@@ -72,6 +72,12 @@ const pretexFallback = String.raw`
     var BS  = String.fromCharCode(92);
     var BSS = BS + BS;
 
+    // Strip lone $ delimiters that confuse MathJax inside display mode
+    tex = tex.replace(/\$([^$]*)\$/g, '$1');
+    // Remove TeX layout commands MathJax doesn't know
+    tex = tex.replace(new RegExp(BSS + 'hfil[lr]?\\b', 'g'), '');
+    tex = tex.replace(/\}%\s*$/gm, '}');
+
     tex = tex.split(BS + 'amp').join('&');
     tex = tex.replace(new RegExp(BSS + 'spalign(?:sys)?delims[^' + BSS + '{]*', 'g'), '');
 
@@ -128,7 +134,7 @@ const pretexFallback = String.raw`
       tex:{
         inlineMath:[['\\\\(','\\\\)']],
         displayMath:[['\\\\[','\\\\]']],
-        packages:{'[+]':['noerrors']},
+        packages:{'[+]':['noerrors','noundefined']},
         macros:{
           R:'\\\\mathbb{R}',C:'\\\\mathbb{C}',N:'\\\\mathbb{N}',Z:'\\\\mathbb{Z}',
           lt:'<',gt:'>',
