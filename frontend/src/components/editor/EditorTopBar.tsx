@@ -175,6 +175,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
           Solo
         </button>
         <button
+          data-testid="team-mode-toggle"
           onClick={switchToTeamMode}
           className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 ${
             collaborationEnabled
@@ -190,11 +191,12 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       {collaborationEnabled && teamSession?.code && (
         <div className="flex items-center gap-1.5">
           <button
+            aria-label={`Code ${teamSession.code}`}
             onClick={() => void copyTeamInviteCode()}
-            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 transition-colors uppercase tracking-widest"
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 transition-colors tracking-widest"
             title="Click to copy invite code"
           >
-            Session: {teamSession.code}
+            Code {teamSession.code}
           </button>
         </div>
       )}
@@ -211,6 +213,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       </button>
 
       <button
+        data-testid="build-repository-button"
         onClick={compileRepository}
         disabled={compiling}
         className="btn-primary py-1.5 px-4 h-9"
@@ -224,6 +227,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       </button>
 
       <button
+        data-testid="live-edit-toggle"
         onClick={() => {
           setLiveEditMode((value) => !value);
           setLiveEditStatus('');

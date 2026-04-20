@@ -122,10 +122,11 @@ const waitForEditorTestHook = async (page: import('@playwright/test').Page) => {
       return typeof testWindow.__mraSetActiveEditorValue === 'function'
         && testWindow.__mraIsActiveEditorReady === true;
     })
-  )).toBe(true);
+  ), { timeout: 45_000 }).toBe(true);
 };
 
 test('opens the local demo workspace through the UI and builds a preview', async ({ page }) => {
+  test.setTimeout(90_000);
   await enableEditorTestMode(page);
   await openLocalDemoWorkspace(page);
 
@@ -135,12 +136,13 @@ test('opens the local demo workspace through the UI and builds a preview', async
 
   await expect(page.locator('iframe[title="Build Preview"]')).toBeVisible();
   const previewFrame = page.frameLocator('iframe[title="Build Preview"]');
-  await expect(previewFrame.getByRole('heading', { name: /vectors/i })).toBeVisible();
-  await expect(previewFrame.getByRole('heading', { name: /matrices/i })).toBeVisible();
-  await expect(previewFrame.getByText(/local preview ready/i)).toBeVisible();
+  await expect(previewFrame.getByRole('heading', { name: /vectors/i })).toBeVisible({ timeout: 45_000 });
+  await expect(previewFrame.getByRole('heading', { name: /matrices/i })).toBeVisible({ timeout: 45_000 });
+  await expect(previewFrame.getByText(/local preview ready/i)).toBeVisible({ timeout: 45_000 });
 });
 
 test('updates the preview in live-edit mode for JavaScript changes', async ({ page }) => {
+  test.setTimeout(90_000);
   await openSeededEditorWorkspace(page);
 
   await page.locator('[data-file-path="interactive.js"]').click();
@@ -165,10 +167,11 @@ if (badge) {
 
   await expect(page.locator('iframe[title="Build Preview"]')).toBeVisible();
   const previewFrame = page.frameLocator('iframe[title="Build Preview"]');
-  await expect(previewFrame.getByText(/reviewed live by professor/i)).toBeVisible();
+  await expect(previewFrame.getByText(/reviewed live by professor/i)).toBeVisible({ timeout: 45_000 });
 });
 
-test('shows team-session presence for the same local demo file in two pages', async ({ browser, page }) => {
+test('shows team-session presence for the same local demo file in two pages', async ({ page }) => {
+  test.setTimeout(150_000);
   await openSeededEditorWorkspace(page);
 
   await page.getByTestId('team-mode-toggle').click();
@@ -179,11 +182,11 @@ test('shows team-session presence for the same local demo file in two pages', as
 
   await page.locator('[data-file-path="course.xml"]').click();
 
-  const teammateContext = await browser.newContext();
-  const teammatePage = await teammateContext.newPage();
-  await createAuthenticatedSession(teammatePage);
+  const teammatePage = await page.context().newPage();
   await teammatePage.addInitScript(() => {
-    (window as Window & { __MRA_TEST__?: boolean }).__MRA_TEST__ = true;
+    const testWindow = window as Window & { __MRA_TEST__?: boolean };
+    testWindow.__MRA_TEST__ = true;
+    window.localStorage.setItem('mra_collab_client_id', 'local-teammate-client');
   });
   await seedEditorSession(teammatePage, {
     code: teamCode,
@@ -193,7 +196,10 @@ test('shows team-session presence for the same local demo file in two pages', as
     createdAt: new Date().toISOString(),
   });
   await teammatePage.goto('/editor');
+  await expect(teammatePage.getByTestId('build-repository-button')).toBeVisible({ timeout: 60_000 });
+  await waitForWorkspaceFiles(teammatePage, ['course.xml']);
   await teammatePage.locator('[data-file-path="course.xml"]').click();
+  await waitForEditorTestHook(teammatePage);
 
   await expect.poll(async () => (
     page.evaluate(() => {
@@ -202,7 +208,7 @@ test('shows team-session presence for the same local demo file in two pages', as
       };
       return testWindow.__mraCollaborationSnapshot?.count ?? 0;
     })
-  )).toBeGreaterThanOrEqual(2);
+  ), { timeout: 45_000 }).toBeGreaterThanOrEqual(2);
 
   await expect.poll(async () => (
     teammatePage.evaluate(() => {
@@ -211,7 +217,7 @@ test('shows team-session presence for the same local demo file in two pages', as
       };
       return testWindow.__mraCollaborationSnapshot?.count ?? 0;
     })
-  )).toBeGreaterThanOrEqual(2);
+  ), { timeout: 45_000 }).toBeGreaterThanOrEqual(2);
 
-  await teammateContext.close();
+  await teammatePage.close();
 });

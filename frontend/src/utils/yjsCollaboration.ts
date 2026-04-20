@@ -41,7 +41,7 @@ interface CollaborationSessionOptions {
 const toWebSocketUrl = (serverUrl: string) => {
   const normalized = new URL(serverUrl);
   normalized.protocol = normalized.protocol === 'https:' ? 'wss:' : 'ws:';
-  normalized.pathname = '/collab/ws';
+  normalized.pathname = '/collaboration/ws';
   normalized.search = '';
   normalized.hash = '';
   return normalized.toString();

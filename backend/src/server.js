@@ -897,7 +897,7 @@ const ensureRealtimeUpgradeRouting = () => {
   server.on('upgrade', (request, socket, head) => {
     const requestUrl = new URL(request.url || '', 'http://localhost');
 
-    if (requestUrl.pathname === '/collab/ws' && collaborationServer) {
+    if ((requestUrl.pathname === '/collab/ws' || requestUrl.pathname === '/collaboration/ws') && collaborationServer) {
       collaborationServer.handleUpgrade(request, socket, head, (connection) => {
         collaborationServer.emit('connection', connection, request);
       });

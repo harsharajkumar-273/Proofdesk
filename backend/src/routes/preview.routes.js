@@ -33,6 +33,44 @@ const getPreviewCacheHeader = (ext) =>
     ? 'no-store'
     : 'public, max-age=60';
 
+const LIVE_PREVIEW_ASSET_ATTR_PATTERN = /\b(src|href)=(["'])([^"']+)\2/gi;
+const LIVE_PREVIEW_ASSET_PATTERN = /\.(?:css|js)(?:$|[?#])/i;
+const SKIP_LIVE_PREVIEW_VERSION_PATTERN = /^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/\/|data:|mailto:|tel:|#|\?)/;
+
+const appendQueryParam = (url, key, value) => {
+  const hashIndex = url.indexOf('#');
+  const hash = hashIndex === -1 ? '' : url.slice(hashIndex);
+  const withoutHash = hashIndex === -1 ? url : url.slice(0, hashIndex);
+  const queryIndex = withoutHash.indexOf('?');
+  const pathname = queryIndex === -1 ? withoutHash : withoutHash.slice(0, queryIndex);
+  const query = queryIndex === -1 ? '' : withoutHash.slice(queryIndex + 1);
+  const params = new URLSearchParams(query);
+  params.set(key, value);
+  return `${pathname}?${params.toString()}${hash}`;
+};
+
+const versionLivePreviewAssets = (html, version) => {
+  if (!version) {
+    return html;
+  }
+
+  const safeVersion = String(version).slice(0, 80);
+
+  return html.replace(
+    LIVE_PREVIEW_ASSET_ATTR_PATTERN,
+    (match, attr, quote, url) => {
+      if (
+        SKIP_LIVE_PREVIEW_VERSION_PATTERN.test(url)
+        || !LIVE_PREVIEW_ASSET_PATTERN.test(url)
+      ) {
+        return match;
+      }
+
+      return `${attr}=${quote}${appendQueryParam(url, 'proofdeskLive', safeVersion)}${quote}`;
+    }
+  );
+};
+
 export const createPreviewRouter = () => {
   const router = Router();
 
@@ -86,11 +124,15 @@ export const createPreviewRouter = () => {
 
     const ext = path.extname(filePath).toLowerCase();
     const content = await fs.readFile(fullPath);
+    const previewVersion = Array.isArray(req.query.t) ? req.query.t[0] : req.query.t;
+    const responseContent = (ext === '.html' || ext === '.htm')
+      ? versionLivePreviewAssets(content.toString('utf-8'), previewVersion)
+      : content;
     res.setHeader('Content-Type', getPreviewMimeType(ext));
     res.setHeader('Cache-Control', getPreviewCacheHeader(ext));
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
-    res.send(content);
+    res.send(responseContent);
   });
 
   return router;

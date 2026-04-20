@@ -1,5 +1,12 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { loader } from '@monaco-editor/react';
+import * as monacoRuntime from 'monaco-editor/esm/vs/editor/editor.api';
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
+import HtmlWorker from 'monaco-editor/esm/vs/language/html/html.worker?worker';
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+import TypeScriptWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import { 
@@ -56,6 +63,36 @@ import {
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile, pretexToHtml } from '../utils/pretexPreview';
 import { MonacoYjsCollaborationSession } from '../utils/yjsCollaboration';
+
+const monacoGlobal = self as Window & typeof globalThis & {
+  MonacoEnvironment?: {
+    getWorker: (workerId: string, label: string) => Worker;
+  };
+};
+
+monacoGlobal.MonacoEnvironment = {
+  getWorker(_workerId, label) {
+    if (label === 'json') {
+      return new JsonWorker();
+    }
+
+    if (label === 'css' || label === 'scss' || label === 'less') {
+      return new CssWorker();
+    }
+
+    if (label === 'html' || label === 'handlebars' || label === 'razor') {
+      return new HtmlWorker();
+    }
+
+    if (label === 'typescript' || label === 'javascript') {
+      return new TypeScriptWorker();
+    }
+
+    return new EditorWorker();
+  },
+};
+
+loader.config({ monaco: monacoRuntime });
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
 const TerminalPanel = lazy(() => import('./Terminal'));
@@ -162,6 +199,15 @@ type EditorTestWindow = Window & {
   __mraCollaborationSnapshot?: {
     count: number;
     status: string;
+    enabled?: boolean;
+    teamCode?: string | null;
+    repoFullName?: string | null;
+    activePath?: string | null;
+    userLogin?: string | null;
+    editorReady?: boolean;
+    hasEditor?: boolean;
+    roomId?: string | null;
+    sessionActive?: boolean;
   };
   __mraWorkspaceSnapshot?: {
     loading: boolean;
@@ -202,6 +248,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [collaborationStatus, setCollaborationStatus] = useState<string>('');
   const [collaborators, setCollaborators] = useState<CollaborationParticipant[]>([]);
   const [editorReady, setEditorReady] = useState<boolean>(false);
+  const [collaborationRetryKey, setCollaborationRetryKey] = useState<number>(0);
   const [teamSession, setTeamSession] = useState<TeamSessionData | null>(initialStoredTeamSessionRef.current);
   const [teamSessionBusy, setTeamSessionBusy] = useState<boolean>(false);
   const [teamSessionNotice, setTeamSessionNotice] = useState<string>('');
@@ -254,6 +301,21 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [compilationMode, setCompilationMode] = useState<'repository' | 'file'>('repository');
   const [autoCompile, setAutoCompile] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const setCompilationModeState = (nextMode: 'repository' | 'file') => {
+    compilationModeRef.current = nextMode;
+    setCompilationMode(nextMode);
+  };
+
+  const setLiveEditModeState: React.Dispatch<React.SetStateAction<boolean>> = (nextValue) => {
+    setLiveEditMode((currentValue) => {
+      const resolvedValue = typeof nextValue === 'function'
+        ? (nextValue as (value: boolean) => boolean)(currentValue)
+        : nextValue;
+      liveEditModeRef.current = resolvedValue;
+      return resolvedValue;
+    });
+  };
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const unsavedTabs = useMemo(() => tabs.filter((tab) => tab.hasUnsavedChanges), [tabs]);
@@ -744,7 +806,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     if (tab.language === 'html') {
       const baseHref = getPreviewBaseHref(previewUrl, API_URL);
       setSrcDocContent(prepareHtmlForSrcDoc(tab.content, baseHref, tab.path));
-      setCompilationMode('repository');
+      setCompilationModeState('repository');
     } else if (liveEditMode && isPreTeXtFile(tab.name)) {
       // Instantly show PreTeXt preview when switching to an XML tab in live mode
       setSrcDocContent(pretexToHtml(tab.content));
@@ -861,8 +923,26 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     testWindow.__mraCollaborationSnapshot = {
       count: collaborators.length,
       status: collaborationStatus,
+      enabled: collaborationEnabled,
+      teamCode: teamSession?.code || null,
+      repoFullName: repo?.fullName || null,
+      activePath: activeTab?.path || null,
+      userLogin: userData?.login || null,
+      editorReady,
+      hasEditor: Boolean(editorRef.current),
+      roomId: buildCollaborationRoomId(teamSession?.code, activeTab?.path),
+      sessionActive: Boolean(collabSessionRef.current),
     };
-  }, [collaborationStatus, collaborators]);
+  }, [
+    activeTab?.path,
+    collaborationEnabled,
+    collaborationStatus,
+    collaborators,
+    editorReady,
+    repo?.fullName,
+    teamSession?.code,
+    userData?.login,
+  ]);
 
   useEffect(() => {
     const testWindow = window as EditorTestWindow;
@@ -919,9 +999,17 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     const roomId = buildCollaborationRoomId(teamSession?.code, activeTab?.path);
     const model = editorRef.current.getModel?.();
 
-    if (!roomId || !model) {
+    if (!roomId) {
       setCollaborationStatus('Team room unavailable');
       return;
+    }
+
+    if (!model) {
+      setCollaborationStatus('Preparing team room…');
+      const retryTimer = window.setTimeout(() => {
+        setCollaborationRetryKey((key) => key + 1);
+      }, 150);
+      return () => window.clearTimeout(retryTimer);
     }
 
     collabSessionRef.current?.destroy();
@@ -994,7 +1082,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     };
   // Collaboration setup is keyed to room identity; helpers read current data from refs.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [API_URL, collaborationEnabled, teamSession?.code, repo?.fullName, activeTabId, userData?.login, editorReady, compilationMode, teamSessionBusy]);
+  }, [API_URL, collaborationEnabled, teamSession?.code, repo?.fullName, activeTabId, userData?.login, editorReady, collaborationRetryKey]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -1082,7 +1170,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       return;
     }
 
-    setCompilationMode('file');
+    setCompilationModeState('file');
     setLoading(true);
     
     try {
@@ -1120,7 +1208,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
       // GoLive: for HTML files, show instant srcDoc preview and switch to repo mode
       if (lang === 'html') {
-        setCompilationMode('repository');
+        setCompilationModeState('repository');
         const baseHref = getPreviewBaseHref(previewUrl, API_URL);
         setSrcDocContent(prepareHtmlForSrcDoc(content, baseHref, path));
       } else if (autoCompile) {
@@ -1246,7 +1334,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     setSrcDocContent(null);
     setPreviewEntryFile(nextTarget);
     setPreviewUrl(buildPreviewHref(API_URL, sessionId, nextTarget));
-    setCompilationMode('repository');
+    setCompilationModeState('repository');
     setWorkspaceNotice({
       tone: 'info',
       title: `Opened the related preview page for ${activeTab?.name || nextTarget}.`,
@@ -1332,7 +1420,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     if (!repoData) return null;
 
     setCompiling(true);
-    setCompilationMode('repository');
+    setCompilationModeState('repository');
     if (options.quiet && options.statusMessage) {
       setLiveEditStatus(options.statusMessage);
     }
@@ -1756,7 +1844,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         compileRepository={() => compileRepository()}
         compiling={compiling}
         liveEditMode={liveEditMode}
-        setLiveEditMode={setLiveEditMode}
+        setLiveEditMode={setLiveEditModeState}
         setLiveEditStatus={setLiveEditStatus}
         isRebuilding={isRebuilding}
         collaborationEnabled={collaborationEnabled}

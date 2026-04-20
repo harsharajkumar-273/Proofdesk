@@ -25,7 +25,8 @@ test('landing page stays readable at the current viewport', async ({ page }) => 
   await page.goto('/');
   await expect(page.getByTestId('local-demo-login')).toBeVisible({ timeout: 10_000 });
   await expect(page.getByTestId('github-login-button')).toBeVisible();
-  await expect(page.getByText(/open the repository, review the pages/i)).toBeVisible();
+  await expect(page.getByRole('heading', { name: /review, edit, and publish/i })).toBeVisible();
+  await expect(page.getByText(/access your course repositories/i)).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });
 

@@ -7,19 +7,6 @@ export default defineConfig({
   server: {
     port: 3000,
     host: 'localhost',
-    // In dev, proxy API calls to the backend so CORS is never an issue
-    proxy: {
-      '/auth':         'http://localhost:4000',
-      '/build':        'http://localhost:4000',
-      '/preview':      'http://localhost:4000',
-      '/compile':      'http://localhost:4000',
-      '/user':         'http://localhost:4000',
-      '/repos':        'http://localhost:4000',
-      '/health':       'http://localhost:4000',
-      '/workspace':    'http://localhost:4000',
-      '/team-sessions': 'http://localhost:4000',
-      '/monitoring':   'http://localhost:4000',
-    },
     // Pre-transform lazy-loaded pages so Vite never triggers a mid-request
     // dependency re-optimisation (which causes "Failed to fetch dynamically
     // imported module" when the user first navigates to the editor).

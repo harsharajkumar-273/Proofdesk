@@ -297,6 +297,43 @@ const closeConnection = (sharedDoc, connection) => {
   }
 };
 
+const processConnectionMessage = (sharedDoc, connection, rawMessage, isBinary) => {
+  try {
+    if (!isBinary) {
+      const payload = JSON.parse(rawMessage.toString());
+      if (payload.type === 'join') {
+        if (
+          typeof payload.initialContent === 'string'
+          && payload.initialContent.length > 0
+          && sharedDoc.text.length === 0
+        ) {
+          sharedDoc.ydoc.transact(() => {
+            sharedDoc.text.insert(0, payload.initialContent);
+          }, connection);
+        }
+
+        sendCurrentState(sharedDoc, connection);
+      }
+      return;
+    }
+
+    const message = new Uint8Array(rawMessage);
+    const messageType = message[0];
+    const payload = message.subarray(1);
+
+    if (messageType === MESSAGE_DOC_UPDATE) {
+      Y.applyUpdate(sharedDoc.ydoc, payload, connection);
+      return;
+    }
+
+    if (messageType === MESSAGE_AWARENESS_UPDATE) {
+      applyAwarenessUpdate(sharedDoc.awareness, payload, connection);
+    }
+  } catch (error) {
+    console.error('[Collab] Message handling error:', error.message);
+  }
+};
+
 export const attachCollaborationServer = () => {
   const wss = new WebSocketServer({ noServer: true });
 
@@ -304,67 +341,67 @@ export const attachCollaborationServer = () => {
     void ensureRedisSubscription();
   }
 
-  wss.on('connection', async (connection, request) => {
+  wss.on('connection', (connection, request) => {
     const requestUrl = new URL(request.url || '', 'http://localhost');
     const roomId = requestUrl.searchParams.get('roomId');
-    const authSession = await authSessionStore.getSessionFromRequest({
-      headers: request.headers,
-    });
-
-    if (!authSession?.accessToken) {
-      connection.close(1008, 'authenticated session is required');
-      return;
-    }
-
-    if (!isValidRoomId(roomId)) {
-      connection.close(1008, 'roomId is required');
-      return;
-    }
-
-    const sharedDoc = getOrCreateDoc(roomId);
-    await sharedDoc.loadPromise;
-    sharedDoc.connections.set(connection, new Set());
-    sharedDoc.updatedAt = Date.now();
+    const pendingMessages = [];
+    let sharedDoc = null;
+    let ready = false;
+    let closed = false;
 
     connection.on('message', (rawMessage, isBinary) => {
-      try {
-        if (!isBinary) {
-          const payload = JSON.parse(rawMessage.toString());
-          if (payload.type === 'join') {
-            if (
-              typeof payload.initialContent === 'string'
-              && payload.initialContent.length > 0
-              && sharedDoc.text.length === 0
-            ) {
-              sharedDoc.ydoc.transact(() => {
-                sharedDoc.text.insert(0, payload.initialContent);
-              }, connection);
-            }
-
-            sendCurrentState(sharedDoc, connection);
-          }
-          return;
-        }
-
-        const message = new Uint8Array(rawMessage);
-        const messageType = message[0];
-        const payload = message.subarray(1);
-
-        if (messageType === MESSAGE_DOC_UPDATE) {
-          Y.applyUpdate(sharedDoc.ydoc, payload, connection);
-          return;
-        }
-
-        if (messageType === MESSAGE_AWARENESS_UPDATE) {
-          applyAwarenessUpdate(sharedDoc.awareness, payload, connection);
-        }
-      } catch (error) {
-        console.error('[Collab] Message handling error:', error.message);
+      if (!ready || !sharedDoc) {
+        pendingMessages.push([rawMessage, isBinary]);
+        return;
       }
+
+      processConnectionMessage(sharedDoc, connection, rawMessage, isBinary);
     });
 
-    connection.on('close', () => closeConnection(sharedDoc, connection));
-    connection.on('error', () => closeConnection(sharedDoc, connection));
+    connection.on('close', () => {
+      closed = true;
+      if (sharedDoc) closeConnection(sharedDoc, connection);
+    });
+    connection.on('error', () => {
+      closed = true;
+      if (sharedDoc) closeConnection(sharedDoc, connection);
+    });
+
+    void (async () => {
+      const authSession = await authSessionStore.getSessionFromRequest({
+        headers: request.headers,
+      });
+
+      if (!authSession?.accessToken) {
+        connection.close(1008, 'authenticated session is required');
+        return;
+      }
+
+      if (!isValidRoomId(roomId)) {
+        connection.close(1008, 'roomId is required');
+        return;
+      }
+
+      sharedDoc = getOrCreateDoc(roomId);
+      await sharedDoc.loadPromise;
+      if (closed) return;
+
+      sharedDoc.connections.set(connection, new Set());
+      sharedDoc.updatedAt = Date.now();
+      ready = true;
+
+      while (pendingMessages.length > 0) {
+        const [rawMessage, isBinary] = pendingMessages.shift();
+        processConnectionMessage(sharedDoc, connection, rawMessage, isBinary);
+      }
+    })().catch((error) => {
+      console.error('[Collab] Connection setup error:', error.message);
+      try {
+        connection.close(1011, 'collaboration setup failed');
+      } catch {
+        // Connection may already be closed.
+      }
+    });
   });
 
   return wss;

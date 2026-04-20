@@ -184,7 +184,7 @@ before(async () => {
   );
   await fs.writeFile(
     path.join(previewOutputDir, 'demo.html'),
-    '<!DOCTYPE html><html><head><title>Demo</title></head><body><div class="mathbox-wrapper"><div id="mathbox1"></div></div><script src="js/demo.js"></script></body></html>',
+    '<!DOCTYPE html><html><head><title>Demo</title><link rel="stylesheet" href="styles.css"></head><body><div class="mathbox-wrapper"><div id="mathbox1"></div></div><script src="js/demo.js"></script></body></html>',
     'utf-8'
   );
   await fs.writeFile(
@@ -489,6 +489,13 @@ describe('active backend routes', () => {
     assert.match(response.text, /id="mathbox-loader-preview-fix"/);
     assert.match(response.text, /proofdesk-loader-hidden/);
     assert.match(response.text, /hideMathBoxLoaders/);
+  });
+
+  it('cache-busts local live preview JavaScript and CSS references', async () => {
+    const response = await request(app).get(`/preview/${previewSessionId}/demo.html?t=live-123`);
+    assert.equal(response.status, 200);
+    assert.match(response.text, /href="styles\.css\?proofdeskLive=live-123"/);
+    assert.match(response.text, /src="js\/demo\.js\?proofdeskLive=live-123"/);
   });
 
   it('rejects invalid quick-update session ids', async () => {
