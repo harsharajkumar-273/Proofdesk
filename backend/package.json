@@ -12,7 +12,7 @@
     "verify:env:strict": "node src/scripts/validateRuntimeConfig.js --strict"
   },
   "dependencies": {
-    "@octokit/rest": "^19.0.13",
+    "@octokit/rest": "^22.0.1",
     "axios": "^1.13.2",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
@@ -30,7 +30,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.6.0",
-    "nodemon": "^2.0.22",
+    "nodemon": "^3.1.14",
     "supertest": "^7.2.2",
     "typescript": "^6.0.2"
   }
