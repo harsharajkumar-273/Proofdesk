@@ -322,7 +322,7 @@ class AuthSessionStore {
   }
 
   attachSessionCookie(res, sessionId) {
-    const secure = process.env.NODE_ENV === 'production';
+    const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
     res.append(
       'Set-Cookie',
       toCookieHeader(SESSION_COOKIE_NAME, sessionId, {
@@ -336,7 +336,7 @@ class AuthSessionStore {
   }
 
   clearSessionCookie(res) {
-    const secure = process.env.NODE_ENV === 'production';
+    const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
     res.append(
       'Set-Cookie',
       toCookieHeader(SESSION_COOKIE_NAME, '', {
@@ -350,7 +350,7 @@ class AuthSessionStore {
   }
 
   createOAuthState(res) {
-    const secure = process.env.NODE_ENV === 'production';
+    const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
     const state = crypto.randomBytes(16).toString('hex');
     res.append(
       'Set-Cookie',
@@ -371,7 +371,7 @@ class AuthSessionStore {
   }
 
   clearOAuthState(res) {
-    const secure = process.env.NODE_ENV === 'production';
+    const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
     res.append(
       'Set-Cookie',
       toCookieHeader(OAUTH_STATE_COOKIE_NAME, '', {
