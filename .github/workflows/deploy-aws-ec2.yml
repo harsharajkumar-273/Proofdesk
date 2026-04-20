@@ -1,0 +1,95 @@
+name: Deploy To AWS EC2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      APP_DIR: /opt/proofdesk
+      AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+      AWS_EC2_USER: ${{ secrets.AWS_EC2_USER || 'ubuntu' }}
+      AWS_EC2_SSH_KEY: ${{ secrets.AWS_EC2_SSH_KEY }}
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+      GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+      GITHUB_REDIRECT_URI: ${{ secrets.GITHUB_REDIRECT_URI }}
+      PROOFDESK_SESSION_SECRET: ${{ secrets.PROOFDESK_SESSION_SECRET }}
+      GITHUB_PERSONAL_TOKEN: ${{ secrets.GITHUB_PERSONAL_TOKEN }}
+      PREWARM_REPOS: ${{ secrets.PREWARM_REPOS || 'QBobWatson/ila' }}
+      PROOFDESK_MONITORING_WEBHOOK_URL: ${{ secrets.PROOFDESK_MONITORING_WEBHOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in AWS_EC2_HOST AWS_EC2_SSH_KEY FRONTEND_URL GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET GITHUB_REDIRECT_URI PROOFDESK_SESSION_SECRET; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required secret: ${name}" >&2
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Write production env file
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .env.production.generated <<EOF
+          FRONTEND_URL=${FRONTEND_URL}
+          GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+          GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+          GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI}
+          PROOFDESK_SESSION_SECRET=${PROOFDESK_SESSION_SECRET}
+          GITHUB_PERSONAL_TOKEN=${GITHUB_PERSONAL_TOKEN}
+          PREWARM_REPOS=${PREWARM_REPOS}
+          PROOFDESK_SMOKE_REPO=QBobWatson/ila
+          PROOFDESK_MONITORING_ENABLED=true
+          PROOFDESK_MONITORING_WEBHOOK_URL=${PROOFDESK_MONITORING_WEBHOOK_URL}
+          EOF
+
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${AWS_EC2_SSH_KEY}" > ~/.ssh/proofdesk_deploy_key
+          chmod 600 ~/.ssh/proofdesk_deploy_key
+          ssh-keyscan -H "${AWS_EC2_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Upload release bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='frontend/node_modules' \
+            --exclude='backend/node_modules' \
+            --exclude='frontend/dist' \
+            --exclude='.tmp' \
+            --exclude='backend/.proofdesk-data' \
+            --exclude='builds/output' \
+            --exclude='builds/test-output' \
+            --exclude='builds/ila-repo' \
+            -czf /tmp/proofdesk-release.tgz .
+          ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "mkdir -p ${APP_DIR}"
+          scp -i ~/.ssh/proofdesk_deploy_key /tmp/proofdesk-release.tgz "${AWS_EC2_USER}@${AWS_EC2_HOST}:${APP_DIR}/proofdesk-release.tgz"
+          scp -i ~/.ssh/proofdesk_deploy_key .env.production.generated "${AWS_EC2_USER}@${AWS_EC2_HOST}:${APP_DIR}/.env"
+
+      - name: Restart Docker Compose stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
+            set -euo pipefail
+            cd ${APP_DIR}
+            tar -xzf proofdesk-release.tgz
+            docker compose -f docker-compose.prod.yml up --build -d
+            docker compose -f docker-compose.prod.yml ps
+            docker image prune -f
+          "

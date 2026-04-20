@@ -1,0 +1,40 @@
+{
+  "name": "bi-directional-editor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "test": "tests"
+  },
+  "scripts": {
+    "dev": "concurrently \"npm run dev --prefix frontend\" \"npm run dev --prefix backend\"",
+    "dev:test": "concurrently \"ENABLE_LOCAL_TEST_MODE=true LOCAL_TEST_TOKEN=local-test LOCAL_TEST_REPO_OWNER=demo LOCAL_TEST_REPO_NAME=course-demo LOCAL_TEST_REPO_PATH=./test-repo/course-demo FRONTEND_URL=http://127.0.0.1:3000 PORT=4000 npm run dev --prefix backend\" \"VITE_ENABLE_LOCAL_TEST_MODE=true VITE_BACKEND_URL=http://127.0.0.1:4000 VITE_LOCAL_TEST_TOKEN=local-test VITE_LOCAL_TEST_REPO_OWNER=demo VITE_LOCAL_TEST_REPO_NAME=course-demo npm run dev --prefix frontend -- --host 127.0.0.1 --port 3000\"",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "npm run test --prefix frontend -- --run",
+    "test:backend": "npm run test --prefix backend",
+    "test:e2e": "playwright test",
+    "test:e2e:github": "playwright test tests/e2e/github-live.spec.ts",
+    "test:e2e:github:auto": "node scripts/run-github-smoke.mjs",
+    "test:e2e:sanity": "playwright test -c playwright.sanity.config.ts",
+    "verify:env": "npm run verify:env --prefix backend",
+    "verify:env:strict": "npm run verify:env:strict --prefix backend",
+    "verify:deploy": "npm run verify:env && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity",
+    "verify:deploy:strict": "npm run verify:env:strict && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "axios": "^1.12.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "baseline-browser-mapping": "^2.9.19",
+    "concurrently": "^9.2.1"
+  }
+}

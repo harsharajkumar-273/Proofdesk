@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+
+# Build output
+frontend/dist/
+backend/dist/
+playwright-report/
+test-results/
+builds/output/
+builds/test-output/
+builds/ila-repo/
+build.log
+*.log
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
+backend/.env.*.local
+frontend/.env.local
+frontend/.env.*.local
+.proofdesk-data/
+backend/.proofdesk-data/
+.tmp/
+
+# Accidental local Docker command artifacts
+docker/--rm/
+docker/-v/
+docker/Starting Docker build test.../
+docker/docker/
+docker/echo/
+docker/mra-pretext-builder/
+docker/run/
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ENABLE_LOCAL_TEST_MODE: "true"
+      LOCAL_TEST_TOKEN: local-test
+      LOCAL_TEST_REPO_OWNER: demo
+      LOCAL_TEST_REPO_NAME: course-demo
+      LOCAL_TEST_REPO_PATH: ./test-repo/course-demo
+      FRONTEND_URL: http://127.0.0.1:4173
+      PROOFDESK_SESSION_SECRET: ci-session-secret
+      PROOFDESK_DATA_DIR: ./.tmp/proofdesk-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Verify runtime configuration
+        run: npm run verify:env
+
+      - name: Run tests
+        run: npm test
+
+      - name: Lint frontend
+        run: npm run lint --prefix frontend
+
+      - name: Build frontend
+        run: npm run build --prefix frontend

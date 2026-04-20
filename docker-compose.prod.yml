@@ -1,0 +1,93 @@
+services:
+
+  # ── nginx: serves the React frontend and proxies API calls to the backend ──
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.nginx
+      args:
+        VITE_BACKEND_URL: ${FRONTEND_URL}
+        VITE_ENABLE_LOCAL_TEST_MODE: "false"
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── backend: Express API + build executor ──
+  backend:
+    build: ./backend
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI}
+      FRONTEND_URL: ${FRONTEND_URL}
+      GITHUB_PERSONAL_TOKEN: ${GITHUB_PERSONAL_TOKEN:-}
+      ENABLE_LOCAL_TEST_MODE: "false"
+      PROOFDESK_SESSION_SECRET: ${PROOFDESK_SESSION_SECRET}
+      PROOFDESK_DATA_DIR: /var/lib/proofdesk
+      PROOFDESK_TERMINAL_MODE: restricted
+      PROOFDESK_TERMINAL_RUNTIME: container
+      PROOFDESK_SHARED_STATE_BACKEND: redis
+      PROOFDESK_REDIS_URL: redis://redis:6379/0
+      PROOFDESK_MONITORING_ENABLED: ${PROOFDESK_MONITORING_ENABLED:-true}
+      PROOFDESK_MONITORING_WEBHOOK_URL: ${PROOFDESK_MONITORING_WEBHOOK_URL:-}
+      PREWARM_REPOS: ${PREWARM_REPOS:-}
+      PROOFDESK_SMOKE_REPO: ${PROOFDESK_SMOKE_REPO:-QBobWatson/ila}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Give the backend access to Docker so it can run PreTeXt build containers
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persist build session output across restarts
+      - proofdesk-data:/var/lib/proofdesk
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── ila-live (optional): builds and watches the ILA textbook ──
+  # Only needed if you're running the ILA textbook preview feature.
+  # Remove this service if you're just deploying the MRA editor.
+  ila-live:
+    profiles: ["ila-live"]
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    image: mra-pretext-builder
+    command: ["watch", "/repo", "/output", "8080"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${ILA_REPO_PATH:-./builds/ila-repo}:/repo
+      - ./builds/output:/output
+      # Persist equation SVG cache — the biggest build speedup
+      - pretex-cache:/home/vagrant/cache
+      # Persist compiled JS/CSS bundles
+      - vagrant-build:/home/vagrant/build
+    restart: unless-stopped
+
+volumes:
+  pretex-cache:
+  vagrant-build:
+  proofdesk-data:
+  redis-data:

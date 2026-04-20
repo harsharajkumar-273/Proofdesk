@@ -1,0 +1,24 @@
+services:
+  ila-live:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile
+    image: mra-pretext-builder
+    container_name: ila-live-preview
+    command: ["watch", "/repo", "/output", "8080"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${ILA_REPO_PATH:-./builds/ila-repo}:/repo
+      - ./builds/output:/output
+      # Persist pretex-cache so LaTeX→SVG equation renders are reused across builds.
+      # This is the biggest speedup: avoids re-rendering hundreds of equations each run.
+      - pretex-cache:/home/vagrant/cache
+      # Persist compiled JS/CSS so SCons skips unchanged bundle steps.
+      - vagrant-build:/home/vagrant/build
+    restart: unless-stopped
+
+volumes:
+  # Named volumes persist across container restarts (unlike anonymous bind mounts).
+  pretex-cache:
+  vagrant-build:
