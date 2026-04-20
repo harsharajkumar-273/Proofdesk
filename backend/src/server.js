@@ -192,7 +192,7 @@ app.get('/repos', async (req, res) => {
   }
 
   try {
-    const octokit = new Octokit({ auth: token });
+    const octokit = new Octokit({ auth: token, request: { timeout: 10000 } });
     const { data } = await octokit.repos.listForAuthenticatedUser({
       sort: 'updated',
       per_page: 100,
@@ -215,7 +215,7 @@ app.get('/repos/search', requireAccessToken, async (req, res) => {
     return res.status(429).json({ error: 'Too many search requests. Please wait a moment before searching again.' });
   }
 
-  const query = String(req.query.q || '').trim();
+  const query = String(req.query.q || '').trim().slice(0, 200);
 
   if (query.length < 2) {
     return res.json({ items: [] });
