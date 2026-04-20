@@ -1437,6 +1437,27 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           preferSeed: options.quiet === true
         })
       }, 'Build initialization failed');
+
+      // Another build is already running for this repo - show waiting UI and retry
+      if ((data as { buildInProgress?: boolean }).buildInProgress) {
+        setWorkspaceNotice({
+          tone: 'info',
+          title: 'Build already in progress',
+          advice: 'A build is already running for this repository. Checking back automatically in 20 seconds...',
+        });
+        setCompiledOutput(`
+          <div style="background: #1e1e1e; color: #ccc; padding: 20px; font-family: monospace;">
+            <h2 style="color:#4fc3f7;">Build in progress…</h2>
+            <p>Another build is already running for this repository.</p>
+            <p>This page will automatically check back in 20 seconds.</p>
+          </div>
+        `);
+        setTimeout(() => {
+          void initializeBuildSession(repoData, options);
+        }, 20000);
+        return workspaceSessionId || null;
+      }
+
       const applied = applyBuildResponse(data, { quiet: options.quiet });
       if (!applied && options.quiet) {
         setLiveEditStatus('Live preview unavailable');

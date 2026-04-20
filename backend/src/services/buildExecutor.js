@@ -121,6 +121,10 @@ class BuildExecutor {
     // waits for the first build rather than starting a duplicate.
     this.inProgress = new Map();
 
+    // Tracks repos currently running a Docker build so callers can detect
+    // "already building" and show a waiting UI instead of "Build Failed".
+    this.dockerBuildsInProgress = new Set();
+
     // Restore persisted cache from previous server runs
     this._loadCache();
   }
@@ -590,6 +594,22 @@ class BuildExecutor {
       };
     }
 
+    const repoKey = `${session.owner}/${session.repo}`;
+
+    // If a Docker build is already running for this repo, tell the caller
+    // so the UI can show "build in progress" instead of "Build Failed".
+    if (this.dockerBuildsInProgress.has(repoKey)) {
+      console.log(`[BuildExecutor] Docker build already running for ${repoKey} — returning buildInProgress`);
+      return {
+        success: false,
+        buildInProgress: true,
+        buildType: 'scons-html',
+        artifacts: [],
+        entryFile: null,
+        sessionId,
+      };
+    }
+
     // Try to restore pretex equation cache from GitHub Releases before running Docker.
     // If restored, the build skips the slowest step and finishes in ~3 min instead of ~60 min.
     let commitHash = session.commitHash || null;
@@ -630,6 +650,7 @@ class BuildExecutor {
       };
     }
 
+    this.dockerBuildsInProgress.add(repoKey);
     try {
       const { stdout, stderr } = await execAsync(cmd, {
         timeout: 3600000, // 60 min hard limit
@@ -682,6 +703,8 @@ class BuildExecutor {
         success: false, buildType: 'scons-html', artifacts: [], entryFile: null,
         stdout: err.stdout || '', stderr: err.stderr || err.message, command: cmd, sessionId,
       };
+    } finally {
+      this.dockerBuildsInProgress.delete(repoKey);
     }
   }
 
