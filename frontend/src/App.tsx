@@ -136,13 +136,17 @@ function App() {
   }, [isLoading, location.pathname]);
 
   const handleLogout = () => {
-    void fetch(`${API_URL}/auth/logout`, {
+    fetch(`${API_URL}/auth/logout`, {
       method: 'POST',
       credentials: 'include',
-    }).catch(() => {});
-    sessionStorage.removeItem('selectedRepo');
-    sessionStorage.removeItem('teamSession');
-    setHasWorkspaceAccess(false);
+    })
+      .catch(() => {})
+      .finally(() => {
+        sessionStorage.removeItem('selectedRepo');
+        sessionStorage.removeItem('teamSession');
+        setHasWorkspaceAccess(false);
+        window.location.href = '/';
+      });
   };
 
   if (isLoading) {
