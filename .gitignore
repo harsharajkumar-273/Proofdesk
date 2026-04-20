@@ -40,3 +40,4 @@ docker/run/
 .DS_Store
 .idea/
 .vscode/
+.env.production
