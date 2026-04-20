@@ -21,6 +21,7 @@ Live textbook: http://textbooks.math.gatech.edu/ila/
 - [Architecture Notes](#architecture-notes)
 - [AWS EC2 Deployment](#aws-ec2-deployment)
 - [Deployment Verification](#deployment-verification)
+- [Future Scope](#future-scope)
 
 ---
 
@@ -470,3 +471,64 @@ The ILA repo was originally developed for Python 2. `build.sh` applies the follo
 ### SCons Builder Suffixes
 
 The custom `CatJS` and `CatCSS` SCons builders must declare `suffix='.js'` and `suffix='.css'` respectively. Without this, SCons generates extensionless intermediate files, breaking the `version_filter` cache-busting logic in `demos/SConscript`.
+
+---
+
+## Future Scope
+
+Proofdesk is designed to grow into a general-purpose open-source platform for collaborative math course publishing. The following directions are actively planned or under exploration:
+
+### 1. Multi-Textbook Support
+Currently Proofdesk is wired to the ILA repository. The roadmap extends this to any PreTeXt-based textbook — a professor can paste a GitHub URL and immediately get a full editor + live preview workspace without any server configuration.
+
+### 2. Student and Teacher Workspaces (AI Split)
+A dual-mode interface is planned:
+
+- **Professor/TA mode** — full repository access, build controls, collaboration, and an unrestricted AI assistant for authoring, editing, and explaining technical content.
+- **Student mode** — a read-only or restricted workspace with a purpose-limited AI tutor that can answer questions about the material but cannot do homework for the student. Rate limits, scope restrictions, and audit trails enforce appropriate use.
+
+### 3. HTTPS and Custom Domain
+The current HTTP deployment works but limits cookie security and browser trust. Adding a custom domain with TLS (via Let's Encrypt or AWS Certificate Manager) will enable `Secure` cookies, full OAuth security, and HSTS — making the platform production-safe for institutions.
+
+### 4. Open Source Platform and Community
+Proofdesk aims to be a community hub for open-source math textbooks. Planned features:
+
+- A public index of PreTeXt textbooks that can be opened in one click
+- Fork/contribute workflows so professors can adapt community textbooks for their own courses
+- Cross-repository search over all indexed course material
+
+### 5. Developer and Research Tools Integration
+The platform's terminal, live preview, and collaboration layer can be extended into a lightweight research environment:
+
+- Jupyter-style notebook embedding alongside PreTeXt source
+- Git-native version history with visual diffs for math content
+- Integration with symbolic math tools (SageMath, Mathematica via API) directly inside the workspace
+
+### 6. Real-Time Collaboration at Scale
+The current WebSocket collaboration layer supports small teams. Future work includes:
+
+- Operational-transform or CRDT-based conflict resolution for simultaneous edits
+- Presence indicators, cursor sharing, and inline review/comment threads
+- Role-based permissions (course owner, contributor, reviewer)
+
+### 7. AI-Assisted Authoring
+Beyond the student/teacher split, AI can assist professors directly:
+
+- Suggesting PreTeXt markup for pasted LaTeX or plain-text content
+- Auto-generating exercises, hints, and solutions from chapter content
+- Detecting broken cross-references and undefined notation across chapters
+
+### 8. Institutional Deployment and LMS Integration
+For universities adopting Proofdesk at scale:
+
+- Single sign-on via SAML/OIDC (Canvas, Blackboard, Google Workspace)
+- LMS grade passback for student-mode exercises
+- Per-course analytics: build frequency, student engagement, commonly accessed sections
+
+### 9. Security and Distributed Architecture
+As usage grows, the single-host architecture will be replaced with:
+
+- Horizontally scalable build workers (each PreTeXt build runs in an isolated container on a separate node)
+- Distributed session management via Redis Cluster
+- Audit logging for all build and terminal actions
+- Role-based access control with fine-grained repository permissions
