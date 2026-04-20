@@ -138,12 +138,13 @@ class BuildExecutor {
 
   async _ensureImageAvailableNow() {
     try {
-      await execAsync(`docker image inspect ${this.image}`, { timeout: 10000 });
-      return false;
+      const { stdout } = await execAsync(`docker images -q ${this.image}`, { timeout: 10000 });
+      if (stdout.trim()) return false;
     } catch {
-      console.log(`[Docker] Image ${this.image} not found locally. Building from ${this.dockerDir}...`);
+      // docker CLI unavailable — fall through to build attempt
     }
 
+    console.log(`[Docker] Image ${this.image} not found locally. Building from ${this.dockerDir}...`);
     const buildCmd = `docker build -t ${this.image} "${this.dockerDir}"`;
     const { stderr } = await execAsync(buildCmd, {
       timeout: 2 * 60 * 60 * 1000,

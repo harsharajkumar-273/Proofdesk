@@ -46,6 +46,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Persist build session output across restarts
       - proofdesk-data:/var/lib/proofdesk
+      # Expose the docker build context so the backend can build mra-pretext-builder if missing
+      - /opt/proofdesk/docker:/docker:ro
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s
