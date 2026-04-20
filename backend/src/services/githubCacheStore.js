@@ -13,9 +13,9 @@ import https from 'https';
 import http from 'http';
 import fs from 'fs/promises';
 import { createWriteStream } from 'fs';
-import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { getProofdeskDataRoot } from '../utils/dataPaths.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -68,7 +68,7 @@ class GitHubCacheStore {
       if (!asset) return false;
 
       console.log(`[GitHubCache] Restoring pretex cache (${Math.round(asset.size / 1024 / 1024)} MB) ...`);
-      const tmpFile = path.join(os.tmpdir(), `pretex-cache-${Date.now()}.tar.gz`);
+      const tmpFile = path.join(getProofdeskDataRoot(), `pretex-cache-${Date.now()}.tar.gz`);
 
       await this._downloadAsset(asset.url, tmpFile);
 
@@ -100,13 +100,14 @@ class GitHubCacheStore {
       return;
     }
 
-    const tmpFile = path.join(os.tmpdir(), `pretex-cache-${Date.now()}.tar.gz`);
+    const tmpFile = path.join(getProofdeskDataRoot(), `pretex-cache-${Date.now()}.tar.gz`);
     console.log(`[GitHubCache] Packaging pretex cache for upload ...`);
 
     try {
       // Tar the entire volume content
+      const tmpDir = getProofdeskDataRoot();
       await execAsync(
-        `docker run --rm -v ${DOCKER_VOLUME}:/cache -v "${os.tmpdir()}:/out" alpine tar czf "/out/${path.basename(tmpFile)}" /cache`,
+        `docker run --rm -v ${DOCKER_VOLUME}:/cache -v "${tmpDir}:/out" alpine tar czf "/out/${path.basename(tmpFile)}" /cache`,
         { timeout: 300000 }
       );
 
