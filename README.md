@@ -532,3 +532,18 @@ As usage grows, the single-host architecture will be replaced with:
 - Distributed session management via Redis Cluster
 - Audit logging for all build and terminal actions
 - Role-based access control with fine-grained repository permissions
+
+### Dependency Graph Explorer                                                                          
+                                                                                                     
+  - An interactive visual graph showing how files, functions, and chapters connect across a repository.
+   Nodes represent files or functions; edges represent imports, function calls, or cross-references. 
+  -Clicking a node navigates to that file in the editor; clicking an edge jumps to the exact import or
+   call site.                                                                                        
+                  
+  -For PreTeXt textbooks this means professors can see at a glance how chapters cross-reference each  
+  other. For contributors it means a new developer can understand the entire codebase structure in
+  seconds without reading every file.                                                                
+                  
+  -Planned rendering: force-directed graph using Cytoscape.js. Parsing handled server-side when a     
+  repository is opened, outputting a language-agnostic JSON graph consumed by the frontend.
+                
