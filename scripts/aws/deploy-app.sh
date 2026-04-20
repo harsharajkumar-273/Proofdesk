@@ -77,6 +77,20 @@ REMOTE
 log "Installing .env ..."
 $SSH "cp /home/ubuntu/.env.production /opt/proofdesk/.env"
 
+# ── Pre-build PreTeXt builder image on the host ───────────────────────────────
+# The backend spawns mra-pretext-builder containers via the Docker socket.
+# Build the image on the host so the backend finds it without needing /docker mounted.
+log "Building mra-pretext-builder image on host (may take a few minutes on first run) ..."
+$SSH bash << 'REMOTE'
+  set -euo pipefail
+  if sudo docker image inspect mra-pretext-builder >/dev/null 2>&1; then
+    echo "[remote] mra-pretext-builder already present, skipping build."
+  else
+    echo "[remote] Building mra-pretext-builder ..."
+    sudo docker build -t mra-pretext-builder /opt/proofdesk/docker/
+  fi
+REMOTE
+
 # ── Start app ─────────────────────────────────────────────────────────────────
 log "Building and starting Docker services (first build takes ~5 min) ..."
 $SSH bash << 'REMOTE'
