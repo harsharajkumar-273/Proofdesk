@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import localTestRepoService from './localTestRepoService.js';
 import { syncPreviewBundle } from './previewBundleService.js';
 import { getProofdeskDataRoot } from '../utils/dataPaths.js';
+import githubCacheStore from './githubCacheStore.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -589,6 +590,17 @@ class BuildExecutor {
       };
     }
 
+    // Try to restore pretex equation cache from GitHub Releases before running Docker.
+    // If restored, the build skips the slowest step and finishes in ~3 min instead of ~60 min.
+    let commitHash = session.commitHash || null;
+    try {
+      const { stdout: sha } = await execAsync('git rev-parse HEAD', {
+        cwd: session.repoPath, timeout: 5000,
+      });
+      commitHash = sha.trim();
+    } catch {}
+    await githubCacheStore.checkAndRestore(session.owner, session.repo, commitHash);
+
     // Mount shared volumes so the pretex equation cache is reused across builds
     const cmd = [
       'docker run --rm',
@@ -632,14 +644,18 @@ class BuildExecutor {
       // Cache the successful build
       if (success) {
         const repoKey = `${session.owner}/${session.repo}`;
-        // Read the actual commit from the cloned repo (most reliable)
-        let commitHash = session.commitHash || null;
+        // commitHash was already resolved above before the Docker run
         try {
-          const { stdout: sha } = await execAsync('git rev-parse HEAD', {
-            cwd: session.repoPath, timeout: 5000,
-          });
-          commitHash = sha.trim();
+          if (!commitHash) {
+            const { stdout: sha } = await execAsync('git rev-parse HEAD', {
+              cwd: session.repoPath, timeout: 5000,
+            });
+            commitHash = sha.trim();
+          }
         } catch {}
+
+        // Upload pretex cache to GitHub Releases in the background (non-blocking)
+        githubCacheStore.save(session.owner, session.repo, commitHash).catch(() => {});
 
         this.buildCache.set(repoKey, {
           commitHash,
