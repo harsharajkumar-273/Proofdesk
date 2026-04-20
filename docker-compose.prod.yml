@@ -44,8 +44,8 @@ services:
     volumes:
       # Give the backend access to Docker so it can run PreTeXt build containers
       - /var/run/docker.sock:/var/run/docker.sock
-      # Persist build session output across restarts
-      - proofdesk-data:/var/lib/proofdesk
+      # Bind-mount (not named volume) so spawned builder containers can access the same host path
+      - /var/lib/proofdesk:/var/lib/proofdesk
       # Expose the docker build context so the backend can build mra-pretext-builder if missing
       - /opt/proofdesk/docker:/docker:ro
     healthcheck:
@@ -92,5 +92,4 @@ services:
 volumes:
   pretex-cache:
   vagrant-build:
-  proofdesk-data:
   redis-data:
