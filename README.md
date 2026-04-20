@@ -533,6 +533,15 @@ As usage grows, the single-host architecture will be replaced with:
 - Audit logging for all build and terminal actions
 - Role-based access control with fine-grained repository permissions
 
+### Google Login and Reviewer Mode
+                                                                                                     
+  -Allow anyone with a Google account to view a published PreTeXt repository and leave inline comments
+   on specific sections, paragraphs, or equations — without needing a GitHub account. The repository 
+  owner sees all comments in a review panel and can act on them directly from the editor.
+                                                                                                     
+  -This separates the two roles cleanly: authors write and build, reviewers read and annotate. Useful 
+  for professors sharing draft textbooks with students or co-authors for feedback before publishing.
+
 ### Dependency Graph Explorer                                                                          
                                                                                                      
   - An interactive visual graph showing how files, functions, and chapters connect across a repository.
