@@ -1161,12 +1161,18 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
   };
 
-  const openFileInTab = async (path: string) => {
+  const openFileInTab = async (path: string, line?: number) => {
     if (!repo) return;
 
     const existingTab = tabs.find(t => t.path === path);
     if (existingTab) {
       setActiveTabId(existingTab.id);
+      if (line) {
+        setTimeout(() => {
+          editorRef.current?.revealLineInCenter(line);
+          editorRef.current?.setPosition({ lineNumber: line, column: 1 });
+        }, 50);
+      }
       return;
     }
 
@@ -1205,6 +1211,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       setActiveTabId(newTab.id);
       setRecentFiles(pushRecentFile(repo.fullName, { path, name: newTab.name }));
       setWorkspaceNotice(null);
+      if (line) {
+        setTimeout(() => {
+          editorRef.current?.revealLineInCenter(line);
+          editorRef.current?.setPosition({ lineNumber: line, column: 1 });
+        }, 150);
+      }
 
       // GoLive: for HTML files, show instant srcDoc preview and switch to repo mode
       if (lang === 'html') {
@@ -2078,6 +2090,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
               previewUrl={previewUrl}
               previewFrameKey={previewFrameKey}
               compiledOutput={compiledOutput}
+              sessionId={buildSessionId}
+              apiUrl={API_URL}
             />
           </div>
 

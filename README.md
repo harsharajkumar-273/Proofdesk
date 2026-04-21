@@ -474,6 +474,73 @@ The custom `CatJS` and `CatCSS` SCons builders must declare `suffix='.js'` and `
 
 ---
 
+## Scaling Features
+
+These features are built or in active development to make Proofdesk more powerful and scalable.
+
+---
+
+### High Impact
+
+#### 1. Full-Text Search Across All Repository Files ✅
+Search across every `.xml`, `.ptx`, `.html`, `.css`, `.js`, and other text file in the opened repo. Results show file name, line number, and a highlighted snippet. Clicking a result opens the file and jumps the Monaco editor to that exact line.
+
+- Backend: `GET /workspace/:sessionId/search?q=` — walks the repo directory, case-insensitive match, max 50 files × 5 matches each
+- Frontend: `EditorSearchPane` — debounced input, match count badge per file, keyword highlighting
+
+#### 2. Export / Download Built Output ✅
+A one-click **Export ZIP** button in the preview toolbar packages the entire compiled `output/` directory (HTML, CSS, JS, fonts, demos, knowl files) into a ZIP download. Professors can share a fully self-contained textbook without any hosting.
+
+- Backend: `GET /build/export/:sessionId` — streams a ZIP via `archiver`
+- Frontend: Download button appears in the preview toolbar once a build is available
+
+#### 3. Git Diff Viewer for Math Content
+Visual side-by-side diff of XML files between commits with math rendered inline. Seeing `\(Ax=b\)` rendered is far more useful than seeing raw LaTeX source in a diff.
+
+#### 4. Inline Comment Threads on Paragraphs
+Click any paragraph in the preview → leave a timestamped comment pinned to that section. Comments are stored per-repo and shown in a review panel. Extends the existing review marker system into a full annotation layer.
+
+#### 5. Chapter / Section Navigation Sidebar
+A collapsible TOC tree built from the XML structure of the opened file or the entire `src/` directory. Clicking a section jumps the editor to that XML node and the preview to that section.
+
+---
+
+### Medium Impact
+
+#### 6. Build Log Streaming Panel
+Real-time terminal-style panel showing Docker build output line-by-line as it runs. Currently users see a spinner — a live log makes it debuggable and builds trust during the 15–20 minute first build.
+
+#### 7. Shareable Preview Links ✅
+One-click **Share Preview** that generates a time-limited public URL for the current built output. No GitHub account needed to view. Useful for sharing drafts with non-technical reviewers or students.
+
+- Backend: `POST /build/share/:sessionId` → creates a 32-char token stored in `.share-tokens.json` with a 7-day TTL
+- Public route: `GET /shared/:token/*` — no auth, serves output files directly from the stored path
+- Frontend: **Share** button in the preview toolbar; on click calls the API, copies the URL to clipboard, and shows a green "Copied!" confirmation for 2.5 seconds
+
+#### 8. LaTeX / PreTeXt Snippet Library
+A sidebar palette of common PreTeXt blocks (theorem, definition, proof, align environment, figure, etc.) that insert at cursor. Saves repetitive typing and reduces authoring errors.
+
+#### 9. Multi-File Find & Replace
+Regex-capable find/replace across all files in the repository — with a preview of all matches before applying. The Monaco editor supports single-file search; this adds the workspace-wide layer.
+
+#### 10. Workspace Templates
+A "New Textbook" flow: choose from starter templates (ILA-style, lecture notes, problem set) → creates a new GitHub repo pre-wired with the right PreTeXt structure. Professors can start fresh without copying the ILA repo manually.
+
+---
+
+### Scaling Infrastructure
+
+#### 11. Build Queue + Progress API
+A proper job queue (BullMQ on Redis, already in stack) with status polling so multiple users can queue builds without collisions. Shows estimated time remaining and prevents duplicate Docker containers for the same repo.
+
+#### 12. Per-Section Build (Incremental)
+Only rebuild the chapters that changed instead of the entire book. The SCons pipeline already supports incremental builds — expose this at the UI level with a "Rebuild changed files only" option. Cuts rebuild time from 15 min to under 2 min for single-chapter edits.
+
+#### 13. Usage Analytics Dashboard (Professor-Facing)
+Track which sections were most edited this week, how long builds take, and error frequency per file. Shown as a dashboard on the professor's repo page. Built on the existing `/monitoring/events` infrastructure.
+
+---
+
 ## Future Scope
 
 Proofdesk is designed to grow into a general-purpose open-source platform for collaborative math course publishing. The following directions are actively planned or under exploration:

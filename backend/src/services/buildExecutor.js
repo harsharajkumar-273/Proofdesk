@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import localTestRepoService from './localTestRepoService.js';
 import { syncPreviewBundle } from './previewBundleService.js';
-import { getProofdeskDataRoot } from '../utils/dataPaths.js';
+import { getProofdeskDataRoot, getProofdeskDataPath } from '../utils/dataPaths.js';
 import githubCacheStore from './githubCacheStore.js';
 
 const execAsync = promisify(exec);
@@ -843,6 +843,33 @@ class BuildExecutor {
         throw new Error(`Artifact not found: ${filePath}`);
       }
     }
+  }
+
+  /* ─── exportZip ─────────────────────────────────────────────────────────── */
+
+  async exportZip(sessionId, res) {
+    if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+      throw new Error('Invalid session ID');
+    }
+
+    const session = this.sessions.get(sessionId);
+    const outputPath = session
+      ? path.resolve(session.outputPath)
+      : path.resolve(getProofdeskDataPath(sessionId, 'output'));
+
+    try {
+      await fs.access(outputPath);
+    } catch {
+      throw new Error('Build output not found — run a build first');
+    }
+
+    const archiver = (await import('archiver')).default;
+    const archive  = archiver('zip', { zlib: { level: 6 } });
+
+    archive.on('error', (err) => { throw err; });
+    archive.pipe(res);
+    archive.directory(outputPath, false);
+    await archive.finalize();
   }
 
   /* ─── cleanup ────────────────────────────────────────────────────────────── */

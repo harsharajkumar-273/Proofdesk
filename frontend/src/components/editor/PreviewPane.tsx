@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import {
   ArrowUpRight,
+  Check,
+  Download,
   Eye,
   LayoutGrid,
+  Link,
   Package,
   RefreshCw,
 } from 'lucide-react';
@@ -40,6 +43,8 @@ interface PreviewPaneProps {
   previewUrl: string | null;
   previewFrameKey: number;
   compiledOutput: string;
+  sessionId?: string | null;
+  apiUrl?: string;
 }
 
 const PreviewPane: React.FC<PreviewPaneProps> = ({
@@ -67,7 +72,40 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   previewUrl,
   previewFrameKey,
   compiledOutput,
+  sessionId,
+  apiUrl = 'http://localhost:4000',
 }) => {
+  const [shareState, setShareState] = useState<'idle' | 'loading' | 'copied'>('idle');
+
+  const handleDownloadZip = useCallback(() => {
+    if (!sessionId) return;
+    const url = `${apiUrl}/build/export/${encodeURIComponent(sessionId)}`;
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `proofdesk-output-${sessionId.slice(0, 8)}.zip`;
+    a.click();
+  }, [sessionId, apiUrl]);
+
+  const handleSharePreview = useCallback(async () => {
+    if (!sessionId || shareState === 'loading') return;
+    setShareState('loading');
+    try {
+      const res = await fetch(`${apiUrl}/build/share/${encodeURIComponent(sessionId)}`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entryFile: previewUrl?.split('/').pop() ?? 'overview.html' }),
+      });
+      if (!res.ok) throw new Error('Failed to create share link');
+      const { url } = await res.json() as { url: string };
+      await navigator.clipboard.writeText(url);
+      setShareState('copied');
+      setTimeout(() => setShareState('idle'), 2500);
+    } catch {
+      setShareState('idle');
+    }
+  }, [sessionId, apiUrl, previewUrl, shareState]);
+
   const renderEditor = () => (
     <MonacoEditor
       height="100%"
@@ -179,6 +217,30 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 <ArrowUpRight className="h-3 w-3" />
                 Related Page
               </button>
+              {sessionId && (previewUrl || compiledOutput) && (
+                <>
+                  <button
+                    onClick={() => void handleSharePreview()}
+                    disabled={shareState === 'loading'}
+                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-50"
+                    title="Copy shareable link (valid 7 days, no login needed)"
+                  >
+                    {shareState === 'copied' ? (
+                      <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">Copied!</span></>
+                    ) : (
+                      <><Link className="h-3 w-3" />Share</>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleDownloadZip}
+                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
+                    title="Download compiled output as ZIP"
+                  >
+                    <Download className="h-3 w-3" />
+                    Export ZIP
+                  </button>
+                </>
+              )}
               <button
                 onClick={compileRepository}
                 className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white"

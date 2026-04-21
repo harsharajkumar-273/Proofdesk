@@ -33,6 +33,7 @@ import { extractAccessToken, requireAccessToken } from './middleware/auth.js';
 import createAuthRouter from './routes/auth.routes.js';
 import createPreviewRouter from './routes/preview.routes.js';
 import createSystemRouter from './routes/system.routes.js';
+import { createShareToken, getShareToken } from './services/shareTokenStore.js';
 import {
   getWorkspaceFileContent,
   getWorkspaceSession,
@@ -548,6 +549,53 @@ app.get('/team-sessions/:code', requireAccessToken, async (req, res) => {
 
 app.use('/preview', createPreviewRouter());
 
+// ============= PUBLIC SHARED PREVIEW (no auth) =============
+
+app.get('/shared/:token', async (req, res) => {
+  const entry = await getShareToken(req.params.token);
+  if (!entry) return res.status(404).send('Share link not found or expired.');
+  res.redirect(`/shared/${req.params.token}/${entry.entryFile}`);
+});
+
+app.get('/shared/:token/*', async (req, res) => {
+  const entry = await getShareToken(req.params.token);
+  if (!entry) return res.status(404).send('Share link not found or expired.');
+
+  const filePath = req.params[0] || entry.entryFile;
+  const outputBase = path.resolve(entry.outputPath);
+  const fullPath   = path.resolve(outputBase, filePath);
+
+  if (!fullPath.startsWith(outputBase + path.sep) && fullPath !== outputBase) {
+    return res.status(403).send('Access denied');
+  }
+
+  try {
+    const content = await fs.readFile(fullPath);
+    const ext = path.extname(filePath).toLowerCase();
+    const mime = {
+      '.html': 'text/html; charset=utf-8',
+      '.css':  'text/css',
+      '.js':   'application/javascript',
+      '.svg':  'image/svg+xml',
+      '.png':  'image/png',
+      '.jpg':  'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif':  'image/gif',
+      '.woff': 'font/woff',
+      '.woff2':'font/woff2',
+      '.ttf':  'font/ttf',
+      '.ico':  'image/x-icon',
+    }[ext] || 'application/octet-stream';
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', ['.html', '.htm'].includes(ext) ? 'no-store' : 'public, max-age=300');
+    res.setHeader('X-Proofdesk-Shared', '1');
+    res.send(content);
+  } catch {
+    res.status(404).send('File not found');
+  }
+});
+
 // ============= BUILD ROUTES (NEW - REAL COMPILATION) =============
 
 // Initialize build session
@@ -752,6 +800,57 @@ app.get('/build/artifact/:sessionId/*', requireAccessToken, async (req, res) => 
   } catch (error) {
     console.error('Artifact serve error:', error);
     res.status(404).json({ error: 'Artifact not found' });
+  }
+});
+
+// Export compiled output as ZIP
+app.get('/build/export/:sessionId', requireAccessToken, async (req, res) => {
+  const { sessionId } = req.params;
+
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  res.setHeader('Content-Type', 'application/zip');
+  res.setHeader('Content-Disposition', `attachment; filename="proofdesk-output-${sessionId.slice(0, 8)}.zip"`);
+
+  try {
+    await buildExecutor.exportZip(sessionId, res);
+  } catch (error) {
+    console.error('Export error:', error.message);
+    if (!res.headersSent) {
+      res.status(404).json({ error: error.message });
+    }
+  }
+});
+
+// Create a shareable public link for the current built output
+app.post('/build/share/:sessionId', requireAccessToken, async (req, res) => {
+  const { sessionId } = req.params;
+
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const session = buildExecutor.sessions.get(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Build session not found — run a build first' });
+  }
+
+  try {
+    const token = await createShareToken({
+      sessionId,
+      outputPath: session.outputPath,
+      repoPath:   session.repoPath,
+      entryFile:  req.body?.entryFile || 'overview.html',
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+    const shareUrl    = `${frontendUrl}/shared/${token}`;
+    res.json({ token, url: shareUrl, expiresInDays: 7 });
+  } catch (error) {
+    console.error('Share token error:', error.message);
+    res.status(500).json({ error: 'Failed to create share link' });
   }
 });
 

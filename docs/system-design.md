@@ -1,227 +1,442 @@
-# System Design
+# Proofdesk — System Design
 
-## Purpose
+> **Author / Contributor:** Harsha Raj Kumar
+> **Stack:** React · TypeScript · Node.js · Express · Docker · PreTeXt · Yjs · Redis · nginx
 
-This project is a browser-based workspace for course or textbook repositories.
-It lets a professor or collaborator:
+---
 
-- sign in with GitHub
-- open a repository
-- edit source files in Monaco
-- build and preview rendered output
-- collaborate on the same file in real time
+## Table of Contents
 
-For local development and product testing, the app also supports a seeded local
-demo repository so the full flow can run without GitHub credentials.
+1. [High-Level Architecture](#1-high-level-architecture)
+2. [Authentication Flow](#2-authentication-flow)
+3. [Repository & Workspace Initialization](#3-repository--workspace-initialization)
+4. [Full Build Compilation Pipeline](#4-full-build-compilation-pipeline)
+5. [Math Rendering Pipeline](#5-math-rendering-pipeline)
+6. [Live vs Full Preview Modes](#6-live-vs-full-preview-modes)
+7. [Real-Time Collaboration (Yjs)](#7-real-time-collaboration-yjs)
+8. [Storage Model](#8-storage-model)
+9. [Request Routing (nginx)](#9-request-routing-nginx)
+10. [Frontend Component Hierarchy](#10-frontend-component-hierarchy)
 
-## High-level architecture
+---
 
-### Frontend
+## 1. High-Level Architecture
 
-The frontend is a React + Vite application.
+```mermaid
+graph TB
+    subgraph Browser["Browser (React + Vite)"]
+        UI[Editor UI]
+        LivePrev[Live Preview Engine]
+        YjsClient[Yjs Collaboration Client]
+    end
 
-Main screens:
+    subgraph Backend["Backend (Node / Express)"]
+        API[REST API Server]
+        WS[WebSocket Server]
+        BuildEx[Build Executor]
+        WorkspaceSvc[Workspace Service]
+        GitSvc[Git Workspace Service]
+        TeamSvc[Team Sessions]
+        CollabSrv[Collaboration Server]
+    end
 
-- `/`
-  Professor-facing landing page with GitHub login or local demo entry
-- `/workspace`
-  Repository chooser and team-session join page
-- `/editor`
-  Monaco editor, file tree, preview, build controls, review workflow, recent
-  file shortcuts, and collaboration UI
+    subgraph Storage["Storage"]
+        Redis[(Redis)]
+        TmpFS[/tmp/proofdesk-data/]
+        LocalFS[Local Workspace Files]
+    end
 
-Main frontend modules:
+    subgraph Docker["Docker Container"]
+        BuildSh[build.sh — 7-step pipeline]
+        SCons[SCons Build System]
+        PreTeXt[PreTeXt XSL Transform]
+        PretexPy[pretex.py Math Renderer]
+    end
 
-- `frontend/src/App.tsx`
-  Route entry point and backend session restoration
-- `frontend/src/components/ProfessorDashboardPage.tsx`
-  Login / workspace entry UI
-- `frontend/src/components/RepoInputPage.tsx`
-  Repository selection and shared-session join
-- `frontend/src/components/EditorPage.tsx`
-  Main editing experience
-- `frontend/src/components/SaveReviewDialog.tsx`
-  Save-review modal that summarizes changed files before writing to GitHub
-- `frontend/src/utils/editorApi.ts`
-  Structured API error parsing for auth, build, and editor requests
-- `frontend/src/utils/editorCollaboration.ts`
-  Team-session and collaborator helper logic extracted from the editor
-- `frontend/src/utils/editorDiff.ts`
-  Change-summary helpers for the save review flow
-- `frontend/src/utils/editorPreview.ts`
-  Preview/render helpers extracted from the editor
-- `frontend/src/utils/editorWorkspace.ts`
-  Recent-file storage, review markers, and source-to-preview mapping helpers
-- `frontend/src/utils/yjsCollaboration.ts`
-  WebSocket + Yjs synchronization layer
+    subgraph External["External Services"]
+        GitHub[GitHub API / OAuth]
+        GHRepo[GitHub Repository]
+    end
 
-### Backend
+    UI -->|REST| API
+    YjsClient -->|WebSocket| WS
+    WS --> CollabSrv
+    CollabSrv --> Redis
+    API --> BuildEx
+    API --> WorkspaceSvc
+    API --> GitSvc
+    API --> TeamSvc
+    BuildEx -->|docker run| Docker
+    BuildEx --> TmpFS
+    WorkspaceSvc --> LocalFS
+    GitSvc -->|git clone / push| GHRepo
+    API -->|OAuth| GitHub
+    TeamSvc --> Redis
+    LivePrev -->|srcDoc| UI
+```
 
-The backend is an Express server with HTTP routes plus a WebSocket
-collaboration server attached to the same Node HTTP server.
+---
 
-Main backend modules:
+## 2. Authentication Flow
 
-- `backend/src/server.js`
-  Route registration and server startup
-- `backend/src/services/buildExecutor.js`
-  Repository preparation, temp build sessions, preview output management, cache
-- `backend/src/services/collaborationServer.js`
-  Yjs WebSocket server for real-time editing with snapshot persistence
-- `backend/src/services/authSessionStore.js`
-  Cookie-backed server-side auth session storage
-- `backend/src/services/workspaceService.js`
-  Checked-out workspace access for file tree and file content routes
-- `backend/src/services/gitWorkspaceService.js`
-  Real git status, diff, commit, branch, push, pull, and PR helpers
-- `backend/src/services/localTestRepoService.js`
-  Seeded demo repository, local file access, local preview builder
-- `backend/src/services/teamSessions.js`
-  Invite-code generation and persisted team session store
-- `backend/src/utils/buildDiagnostics.js`
-  Shared build and terminal error classification for user-facing recovery hints
-- `backend/src/middleware/auth.js`
-  Bearer token helpers
-- `backend/src/utils/requestLogging.js`
-  Sensitive request-body logging utilities
+```mermaid
+sequenceDiagram
+    actor Prof as Professor
+    participant FE as Frontend (React)
+    participant BE as Backend (Express)
+    participant GH as GitHub OAuth
 
-## Core runtime flows
+    Prof->>FE: Opens Proofdesk
+    FE->>BE: GET /auth/session
+    BE-->>FE: 401 No session
 
-### 1. Authentication
+    Prof->>FE: Clicks "Continue with GitHub"
+    FE->>BE: GET /auth/github
+    BE-->>FE: Redirect to GitHub OAuth URL
 
-Normal mode:
+    FE->>GH: GitHub OAuth consent page
+    Prof->>GH: Approves access
+    GH->>BE: GET /auth/github/callback?code=...&state=...
 
-1. User opens `/`.
-2. Frontend sends the browser to `GET /auth/github`.
-3. GitHub OAuth redirects back to `GET /auth/github/callback`.
-4. Backend verifies OAuth state, exchanges the code for an access token,
-   stores that token in a server-side session, and sets an `HttpOnly` cookie.
-5. Frontend restores access by calling `GET /auth/session`.
+    BE->>BE: Verify OAuth state (CSRF check)
+    BE->>GH: Exchange code → access_token
+    GH-->>BE: access_token
 
-Local test mode:
+    BE->>BE: Store token in server-side session
+    BE-->>FE: Set HttpOnly cookie + redirect /
 
-1. User opens `/`.
-2. Frontend shows `Use local demo workspace` when
-   `VITE_ENABLE_LOCAL_TEST_MODE=true`.
-3. Browser goes to `GET /auth/local-test`.
-4. Backend creates a cookie-backed local demo session.
-5. Frontend restores that session through `GET /auth/session`.
+    FE->>BE: GET /auth/session
+    BE-->>FE: { user, token } (from cookie)
 
-### 2. Repository selection
+    FE->>FE: Store user info, show workspace
+```
 
-GitHub mode:
+---
 
-- frontend repository search and validation go through backend proxy routes
-- selected repo is stored in `sessionStorage`
-- `POST /workspace/init` prepares a checked-out working copy on the server
+## 3. Repository & Workspace Initialization
 
-Local test mode:
+```mermaid
+sequenceDiagram
+    actor Prof as Professor
+    participant FE as Frontend
+    participant BE as Backend
+    participant GH as GitHub
+    participant FS as Server Filesystem
 
-- frontend can open the seeded `demo/course-demo` repository directly
-- the same `POST /workspace/init` route prepares a local working copy
+    Prof->>FE: Enters repo URL or searches
+    FE->>BE: GET /workspace/repos (search)
+    BE->>GH: List/search repositories via Octokit
+    GH-->>BE: Repo list
+    BE-->>FE: Filtered repo list
 
-### 3. Editor loading
+    Prof->>FE: Selects repository
+    FE->>BE: POST /workspace/init { owner, repo }
 
-1. Editor reads `selectedRepo` from `sessionStorage`.
-2. Frontend requests user info and initializes a workspace session for the
-   selected repository.
-3. File tree and file contents are fetched from workspace routes backed by the
-   checked-out server-side repo copy.
-4. Saves write back into that workspace copy first, so preview, terminal, git
-   status, and commit operations all use the same working tree.
+    BE->>GH: Clone repo (git clone --recursive)
+    GH-->>FS: Files written to .proofdesk-data/<sessionId>/repo/
 
-### 4. Build and preview
+    BE->>BE: syncPreviewBundle() — copy toolchain fixes
+    BE-->>FE: { sessionId, fileTree, entryFile }
 
-`buildExecutor` creates a temporary build session for each opened repository.
+    FE->>FE: sessionStorage.selectedRepo = repo
+    FE->>FE: Navigate to /editor
+    FE->>BE: GET /workspace/:id/files
+    BE->>FS: Read directory tree
+    FS-->>BE: File list
+    BE-->>FE: File tree JSON
 
-GitHub-backed mode:
+    Prof->>FE: Opens a file
+    FE->>BE: GET /workspace/:id/file?path=...
+    BE->>FS: fs.readFile()
+    FS-->>BE: File content
+    BE-->>FE: Raw file text → Monaco editor
+```
 
-1. Backend clones or reuses a repo mirror.
-2. Backend runs the build toolchain against the same workspace session or serves
-   cached output copied into a fresh workspace.
-3. Preview artifacts are exposed under preview/build endpoints.
+---
 
-Local test mode:
+## 4. Full Build Compilation Pipeline
 
-1. Backend copies `test-repo/course-demo` into a temp session.
-2. Backend generates a simple HTML preview from `course.xml`.
-3. CSS and JS assets are copied into the output directory.
+```mermaid
+flowchart TD
+    A([Professor clicks\nBuild Repository]) --> B
 
-Preview behavior:
+    subgraph BE["Backend — buildExecutor.js"]
+        B[POST /build/init received]
+        B --> C[Generate sessionId]
+        C --> D[git clone GitHub repo\ninto /tmp/proofdesk-data/sessionId/repo]
+        D --> E[Inject toolchain fixes\nPython 3 patches · Inkscape 1.x patches]
+        E --> F{Docker image\nmra-pretext-builder\nexists?}
+        F -- No --> G[docker build -t mra-pretext-builder ./docker]
+        G --> H
+        F -- Yes --> H[docker run --rm\n-v repo → /repo\n-v output → /output\nmra-pretext-builder]
+    end
 
-- full build: `/build/init` or `/build/update`
-- quick asset patch: `/build/quick-update` for HTML, CSS, JS
-- rendered preview: `/preview/:sessionId/*`
+    subgraph DC["Docker Container — build.sh"]
+        H --> S1
 
-### 5. Live editing
+        S1["Step 1 · Git Submodules\nmathbook · mathbook-assets · mathbox"]
+        S1 --> S2["Step 2 · Ruby 3.2 Patch\nFile.exists? → File.exist?"]
+        S2 --> S3["Step 3 · Build Submodule Assets\nSCSS → CSS via sass-embedded\nnpm + gulp → MathBox JS bundle"]
+        S3 --> S4["Step 4 · Python 3 Patches\naglfn.py · processtex.py · SConscript"]
+        S4 --> S5A
 
-Live editing in the editor uses different strategies by file type:
+        subgraph SCons["Step 5 · SCons Build"]
+            S5A["scons\nJS/CSS bundles\n31 interactive demo HTML pages"]
+            S5A --> S5B["scons html\nPreTeXt XML → HTML chapters"]
+            S5B --> XSL["xsltproc + PreTeXt XSL\ntransforms src/*.xml → HTML"]
+            XSL --> MATH["pretex.py extracts LaTeX\npdflatex → inkscape → inline SVG"]
+        end
 
-- HTML: update `srcDoc` preview immediately and quick-update backend output
-- CSS / JS: quick-update backend output without a full rebuild
-- PreTeXt / XML: render a draft preview client-side first, then queue a rebuild
-- other files: queue a rebuild with debounce
+        MATH --> S6["Step 6 · Copy to /output\nHTML · CSS · JS · fonts\nknowl/ · demos/ · pretex-cache/"]
+        S6 --> S7["Step 7 · Validate output\nFind overview.html / index.html"]
+    end
 
-This gives a faster editing loop while keeping the full build path available.
+    S7 --> I
 
-### 6. Collaboration
+    subgraph BE2["Backend — post-build"]
+        I[Collect artifact list from output/]
+        I --> J[syncPreviewBundle to preview/]
+        J --> K[Cache build result in Redis]
+        K --> L[Return sessionId + entryFile]
+    end
 
-The project now uses Yjs over WebSockets as the active collaboration path.
+    L --> M([PreviewPane renders\niframe src=/preview/sessionId/index.html])
+```
 
-Flow:
+---
 
-1. Host creates a team session and gets an invite code.
-2. Frontend stores the team session in `sessionStorage`.
-3. For each active file, the editor derives a room id:
-   `team:<code>:<file-path>`
-4. `MonacoYjsCollaborationSession` connects to `/collab/ws`.
-5. Yjs syncs document content and collaborator awareness.
+## 5. Math Rendering Pipeline
 
-The older polling-based REST collaboration path has been removed from the
-editor and from the server routes.
+```mermaid
+flowchart LR
+    A["PreTeXt XML\n&lt;me&gt;Ax = b&lt;/me&gt;"] -->|xsltproc| B
 
-## Storage model
+    B["HTML with embedded LaTeX\n&lt;script type='text/x-latex-inline'&gt;\nAx = b\n&lt;/script&gt;"]
 
-Browser storage:
+    B -->|pretex.py\nextracts all equations| C["equation-001.tex\nequation-002.tex\n..."]
 
-- `localStorage.mra:<repo>:recent-files`
-  Recent files opened inside a repository workspace
-- `localStorage.mra:<repo>:review-markers`
-  Per-file review state and notes
-- `sessionStorage.selectedRepo`
-  Current repository descriptor
-- `sessionStorage.teamSession`
-  Current invite/session metadata
+    C -->|pdflatex| D["equation-001.pdf\n(15–20 min for 500+ equations)"]
 
-Server-side storage:
+    D -->|fontforge| E["Font metrics\nToUnicode tables\n(for copy-paste fidelity)"]
 
-- build sessions in `/tmp/mra-builds`
-- optional build cache metadata in `/tmp/mra-builds/.build-cache.json`
-- auth session records in `/tmp/mra-builds/.auth-sessions.json`
-- team session records in `/tmp/mra-builds/.team-sessions.json`
-- Yjs room snapshots in `/tmp/mra-builds/collaboration/`
+    E -->|inkscape 1.x\n--actions syntax| F["equation-001-page1.svg\n(vector, scalable, no raster)"]
 
-## Security notes
+    F -->|pretex.py\ninlines SVG| G["Final HTML\n&lt;svg xmlns=...&gt;...&lt;/svg&gt;\nembedded directly in page"]
 
-- Real credentials must not live in tracked files.
-- The tracked `backend/.env` now contains placeholders only.
-- If real GitHub credentials were ever committed before this change, they must
-  be revoked and rotated in GitHub itself.
-- Request logging redacts sensitive body fields such as content and tokens.
-- GitHub access tokens now stay server-side and are restored through an
-  `HttpOnly` session cookie instead of browser `localStorage`.
-- Build routes validate repository names and session ids before use.
-- Local test mode is explicitly opt-in through environment variables.
+    style A fill:#f0f5ff,stroke:#4a90d9
+    style G fill:#f0fff8,stroke:#00a86b
+```
 
-## Current tradeoffs
+---
 
-- The server and editor are still large files, but some shared helpers have now
-  been split into focused modules.
-- Real GitHub end-to-end tests are now supported through env-driven Playwright
-  smoke tests, but they remain opt-in because they depend on real credentials
-  and repository structure.
-- Team sessions and collaborative document content are now persisted locally,
-  but collaborator presence is still ephemeral and only lasts while sockets are
-  connected.
-- The local demo builder is intentionally simple and exists for testing the
-  product workflow, not as a replacement for the full PreTeXt build pipeline.
+## 6. Live vs Full Preview Modes
+
+```mermaid
+flowchart TD
+    Edit([Professor edits file]) --> FT{File type?}
+
+    FT -->|.html / .htm| LiveHTML
+    FT -->|.ptx / .xml\nPreTeXt| LiveXML
+    FT -->|.css / .js| QuickUpdate
+    FT -->|other| FullRebuild
+
+    subgraph LiveHTML["Live HTML Mode (instant, no backend)"]
+        LH1[prepareHtmlForSrcDoc\nrewrite relative URLs + inject MathJax]
+        LH1 --> LH2[setSrcDocContent → iframe srcDoc=...]
+        LH2 --> LH3[Browser renders HTML immediately]
+        LH3 --> LH4[POST /build/quick-update\nbehind the scenes]
+    end
+
+    subgraph LiveXML["Live PreTeXt Mode (client-side transform)"]
+        LX1[pretexToHtml\nbrowser-side XML → HTML converter]
+        LX1 --> LX2[Converts theorems · equations · lists\nMathJax renders math in iframe]
+        LX2 --> LX3[setSrcDocContent → iframe srcDoc=...]
+        LX3 --> LX4[setTimeout → enqueue full Docker rebuild]
+    end
+
+    subgraph QuickUpdate["Quick Update (asset patch only)"]
+        QU1[POST /build/quick-update\nfile content only]
+        QU1 --> QU2[Backend writes file to output/\nno Docker, no re-render]
+        QU2 --> QU3[previewFrameKey++ → iframe reload]
+    end
+
+    subgraph FullRebuild["Full Docker Rebuild"]
+        FR1[POST /build/init or /build/update]
+        FR1 --> FR2[Docker pipeline runs\n15–20 min first build\n2–5 min incremental]
+        FR2 --> FR3[setPreviewUrl → iframe src=/preview/...]
+    end
+
+    style LiveHTML fill:#f0fff8,stroke:#00a86b
+    style LiveXML fill:#f0f5ff,stroke:#4a90d9
+    style QuickUpdate fill:#fffdf0,stroke:#e08e00
+    style FullRebuild fill:#faf5ff,stroke:#7c3aed
+```
+
+---
+
+## 7. Real-Time Collaboration (Yjs)
+
+```mermaid
+sequenceDiagram
+    actor Host as Host (Professor A)
+    actor Guest as Guest (Professor B)
+    participant FE_H as Frontend — Host
+    participant FE_G as Frontend — Guest
+    participant BE as Backend WebSocket
+    participant Yjs as Yjs Room (in-memory + Redis snapshot)
+
+    Host->>FE_H: Creates team session
+    FE_H->>BE: POST /team-session/create
+    BE-->>FE_H: { inviteCode: "abc123" }
+    FE_H->>FE_H: sessionStorage.teamSession = { code: "abc123" }
+
+    Host->>FE_H: Opens file → MonacoYjsCollaborationSession
+    FE_H->>BE: WebSocket connect /collab/ws
+    FE_H->>Yjs: Join room "team:abc123:src/vectors.xml"
+    Yjs-->>FE_H: Sync current doc state
+
+    Guest->>FE_G: Enters invite code "abc123"
+    FE_G->>BE: POST /team-session/join { code: "abc123" }
+    BE-->>FE_G: { sessionId, repo }
+    FE_G->>BE: WebSocket connect /collab/ws
+    FE_G->>Yjs: Join room "team:abc123:src/vectors.xml"
+    Yjs-->>FE_G: Full doc sync
+
+    Host->>FE_H: Types in Monaco editor
+    FE_H->>Yjs: Yjs update (CRDT delta)
+    Yjs->>FE_G: Broadcast update
+    FE_G->>FE_G: Monaco applies update\n(cursor preserved, no conflict)
+    Yjs->>BE: Persist snapshot to Redis
+
+    Note over Yjs,BE: Snapshot persists across reconnects
+```
+
+---
+
+## 8. Storage Model
+
+```mermaid
+erDiagram
+    BROWSER_LOCALSTORAGE {
+        string mra_repo_recent-files "Recently opened files per repo"
+        string mra_repo_review-markers "Review state and notes per file"
+    }
+
+    BROWSER_SESSIONSTORAGE {
+        string selectedRepo "Current repo descriptor { owner, repo, ... }"
+        string teamSession "Active team session { code, sessionId }"
+    }
+
+    SERVER_FILESYSTEM {
+        dir proofdesk-data_sessionId_repo "Cloned GitHub repo files"
+        dir proofdesk-data_sessionId_output "Compiled build artifacts"
+        dir proofdesk-data_sessionId_preview "Served preview files (nginx)"
+        file auth-sessions-json "HttpOnly cookie → GitHub token map"
+        file team-sessions-json "Invite codes → session metadata"
+        dir collaboration "Yjs document snapshots per room"
+    }
+
+    REDIS {
+        hash build_cache "sessionId → build metadata + version"
+        hash team_sessions "inviteCode → session state"
+        hash yjs_rooms "roomId → Yjs snapshot"
+        hash collab_presence "roomId → connected clients"
+    }
+
+    DOCKER_VOLUMES {
+        vol repo "Mounted read-only source: /repo"
+        vol output "Mounted read-write artifacts: /output"
+    }
+
+    SERVER_FILESYSTEM ||--|| DOCKER_VOLUMES : "mounts for build"
+    REDIS ||--o{ SERVER_FILESYSTEM : "snapshot persistence"
+    BROWSER_SESSIONSTORAGE ||--|| SERVER_FILESYSTEM : "sessionId references"
+```
+
+---
+
+## 9. Request Routing (nginx)
+
+```mermaid
+flowchart LR
+    Client([Browser]) --> Nginx[nginx :80 / :443]
+
+    Nginx -->|"/ and /assets/**"| FE["Frontend\nReact SPA\n(dist/)"]
+    Nginx -->|"/api/**"| API["Backend API\nExpress :4000"]
+    Nginx -->|"/auth/**"| API
+    Nginx -->|"/build/**"| API
+    Nginx -->|"/workspace/**"| API
+    Nginx -->|"/preview/**"| PREV["Preview Static Files\n.proofdesk-data/sessionId/preview/\nserved directly by nginx"]
+    Nginx -->|"/collab/ws"| WS["WebSocket Server\nYjs collaboration\n(upgraded connection)"]
+    Nginx -->|"/terminal/ws"| TERM["Terminal Server\nnode-pty / XTerm.js\n(upgraded connection)"]
+    Nginx -->|"/health"| API
+    Nginx -->|"/monitoring/**"| API
+
+    style FE fill:#f0f5ff,stroke:#4a90d9
+    style API fill:#f0fff8,stroke:#00a86b
+    style PREV fill:#fffdf0,stroke:#e08e00
+    style WS fill:#faf5ff,stroke:#7c3aed
+    style TERM fill:#fff5f5,stroke:#e53e3e
+```
+
+---
+
+## 10. Frontend Component Hierarchy
+
+```mermaid
+graph TD
+    App["App.tsx\nRoute entry · session restore"]
+
+    App --> PDP["ProfessorDashboardPage\nGitHub login · local demo entry"]
+    App --> RIP["RepoInputPage\nRepo search · team session join"]
+    App --> EP["EditorPage\nMain workspace (2500+ lines)"]
+
+    EP --> TopBar["EditorTopBar\nBuild · save · git · review controls"]
+    EP --> TabBar["EditorTabBar\nOpen file tabs"]
+    EP --> Split["Split View"]
+
+    Split --> Explorer["EditorExplorerPane\nFile tree · git status"]
+    Split --> MonacoArea["Monaco Editor\nCode editing · Yjs binding"]
+    Split --> PreviewPane["PreviewPane\nLive / full build iframe"]
+
+    EP --> StatusBar["EditorStatusBar\nCollaborators · live edit status"]
+    EP --> Terminal["Terminal\nXTerm.js + node-pty WebSocket"]
+    EP --> GitPanel["GitPanel\nDiff · stage · commit · push"]
+    EP --> SearchPane["EditorSearchPane\nFile-level find/replace"]
+
+    EP --> Dialogs["Dialogs"]
+    Dialogs --> SaveReview["SaveReviewDialog\nChange summary before GitHub push"]
+    Dialogs --> FileOp["FileOperationDialog\nRename · delete · new file"]
+    Dialogs --> Toast["Toast\nSuccess / error notifications"]
+    Dialogs --> ContextMenu["ContextMenu\nRight-click actions"]
+
+    EP --> MathEditor["MathEditor\nKaTeX inline math editing"]
+    EP --> LAViz["LinearAlgebraVisualizer\nD3.js matrix / vector diagrams"]
+
+    style App fill:#1e40af,color:#fff
+    style EP fill:#1e40af,color:#fff
+    style PreviewPane fill:#065f46,color:#fff
+    style Terminal fill:#7c3aed,color:#fff
+    style GitPanel fill:#92400e,color:#fff
+```
+
+---
+
+## Build Time Reference
+
+| Phase | Tool | Typical Duration |
+|---|---|---|
+| Docker image build (first time) | `docker build` | 15–20 min |
+| Git submodule init | `git submodule update` | 30–60 s |
+| SCSS → CSS | `sass-embedded` | 5–10 s |
+| MathBox JS bundle | `npm + gulp` | 30–60 s |
+| SCons JS/CSS + 31 demos | `scons` | 2–5 min |
+| PreTeXt XML → HTML | `xsltproc` | 1–2 min |
+| Math SVG render (500+ equations) | `pdflatex + inkscape` | 8–15 min |
+| Incremental rebuild (cached math) | SCons + pretex-cache | 2–4 min |
+| Live XML preview (browser) | `pretexToHtml()` | < 100 ms |
+| Live HTML preview (browser) | `prepareHtmlForSrcDoc()` | < 50 ms |
+
+---
+
+*Designed and built by **Harsha Raj Kumar**.*
