@@ -10,6 +10,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY src/ ./src/
+COPY builds/ ./builds/
 
 RUN mkdir -p /var/lib/proofdesk
 

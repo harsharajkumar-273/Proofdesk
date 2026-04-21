@@ -100,7 +100,7 @@ jobs:
             --exclude='backend/.proofdesk-data' \
             --exclude='builds/output' \
             --exclude='builds/test-output' \
-            --exclude='builds/ila-repo' \
+            --exclude='builds/ila-repo/html' \
             -czf /tmp/proofdesk-release.tgz .
           ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "mkdir -p ${APP_DIR}"
           scp -i ~/.ssh/proofdesk_deploy_key /tmp/proofdesk-release.tgz "${AWS_EC2_USER}@${AWS_EC2_HOST}:${APP_DIR}/proofdesk-release.tgz"
