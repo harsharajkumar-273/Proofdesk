@@ -16,7 +16,7 @@ test('injects resilient PreTeXt math layout fixes into preview HTML', () => {
   assert.match(html, /mjx-container\[display="true"\]\{/);
   assert.match(html, /width:100%!important;/);
   assert.match(html, /--proofdesk-pretex-display-height/);
-  assert.match(html, /data-proofdesk-pretex-layout-version="2026-04-21-display-math-reserve"/);
+  assert.match(html, /data-proofdesk-pretex-layout-version="2026-04-21-display-math-reserve-v2"/);
   assert.match(html, /getSvgVisualHeight/);
 });
 

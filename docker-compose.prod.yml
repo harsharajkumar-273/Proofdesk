@@ -21,7 +21,9 @@ services:
 
   # ── backend: Express API + build executor ──
   backend:
-    build: ./backend
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       NODE_ENV: production
       PORT: 4000

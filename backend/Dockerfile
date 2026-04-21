@@ -6,10 +6,10 @@ WORKDIR /app
 # mounted through /var/run/docker.sock.
 RUN apk add --no-cache bash docker-cli git openssh-client python3 make g++
 
-COPY package*.json ./
+COPY backend/package*.json ./
 RUN npm ci --omit=dev
 
-COPY src/ ./src/
+COPY backend/src/ ./src/
 COPY builds/ ./builds/
 
 RUN mkdir -p /var/lib/proofdesk
