@@ -1,0 +1,50 @@
+name: Cleanup EC2 Disk
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      APP_DIR: /opt/proofdesk
+      AWS_EC2_HOST: ${{ secrets.AWS_EC2_HOST }}
+      AWS_EC2_USER: ${{ secrets.AWS_EC2_USER || 'ubuntu' }}
+      AWS_EC2_SSH_KEY: ${{ secrets.AWS_EC2_SSH_KEY }}
+
+    steps:
+      - name: Prepare SSH
+        shell: bash
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${AWS_EC2_SSH_KEY}" > ~/.ssh/proofdesk_deploy_key
+          chmod 600 ~/.ssh/proofdesk_deploy_key
+          ssh-keyscan -H "${AWS_EC2_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Free EC2 disk space
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
+            set -euo pipefail
+            echo '=== Before cleanup ==='
+            df -h /
+
+            echo '=== Stopping stack ==='
+            cd ${APP_DIR}
+            docker compose -f docker-compose.prod.yml down || true
+
+            echo '=== Removing build output dirs older than 0 days ==='
+            find /var/lib/proofdesk -maxdepth 1 -mindepth 1 -type d -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+            du -sh /var/lib/proofdesk 2>/dev/null || true
+
+            echo '=== Pruning Docker images, containers, build cache ==='
+            docker system prune -af
+            du -sh /var/lib/docker 2>/dev/null || true
+
+            echo '=== After cleanup ==='
+            df -h /
+
+            echo '=== Restarting stack ==='
+            docker compose -f docker-compose.prod.yml up --build -d
+            docker compose -f docker-compose.prod.yml ps
+          "
