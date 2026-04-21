@@ -383,7 +383,7 @@ const pretexFallback = String.raw`
         'mjx-container[display="false"]{display:inline-block!important;margin:0 0.1em!important;vertical-align:middle;}',
         'mjx-container svg{max-width:100%;height:auto;}',
         '.pretex-display{display:flow-root!important;margin:1em 0!important;padding:0.15em 0;text-align:center;max-width:100%;overflow-x:auto;overflow-y:visible;clear:both;}',
-        '.pretex-display>svg.pretex{display:block!important;max-width:100%;height:auto;margin:0 auto;}',
+        '.pretex-display>svg.pretex{display:block!important;max-width:100%;margin:0 auto;}',
         'p mjx-container[display="true"]{display:block!important;margin:0.8em auto!important;}',
         'figure,div.mathbox,.mathbox{max-width:100%;}'
       ].join('\n');
