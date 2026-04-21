@@ -16,6 +16,8 @@ test('injects resilient PreTeXt math layout fixes into preview HTML', () => {
   assert.match(html, /mjx-container\[display="true"\]\{/);
   assert.match(html, /width:100%!important;/);
   assert.match(html, /--proofdesk-pretex-display-height/);
+  assert.match(html, /data-proofdesk-pretex-layout-version="2026-04-21-display-math-reserve"/);
+  assert.match(html, /getSvgVisualHeight/);
 });
 
 test('ships a brace-aware syseq fallback for MathJax previews', () => {
@@ -37,5 +39,19 @@ test('places the final PreTeXt layout guard after generated textbook styles', ()
     '1111111111111111'
   );
 
+  assert.ok(html.indexOf('id="proofdesk-pretex-layout-fix"') > html.indexOf('id="pretex-style"'));
+});
+
+test('replaces stale PreTeXt layout guards before reinserting the latest one', () => {
+  const html = transformPreviewFile(
+    'overview.html',
+    '<!DOCTYPE html><html><head><style id="proofdesk-pretex-layout-fix">.pretex-display{display:inline}</style><script id="proofdesk-pretex-layout-guard">window.oldGuard=true</script><style id="pretex-style">svg.pretex{display:inline-block;}</style></head><body><div class="pretex-display"><svg class="pretex" height="4em" viewBox="0 0 100 40"></svg></div></body></html>',
+    '1111111111111111'
+  );
+
+  assert.equal(html.match(/id="proofdesk-pretex-layout-fix"/g).length, 1);
+  assert.equal(html.match(/id="proofdesk-pretex-layout-guard"/g).length, 1);
+  assert.equal(html.includes('window.oldGuard'), false);
+  assert.equal(html.includes('.pretex-display{display:inline}'), false);
   assert.ok(html.indexOf('id="proofdesk-pretex-layout-fix"') > html.indexOf('id="pretex-style"'));
 });

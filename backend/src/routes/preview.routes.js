@@ -5,7 +5,7 @@ import buildExecutor from '../services/buildExecutor.js';
 import {
   ensurePreviewBundle,
 } from '../services/previewBundleService.js';
-import { PROOFDESK_PRETEX_LAYOUT_FIX } from '../services/previewTransformService.js';
+import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
 
 const getPreviewMimeType = (ext) => ({
@@ -130,14 +130,9 @@ export const createPreviewRouter = () => {
     let responseContent;
     if (ext === '.html' || ext === '.htm') {
       let html = versionLivePreviewAssets(content.toString('utf-8'), previewVersion);
-      // Apply the latest layout guard at serve-time so stale cached bundles are
-      // also fixed without needing a full preview rebuild.
-      if (!html.includes('proofdesk-pretex-layout-fix')) {
-        html = html.includes('</head>')
-          ? html.replace('</head>', `${PROOFDESK_PRETEX_LAYOUT_FIX}\n</head>`)
-          : PROOFDESK_PRETEX_LAYOUT_FIX + html;
-      }
-      responseContent = html;
+      // Replace the layout guard at serve-time so stale cached bundles pick up
+      // the current display-math spacing rules without needing a full rebuild.
+      responseContent = injectLatestPreTeXtLayoutFix(html);
     } else {
       responseContent = content;
     }

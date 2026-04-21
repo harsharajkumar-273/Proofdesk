@@ -62,25 +62,36 @@ const rewriteCssUrls = (content, sessionBase, allowedRelativeDirs = []) => {
   );
 };
 
+const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve';
+
 const PROOFDESK_PRETEX_LAYOUT_FIX = String.raw`
-<style id="proofdesk-pretex-layout-fix">
+<style id="proofdesk-pretex-layout-fix" data-proofdesk-pretex-layout-version="${PROOFDESK_PRETEX_LAYOUT_FIX_VERSION}">
 .mathbook-content .pretex-display,
 .pretex-display{
   display:flow-root!important;
   clear:both!important;
   position:relative!important;
+  width:100%!important;
   max-width:100%!important;
+  box-sizing:border-box!important;
   min-height:var(--proofdesk-pretex-display-height, 0);
   margin:1em 0!important;
   padding:0.2em 0!important;
+  line-height:normal!important;
   text-align:center!important;
   text-indent:0!important;
+  float:none!important;
   overflow-x:auto!important;
-  overflow-y:visible!important;
+  overflow-y:auto!important;
+  isolation:isolate!important;
 }
 .mathbook-content li>.pretex-display,
 li>.pretex-display{
   margin:0.85em 0!important;
+}
+.mathbook-content .pretex-display+*,
+.pretex-display+*{
+  clear:both!important;
 }
 .pretex-display::after{
   content:"";
@@ -93,31 +104,39 @@ li>.pretex-display{
   position:static!important;
   float:none!important;
   max-width:100%!important;
+  height:auto!important;
   margin:0 auto!important;
+  vertical-align:baseline!important;
   overflow:visible!important;
 }
 .pretex-bind{
   display:inline-block!important;
+  vertical-align:middle!important;
+  line-height:0;
 }
 .pretex-inline{
   display:inline-block!important;
+  vertical-align:middle!important;
 }
 mjx-container{
   max-width:100%!important;
   line-height:normal!important;
   overflow-x:auto!important;
-  overflow-y:visible!important;
+  overflow-y:auto!important;
 }
 mjx-container[display="true"]{
   display:block!important;
   clear:both!important;
   width:100%!important;
   max-width:100%!important;
+  box-sizing:border-box!important;
+  min-height:var(--proofdesk-mathjax-display-height, 0);
   margin:0.85em auto!important;
   padding:0.25em 0!important;
+  line-height:normal!important;
   text-align:center!important;
   overflow-x:auto!important;
-  overflow-y:visible!important;
+  overflow-y:auto!important;
 }
 mjx-container[display="true"]>svg{
   display:block!important;
@@ -146,6 +165,55 @@ mjx-container[display="true"]>svg{
     return n*basis;
   }
 
+  function getViewBox(svg){
+    var base=svg.viewBox&&svg.viewBox.baseVal;
+    if(base&&base.width&&base.height){
+      return {x:base.x||0,y:base.y||0,width:base.width,height:base.height};
+    }
+    var attr=svg.getAttribute('viewBox');
+    if(!attr) return null;
+    var parts=attr.trim().split(/[\s,]+/).map(parseFloat);
+    if(parts.length!==4||parts.some(function(n){return !isFinite(n);})) return null;
+    return {x:parts[0],y:parts[1],width:parts[2],height:parts[3]};
+  }
+
+  function getSvgVisualHeight(svg, context){
+    var rect=svg.getBoundingClientRect();
+    var attrHeight=toPx(svg.getAttribute('height'), context);
+    var height=Math.max(rect.height||0, attrHeight||0);
+
+    try{
+      var box=svg.getBBox();
+      var viewBox=getViewBox(svg);
+      if(box&&viewBox&&viewBox.height){
+        var basis=rect.height||attrHeight||viewBox.height;
+        var scaleY=basis/viewBox.height;
+        height=Math.max(height, Math.ceil(box.height*scaleY));
+      }
+    } catch (_) {
+      // Some SVGs cannot compute a bbox until fonts load; scheduled retries handle them.
+    }
+
+    return height;
+  }
+
+  function reserveSvg(display, svg){
+    svg.style.display='block';
+    svg.style.position='static';
+    svg.style.float='none';
+    svg.style.maxWidth='100%';
+    svg.style.height='auto';
+    svg.style.marginLeft='auto';
+    svg.style.marginRight='auto';
+    svg.style.verticalAlign='baseline';
+    svg.style.overflow='visible';
+
+    var height=getSvgVisualHeight(svg, display);
+    if(height>1){
+      display.style.setProperty('--proofdesk-pretex-display-height', Math.ceil(height)+'px');
+    }
+  }
+
   function reserveDisplayMath(root){
     var scope=root&&root.querySelectorAll?root:document;
     var displays=Array.from(scope.querySelectorAll('.pretex-display'));
@@ -154,28 +222,19 @@ mjx-container[display="true"]>svg{
       display.style.display='flow-root';
       display.style.clear='both';
       display.style.position='relative';
+      display.style.width='100%';
       display.style.maxWidth='100%';
+      display.style.boxSizing='border-box';
+      display.style.lineHeight='normal';
       display.style.textAlign='center';
+      display.style.textIndent='0';
+      display.style.float='none';
       display.style.overflowX='auto';
-      display.style.overflowY='visible';
+      display.style.overflowY='auto';
 
-      var svg=display.querySelector(':scope > svg.pretex');
-      if(!svg) return;
-
-      svg.style.display='block';
-      svg.style.position='static';
-      svg.style.float='none';
-      svg.style.maxWidth='100%';
-      svg.style.marginLeft='auto';
-      svg.style.marginRight='auto';
-      svg.style.overflow='visible';
-
-      var rect=svg.getBoundingClientRect();
-      var attrHeight=toPx(svg.getAttribute('height'), display);
-      var height=Math.max(rect.height||0, attrHeight||0);
-      if(height>1){
-        display.style.setProperty('--proofdesk-pretex-display-height', Math.ceil(height)+'px');
-      }
+      Array.from(display.children).forEach(function(child){
+        if(child.matches&&child.matches('svg.pretex')) reserveSvg(display, child);
+      });
     });
 
     Array.from(scope.querySelectorAll('mjx-container[display="true"]')).forEach(function(math){
@@ -183,9 +242,24 @@ mjx-container[display="true"]>svg{
       math.style.clear='both';
       math.style.width='100%';
       math.style.maxWidth='100%';
+      math.style.boxSizing='border-box';
+      math.style.lineHeight='normal';
       math.style.textAlign='center';
       math.style.overflowX='auto';
-      math.style.overflowY='visible';
+      math.style.overflowY='auto';
+
+      var svg=math.querySelector(':scope > svg');
+      if(svg){
+        svg.style.display='block';
+        svg.style.maxWidth='100%';
+        svg.style.height='auto';
+        svg.style.marginLeft='auto';
+        svg.style.marginRight='auto';
+        var height=getSvgVisualHeight(svg, math);
+        if(height>1){
+          math.style.setProperty('--proofdesk-mathjax-display-height', Math.ceil(height)+'px');
+        }
+      }
     });
   }
 
@@ -573,6 +647,24 @@ const mathBoxPreviewFixes = String.raw`
 })();
 </script>`;
 
+const PROOFDESK_LAYOUT_STYLE_PATTERN = /\s*<style\b[^>]*\bid=["']proofdesk-pretex-layout-fix["'][^>]*>[\s\S]*?<\/style>/gi;
+const PROOFDESK_LAYOUT_SCRIPT_PATTERN = /\s*<script\b[^>]*\bid=["']proofdesk-pretex-layout-guard["'][^>]*>[\s\S]*?<\/script>/gi;
+
+const removeExistingPreTeXtLayoutFix = (html) =>
+  html
+    .replace(PROOFDESK_LAYOUT_STYLE_PATTERN, '')
+    .replace(PROOFDESK_LAYOUT_SCRIPT_PATTERN, '');
+
+const injectLatestPreTeXtLayoutFix = (html) => {
+  const cleaned = removeExistingPreTeXtLayoutFix(html);
+
+  if (cleaned.includes('</head>')) {
+    return cleaned.replace('</head>', `${PROOFDESK_PRETEX_LAYOUT_FIX}\n</head>`);
+  }
+
+  return `${PROOFDESK_PRETEX_LAYOUT_FIX}\n${cleaned}`;
+};
+
 const buildPreviewHtml = (raw, sessionBase, { isKnowlFile }) => {
   const ilaAddOnRef = raw.includes('ila-add-on.css')
     ? ''
@@ -614,10 +706,12 @@ const buildPreviewHtml = (raw, sessionBase, { isKnowlFile }) => {
     rewritten = rewriteCssUrls(rewritten, sessionBase, PREVIEW_SHARED_ROOT_DIRS);
   }
 
-  return rewritten
+  const html = rewritten
     .replace(/<head([^>]*)>/i, `<head$1>\n${structuralCss}`)
-    .replace('</head>', `${mathBoxPreviewFixes}\n${PROOFDESK_PRETEX_LAYOUT_FIX}\n</head>`)
+    .replace('</head>', `${mathBoxPreviewFixes}\n</head>`)
     .replace('</body>', `${pretexFallback}\n</body>`);
+
+  return injectLatestPreTeXtLayoutFix(html);
 };
 
 const buildPreviewCss = (rawCss, sessionBase, { isSiteCssFile }) => {
@@ -652,5 +746,7 @@ const transformPreviewFile = (relativePath, rawContent, sessionId) => {
 export {
   PREVIEW_SHARED_ROOT_DIRS,
   PROOFDESK_PRETEX_LAYOUT_FIX,
+  PROOFDESK_PRETEX_LAYOUT_FIX_VERSION,
+  injectLatestPreTeXtLayoutFix,
   transformPreviewFile,
 };

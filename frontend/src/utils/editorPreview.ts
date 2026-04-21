@@ -89,25 +89,36 @@ mjx-container[display="true"] > svg {
 }
 </style>`;
 
+const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve';
+
 const proofdeskPreTeXtLayoutFix = `
-<style id="proofdesk-pretex-layout-fix">
+<style id="proofdesk-pretex-layout-fix" data-proofdesk-pretex-layout-version="${PROOFDESK_PRETEX_LAYOUT_FIX_VERSION}">
 .mathbook-content .pretex-display,
 .pretex-display {
   display: flow-root !important;
   clear: both !important;
   position: relative !important;
+  width: 100% !important;
   max-width: 100% !important;
+  box-sizing: border-box !important;
   min-height: var(--proofdesk-pretex-display-height, 0);
   margin: 1em 0 !important;
   padding: 0.2em 0 !important;
+  line-height: normal !important;
   text-align: center !important;
   text-indent: 0 !important;
+  float: none !important;
   overflow-x: auto !important;
-  overflow-y: visible !important;
+  overflow-y: auto !important;
+  isolation: isolate !important;
 }
 .mathbook-content li > .pretex-display,
 li > .pretex-display {
   margin: 0.85em 0 !important;
+}
+.mathbook-content .pretex-display + *,
+.pretex-display + * {
+  clear: both !important;
 }
 .pretex-display::after {
   content: "";
@@ -138,18 +149,21 @@ mjx-container {
   max-width: 100% !important;
   line-height: normal !important;
   overflow-x: auto !important;
-  overflow-y: visible !important;
+  overflow-y: auto !important;
 }
 mjx-container[display="true"] {
   display: block !important;
   clear: both !important;
   width: 100% !important;
   max-width: 100% !important;
+  box-sizing: border-box !important;
+  min-height: var(--proofdesk-mathjax-display-height, 0);
   margin: 0.85em auto !important;
   padding: 0.25em 0 !important;
+  line-height: normal !important;
   text-align: center !important;
   overflow-x: auto !important;
-  overflow-y: visible !important;
+  overflow-y: auto !important;
 }
 mjx-container[display="true"] > svg {
   display: block !important;
@@ -178,35 +192,76 @@ mjx-container[display="true"] > svg {
     return n * basis;
   }
 
+  function getViewBox(svg) {
+    const base = svg.viewBox && svg.viewBox.baseVal;
+    if (base && base.width && base.height) {
+      return { x: base.x || 0, y: base.y || 0, width: base.width, height: base.height };
+    }
+    const attr = svg.getAttribute('viewBox');
+    if (!attr) return null;
+    const parts = attr.trim().split(/[\\s,]+/).map(Number.parseFloat);
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+    return { x: parts[0], y: parts[1], width: parts[2], height: parts[3] };
+  }
+
+  function getSvgVisualHeight(svg, context) {
+    const rect = svg.getBoundingClientRect();
+    const attrHeight = toPx(svg.getAttribute('height'), context);
+    let height = Math.max(rect.height || 0, attrHeight || 0);
+
+    try {
+      const box = svg.getBBox();
+      const viewBox = getViewBox(svg);
+      if (box && viewBox && viewBox.height) {
+        const basis = rect.height || attrHeight || viewBox.height;
+        const scaleY = basis / viewBox.height;
+        height = Math.max(height, Math.ceil(box.height * scaleY));
+      }
+    } catch {
+      // Some SVGs cannot compute a bbox until fonts load; scheduled retries handle them.
+    }
+
+    return height;
+  }
+
+  function reserveSvg(display, svg) {
+    svg.style.display = 'block';
+    svg.style.position = 'static';
+    svg.style.float = 'none';
+    svg.style.maxWidth = '100%';
+    svg.style.height = 'auto';
+    svg.style.marginLeft = 'auto';
+    svg.style.marginRight = 'auto';
+    svg.style.verticalAlign = 'baseline';
+    svg.style.overflow = 'visible';
+
+    const height = getSvgVisualHeight(svg, display);
+    if (height > 1) {
+      display.style.setProperty('--proofdesk-pretex-display-height', Math.ceil(height) + 'px');
+    }
+  }
+
   function reserveDisplayMath(root) {
     const scope = root && root.querySelectorAll ? root : document;
-    Array.from(scope.querySelectorAll('.pretex-display')).forEach((display) => {
+    const displays = Array.from(scope.querySelectorAll('.pretex-display'));
+    if (scope.classList && scope.classList.contains('pretex-display')) displays.unshift(scope);
+    displays.forEach((display) => {
       display.style.display = 'flow-root';
       display.style.clear = 'both';
       display.style.position = 'relative';
+      display.style.width = '100%';
       display.style.maxWidth = '100%';
+      display.style.boxSizing = 'border-box';
+      display.style.lineHeight = 'normal';
       display.style.textAlign = 'center';
+      display.style.textIndent = '0';
+      display.style.float = 'none';
       display.style.overflowX = 'auto';
-      display.style.overflowY = 'visible';
+      display.style.overflowY = 'auto';
 
-      const svg = display.querySelector(':scope > svg.pretex');
-      if (!svg) return;
-
-      svg.style.display = 'block';
-      svg.style.position = 'static';
-      svg.style.float = 'none';
-      svg.style.maxWidth = '100%';
-      svg.style.height = 'auto';
-      svg.style.marginLeft = 'auto';
-      svg.style.marginRight = 'auto';
-      svg.style.overflow = 'visible';
-
-      const rect = svg.getBoundingClientRect();
-      const attrHeight = toPx(svg.getAttribute('height'), display);
-      const height = Math.max(rect.height || 0, attrHeight || 0);
-      if (height > 1) {
-        display.style.setProperty('--proofdesk-pretex-display-height', Math.ceil(height) + 'px');
-      }
+      Array.from(display.children).forEach((child) => {
+        if (child.matches && child.matches('svg.pretex')) reserveSvg(display, child);
+      });
     });
 
     Array.from(scope.querySelectorAll('mjx-container[display="true"]')).forEach((math) => {
@@ -214,9 +269,24 @@ mjx-container[display="true"] > svg {
       math.style.clear = 'both';
       math.style.width = '100%';
       math.style.maxWidth = '100%';
+      math.style.boxSizing = 'border-box';
+      math.style.lineHeight = 'normal';
       math.style.textAlign = 'center';
       math.style.overflowX = 'auto';
-      math.style.overflowY = 'visible';
+      math.style.overflowY = 'auto';
+
+      const svg = math.querySelector(':scope > svg');
+      if (svg) {
+        svg.style.display = 'block';
+        svg.style.maxWidth = '100%';
+        svg.style.height = 'auto';
+        svg.style.marginLeft = 'auto';
+        svg.style.marginRight = 'auto';
+        const height = getSvgVisualHeight(svg, math);
+        if (height > 1) {
+          math.style.setProperty('--proofdesk-mathjax-display-height', Math.ceil(height) + 'px');
+        }
+      }
     });
   }
 
@@ -374,6 +444,21 @@ const rewriteCssUrls = (html: string, baseHref: string, allowedRelativeDirs: str
     return `url(${quote}${baseHref}${url}${quote})`;
   });
 
+const PROOFDESK_LAYOUT_STYLE_PATTERN = /\s*<style\b[^>]*\bid=["']proofdesk-pretex-layout-fix["'][^>]*>[\s\S]*?<\/style>/gi;
+const PROOFDESK_LAYOUT_SCRIPT_PATTERN = /\s*<script\b[^>]*\bid=["']proofdesk-pretex-layout-guard["'][^>]*>[\s\S]*?<\/script>/gi;
+
+const injectLatestPreTeXtLayoutFix = (html: string) => {
+  const cleaned = html
+    .replace(PROOFDESK_LAYOUT_STYLE_PATTERN, '')
+    .replace(PROOFDESK_LAYOUT_SCRIPT_PATTERN, '');
+
+  if (cleaned.includes('</head>')) {
+    return cleaned.replace('</head>', `${proofdeskPreTeXtLayoutFix}\n</head>`);
+  }
+
+  return `${proofdeskPreTeXtLayoutFix}\n${cleaned}`;
+};
+
 const getDocumentBaseHref = (sessionBaseHref: string | undefined, previewFilePath: string) => {
   if (!sessionBaseHref) {
     return '';
@@ -462,19 +547,15 @@ ${needsMathJax ? mathJaxSnippet : ''}
   if (!html.includes('mathbox-loader-preview-fix')) {
     html = html.replace(/<head([^>]*)>/i, `<head$1>\n${mathBoxPreviewFixes}`);
   }
-  if (isPreTeXtDocument && !html.includes('proofdesk-pretex-layout-fix')) {
-    if (html.includes('</head>')) {
-      html = html.replace('</head>', `${proofdeskPreTeXtLayoutFix}\n</head>`);
-    } else {
-      html = `${proofdeskPreTeXtLayoutFix}\n${html}`;
-    }
-  }
   if (needsMathJax) {
     if (html.includes('</head>')) {
       html = html.replace('</head>', `${mathJaxSnippet}\n</head>`);
     } else {
       html = `${mathJaxSnippet}\n${html}`;
     }
+  }
+  if (isPreTeXtDocument) {
+    html = injectLatestPreTeXtLayoutFix(html);
   }
 
   return html;

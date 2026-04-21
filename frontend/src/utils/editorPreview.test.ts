@@ -55,6 +55,8 @@ describe('editorPreview', () => {
     expect(html).toContain('id="pretex-preview-fixes"');
     expect(html).toContain('id="proofdesk-pretex-layout-fix"');
     expect(html).toContain('id="proofdesk-pretex-layout-guard"');
+    expect(html).toContain('data-proofdesk-pretex-layout-version="2026-04-21-display-math-reserve"');
+    expect(html).toContain('getSvgVisualHeight');
     expect(html).toContain('.mathbook-content .knowl-output .knowl-footer');
     expect(html).toContain('src="http://127.0.0.1:4002/assets/mathjax/tex-svg.js"');
   });
@@ -65,6 +67,19 @@ describe('editorPreview', () => {
       'http://127.0.0.1:4002/preview/1111111111111111/'
     );
 
+    expect(html.indexOf('id="proofdesk-pretex-layout-fix"')).toBeGreaterThan(html.indexOf('id="pretex-style"'));
+  });
+
+  it('replaces stale PreTeXt layout guards before reinserting the latest one', () => {
+    const html = prepareHtmlForSrcDoc(
+      '<!DOCTYPE html><html><head><style id="proofdesk-pretex-layout-fix">.pretex-display{display:inline}</style><script id="proofdesk-pretex-layout-guard">window.oldGuard=true</script><style id="pretex-style">svg.pretex{display:inline-block;}</style></head><body class="mathbook-book"><main class="mathbook-content"><div class="pretex-display"><svg class="pretex" height="4em"></svg></div></main></body></html>',
+      'http://127.0.0.1:4002/preview/1111111111111111/'
+    );
+
+    expect(html.match(/id="proofdesk-pretex-layout-fix"/g)).toHaveLength(1);
+    expect(html.match(/id="proofdesk-pretex-layout-guard"/g)).toHaveLength(1);
+    expect(html).not.toContain('window.oldGuard');
+    expect(html).not.toContain('.pretex-display{display:inline}');
     expect(html.indexOf('id="proofdesk-pretex-layout-fix"')).toBeGreaterThan(html.indexOf('id="pretex-style"'));
   });
 

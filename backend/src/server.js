@@ -10,7 +10,7 @@ import { fileURLToPath } from 'url';
 import buildExecutor from './services/buildExecutor.js';
 import { attachCollaborationServer } from './services/collaborationServer.js';
 import { updatePreviewBundleFile } from './services/previewBundleService.js';
-import { PROOFDESK_PRETEX_LAYOUT_FIX } from './services/previewTransformService.js';
+import { injectLatestPreTeXtLayoutFix } from './services/previewTransformService.js';
 import { attachTerminalServer } from './services/terminalServer.js';
 import authSessionStore from './services/authSessionStore.js';
 import { getAuthenticatedGitHubUser } from './services/githubIdentity.js';
@@ -606,12 +606,7 @@ app.get('/shared/:token/*', async (req, res) => {
 
     if (['.html', '.htm'].includes(ext)) {
       let html = content.toString('utf-8');
-      if (!html.includes('proofdesk-pretex-layout-fix')) {
-        html = html.includes('</head>')
-          ? html.replace('</head>', `${PROOFDESK_PRETEX_LAYOUT_FIX}\n</head>`)
-          : PROOFDESK_PRETEX_LAYOUT_FIX + html;
-      }
-      return res.send(html);
+      return res.send(injectLatestPreTeXtLayoutFix(html));
     }
     res.send(content);
   } catch {
