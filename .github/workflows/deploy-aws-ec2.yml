@@ -138,8 +138,9 @@ jobs:
               exit 0
             fi
 
-            echo 'Installing certbot and getting certificate via webroot…'
-            sudo apt-get install -y certbot
+            echo 'Installing certbot via snap and getting certificate via webroot…'
+            sudo snap install --classic certbot 2>/dev/null || true
+            sudo ln -sf /snap/bin/certbot /usr/local/bin/certbot 2>/dev/null || true
             sudo mkdir -p /var/www/certbot
 
             sudo certbot certonly --webroot \
@@ -147,7 +148,8 @@ jobs:
               -d \${DOMAIN} \
               --non-interactive --agree-tos -m \${EMAIL} --no-eff-email
 
-            # Reload nginx so it picks up the real cert (replaces self-signed placeholder)
+            # Wait for nginx to be fully running, then reload with real cert
+            sleep 5
             docker compose -f ${APP_DIR}/docker-compose.prod.yml exec nginx nginx -s reload
             echo 'Certificate issued and nginx reloaded.'
 

@@ -17,6 +17,7 @@ import {
 import { applyHandshakeTheme } from '../themes/handshakeTheme';
 import '../themes/handshakeeditor.css';
 import SaveReviewDialog from './SaveReviewDialog';
+import OnboardingTour from './OnboardingTour';
 import EditorTopBar, { type RepositorySearchResult } from './editor/EditorTopBar';
 import PreviewPane from './editor/PreviewPane';
 import EditorStatusBar from './editor/EditorStatusBar';
@@ -216,6 +217,9 @@ type EditorTestWindow = Window & {
   };
 };
 
+const isCompactEditorViewport = () =>
+  typeof window !== 'undefined' && window.innerWidth < 768;
+
 const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -284,7 +288,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const activeTabIdRef = useRef<string | null>(activeTabId);
   
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
+  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
+  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
+  const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
   const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'debug' | 'extensions'>('explorer');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
@@ -675,6 +681,23 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     void fetchUserData();
     // Load the signed-in user once when the editor shell mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const handleViewportResize = () => {
+      const nextIsCompact = isCompactEditorViewport();
+      setIsCompactViewport(nextIsCompact);
+
+      if (nextIsCompact && !wasCompactViewportRef.current) {
+        setSidebarOpen(false);
+      }
+
+      wasCompactViewportRef.current = nextIsCompact;
+    };
+
+    handleViewportResize();
+    window.addEventListener('resize', handleViewportResize);
+    return () => window.removeEventListener('resize', handleViewportResize);
   }, []);
 
   const fetchUserRepos = async () => {
@@ -1859,8 +1882,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     );
   }
 
+  const sidebarPanelWidth = isCompactViewport
+    ? 'min(300px, calc(100vw - 3.5rem))'
+    : `${sidebarWidth}px`;
+
   return (
     <div className="h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col overflow-hidden selection:bg-indigo-100 selection:text-indigo-900">
+      <OnboardingTour />
       <EditorTopBar
         repo={repo}
         userRepos={userRepos}
@@ -1902,7 +1930,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         onDismiss={() => setWorkspaceNotice(null)}
       />
 
-      <main className="flex-1 flex overflow-hidden">
+      <main className="relative flex-1 flex overflow-hidden">
         {/* Activity Rail */}
         <nav className="w-14 bg-zinc-100 dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 flex flex-col items-center py-4 gap-4 flex-shrink-0 z-30">
           <button
@@ -1977,8 +2005,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         {/* Sidebar Container */}
         {sidebarOpen && (
           <aside 
-            className="bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 flex flex-col flex-shrink-0 animate-in slide-in-from-left duration-300 z-20"
-            style={{ width: `${sidebarWidth}px` }}
+            className={`bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 flex flex-col flex-shrink-0 animate-in slide-in-from-left duration-300 z-20 ${
+              isCompactViewport ? 'absolute bottom-0 left-14 top-0 shadow-2xl' : ''
+            }`}
+            style={{ width: sidebarPanelWidth }}
           >
             <div className="flex-1 overflow-hidden">
               {activityBarTab === 'explorer' && (
@@ -2047,7 +2077,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
             {/* Resize Handle */}
             <div
-              className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-indigo-500/30 transition-colors z-30"
+              className={`${isCompactViewport ? 'hidden' : 'absolute'} top-0 right-0 w-1 h-full cursor-col-resize hover:bg-indigo-500/30 transition-colors z-30`}
               onMouseDown={handleSidebarResizeStart}
             />
           </aside>
@@ -2064,7 +2094,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             closeAllTabs={closeAllTabs}
           />
 
-          <div className="flex-1 flex overflow-hidden">
+          <div className="editor-workspace-split flex-1 flex overflow-hidden">
             <PreviewPane
               compilationMode={compilationMode}
               activeTab={activeTab ? { language: activeTab.language, content: activeTab.content } : null}
