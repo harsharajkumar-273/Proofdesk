@@ -5,6 +5,7 @@ import buildExecutor from '../services/buildExecutor.js';
 import {
   ensurePreviewBundle,
 } from '../services/previewBundleService.js';
+import { PROOFDESK_PRETEX_LAYOUT_FIX } from '../services/previewTransformService.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
 
 const getPreviewMimeType = (ext) => ({
@@ -32,18 +33,6 @@ const getPreviewCacheHeader = (ext) =>
   ['.html', '.htm', '.css', '.js'].includes(ext)
     ? 'no-store'
     : 'public, max-age=60';
-
-// Injected at serve-time into every HTML response so the fix applies even to
-// bundles that were cached before this CSS was written.
-const EQUATION_OVERLAP_FIX = `<style id="proofdesk-eq-fix">
-.pretex-display{display:flow-root!important;clear:both;position:relative;max-width:100%;margin:1em 0!important;padding:0.15em 0;text-align:center;overflow-x:auto;}
-.pretex-display>svg.pretex{display:block!important;vertical-align:baseline!important;max-width:100%;height:auto;margin:0 auto;}
-.pretex-bind{display:inline-block;vertical-align:middle;line-height:0;}
-.pretex-inline{display:inline-block;vertical-align:middle;}
-mjx-container{line-height:normal;overflow-x:auto;max-width:100%;}
-mjx-container[display="true"]{display:block!important;clear:both;text-align:center;margin:0.8em auto!important;overflow-x:auto;padding:0.25em 0;}
-mjx-container[display="true"]>svg{display:block;margin:0 auto;max-width:100%;}
-</style>`;
 
 const LIVE_PREVIEW_ASSET_ATTR_PATTERN = /\b(src|href)=(["'])([^"']+)\2/gi;
 const LIVE_PREVIEW_ASSET_PATTERN = /\.(?:css|js)(?:$|[?#])/i;
@@ -141,12 +130,12 @@ export const createPreviewRouter = () => {
     let responseContent;
     if (ext === '.html' || ext === '.htm') {
       let html = versionLivePreviewAssets(content.toString('utf-8'), previewVersion);
-      // Inject equation overlap fix at serve-time so stale cached bundles are
-      // also fixed without needing a full bundle rebuild.
-      if (!html.includes('proofdesk-eq-fix')) {
+      // Apply the latest layout guard at serve-time so stale cached bundles are
+      // also fixed without needing a full preview rebuild.
+      if (!html.includes('proofdesk-pretex-layout-fix')) {
         html = html.includes('</head>')
-          ? html.replace('</head>', `${EQUATION_OVERLAP_FIX}\n</head>`)
-          : EQUATION_OVERLAP_FIX + html;
+          ? html.replace('</head>', `${PROOFDESK_PRETEX_LAYOUT_FIX}\n</head>`)
+          : PROOFDESK_PRETEX_LAYOUT_FIX + html;
       }
       responseContent = html;
     } else {

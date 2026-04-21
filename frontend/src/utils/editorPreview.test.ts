@@ -53,8 +53,19 @@ describe('editorPreview', () => {
     expect(html).toContain('href="http://127.0.0.1:4002/preview/1111111111111111/static/site.css"');
     expect(html).toContain('href="http://127.0.0.1:4002/preview/1111111111111111/css/ila-add-on.css"');
     expect(html).toContain('id="pretex-preview-fixes"');
+    expect(html).toContain('id="proofdesk-pretex-layout-fix"');
+    expect(html).toContain('id="proofdesk-pretex-layout-guard"');
     expect(html).toContain('.mathbook-content .knowl-output .knowl-footer');
     expect(html).toContain('src="http://127.0.0.1:4002/assets/mathjax/tex-svg.js"');
+  });
+
+  it('places the final PreTeXt layout fix after generated textbook styles', () => {
+    const html = prepareHtmlForSrcDoc(
+      '<!DOCTYPE html><html><head><style id="pretex-style">svg.pretex{display:inline-block;}</style></head><body class="mathbook-book"><main class="mathbook-content"><div class="pretex-display"><svg class="pretex" height="4em"></svg></div></main></body></html>',
+      'http://127.0.0.1:4002/preview/1111111111111111/'
+    );
+
+    expect(html.indexOf('id="proofdesk-pretex-layout-fix"')).toBeGreaterThan(html.indexOf('id="pretex-style"'));
   });
 
   it('rewrites nested knowl assets back to the preview root', () => {

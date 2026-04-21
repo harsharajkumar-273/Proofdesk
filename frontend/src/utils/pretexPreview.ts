@@ -575,6 +575,129 @@ a { color: #2c7be5; }
 a:hover { text-decoration: underline; }
 `;
 
+const DISPLAY_MATH_LAYOUT_GUARD = `
+<style id="proofdesk-pretex-layout-fix">
+.ptx-equation,
+.pretex-display {
+  display: flow-root !important;
+  clear: both !important;
+  position: relative !important;
+  max-width: 100% !important;
+  min-height: var(--proofdesk-pretex-display-height, 0);
+  margin: 1em 0 !important;
+  padding: 0.2em 0 !important;
+  text-align: center !important;
+  text-indent: 0 !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
+.pretex-display > svg.pretex {
+  display: block !important;
+  position: static !important;
+  float: none !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0 auto !important;
+  vertical-align: baseline !important;
+  overflow: visible !important;
+}
+mjx-container {
+  max-width: 100% !important;
+  line-height: normal !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
+mjx-container[display="true"] {
+  display: block !important;
+  clear: both !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0.85em auto !important;
+  padding: 0.25em 0 !important;
+  text-align: center !important;
+  overflow-x: auto !important;
+  overflow-y: visible !important;
+}
+mjx-container[display="true"] > svg {
+  display: block !important;
+  max-width: 100% !important;
+  height: auto !important;
+  margin: 0 auto !important;
+}
+</style>
+<script id="proofdesk-pretex-layout-guard">
+(function () {
+  'use strict';
+
+  function reserveDisplayMath(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+
+    Array.from(scope.querySelectorAll('.pretex-display')).forEach((display) => {
+      display.style.display = 'flow-root';
+      display.style.clear = 'both';
+      display.style.position = 'relative';
+      display.style.maxWidth = '100%';
+      display.style.textAlign = 'center';
+      display.style.overflowX = 'auto';
+      display.style.overflowY = 'visible';
+
+      const svg = display.querySelector(':scope > svg.pretex');
+      if (!svg) return;
+
+      svg.style.display = 'block';
+      svg.style.position = 'static';
+      svg.style.float = 'none';
+      svg.style.maxWidth = '100%';
+      svg.style.height = 'auto';
+      svg.style.marginLeft = 'auto';
+      svg.style.marginRight = 'auto';
+
+      const rect = svg.getBoundingClientRect();
+      if (rect.height > 1) {
+        display.style.setProperty('--proofdesk-pretex-display-height', Math.ceil(rect.height) + 'px');
+      }
+    });
+
+    Array.from(scope.querySelectorAll('mjx-container[display="true"]')).forEach((math) => {
+      math.style.display = 'block';
+      math.style.clear = 'both';
+      math.style.width = '100%';
+      math.style.maxWidth = '100%';
+      math.style.textAlign = 'center';
+      math.style.overflowX = 'auto';
+      math.style.overflowY = 'visible';
+    });
+  }
+
+  function schedule(root) {
+    reserveDisplayMath(root);
+    window.requestAnimationFrame(() => reserveDisplayMath(root));
+    window.setTimeout(() => reserveDisplayMath(root), 100);
+    window.setTimeout(() => reserveDisplayMath(root), 500);
+    window.setTimeout(() => reserveDisplayMath(root), 1200);
+  }
+
+  function init() {
+    schedule(document);
+    const observer = new MutationObserver((mutations) => {
+      mutations.forEach((mutation) => {
+        mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === 1) schedule(node);
+        });
+      });
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init, { once: true });
+  } else {
+    init();
+  }
+})();
+</script>
+`;
+
 const getMathJaxSnippet = () => `
 <script>
 window.MathJax = {
@@ -653,6 +776,7 @@ export function pretexToHtml(xml: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live Preview</title>
   <style>${CSS}</style>
+  ${DISPLAY_MATH_LAYOUT_GUARD}
   ${getMathJaxSnippet()}
 </head>
 <body>${body}</body>

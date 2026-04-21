@@ -7,6 +7,8 @@ describe('pretexPreview', () => {
 
     expect(html).toContain('http://localhost:4000/assets/mathjax/tex-svg.js');
     expect(html).toContain('\\(x+y\\)');
+    expect(html).toContain('id="proofdesk-pretex-layout-fix"');
+    expect(html).toContain('id="proofdesk-pretex-layout-guard"');
   });
 
   it('converts PreTeXt syseq math with nested subscripts into valid aligned MathJax', () => {
