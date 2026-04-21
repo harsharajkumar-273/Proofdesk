@@ -678,6 +678,25 @@ class BuildExecutor {
         // Upload pretex cache to GitHub Releases in the background (non-blocking)
         githubCacheStore.save(session.owner, session.repo, commitHash).catch(() => {});
 
+        // Evict the previous cache entry's directories before writing the new one.
+        // Old build output is no longer reachable once the new build is cached, so
+        // keeping those directories only wastes disk space (each build is ~200-400 MB).
+        // Guard: only delete if no active session is still pointing at those paths.
+        const oldEntry = this.buildCache.get(repoKey);
+        if (oldEntry && oldEntry.sessionId !== sessionId) {
+          const oldBase = path.dirname(oldEntry.repoPath);
+          const isStillActive = [...this.sessions.values()].some(s =>
+            path.dirname(s.repoPath) === path.resolve(oldBase)
+          );
+          if (!isStillActive) {
+            fs.rm(oldBase, { recursive: true, force: true }).catch(err =>
+              console.warn(`[BuildCache] Could not evict old cache dir ${oldBase}:`, err.message)
+            );
+            artifactCache.invalidateSession(oldEntry.sessionId);
+            console.log(`[BuildCache] Evicted stale build for ${repoKey}@${oldEntry.commitHash?.slice(0, 7)}`);
+          }
+        }
+
         this.buildCache.set(repoKey, {
           commitHash,
           cacheVersion: BUILD_CACHE_VERSION,
