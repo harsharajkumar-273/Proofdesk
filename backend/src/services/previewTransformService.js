@@ -93,9 +93,7 @@ li>.pretex-display{
   position:static!important;
   float:none!important;
   max-width:100%!important;
-  height:auto!important;
   margin:0 auto!important;
-  vertical-align:baseline!important;
   overflow:visible!important;
 }
 .pretex-bind{
@@ -153,7 +151,9 @@ mjx-container[display="true"]>svg{
 
   function reserveDisplayMath(root){
     var scope=root&&root.querySelectorAll?root:document;
-    Array.from(scope.querySelectorAll('.pretex-display')).forEach(function(display){
+    var displays=Array.from(scope.querySelectorAll('.pretex-display'));
+    if(scope.classList&&scope.classList.contains('pretex-display')) displays.unshift(scope);
+    displays.forEach(function(display){
       display.style.display='flow-root';
       display.style.clear='both';
       display.style.position='relative';
@@ -169,7 +169,6 @@ mjx-container[display="true"]>svg{
       svg.style.position='static';
       svg.style.float='none';
       svg.style.maxWidth='100%';
-      svg.style.height='auto';
       svg.style.marginLeft='auto';
       svg.style.marginRight='auto';
       svg.style.overflow='visible';
