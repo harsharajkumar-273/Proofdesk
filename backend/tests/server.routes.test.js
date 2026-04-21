@@ -475,7 +475,7 @@ describe('active backend routes', () => {
     assert.match(knowlResponse.text, /src="\/preview\/aaaaaaaaaaaaaaaa\/images\/important\.svg"/);
     assert.match(knowlResponse.text, /href="\/preview\/aaaaaaaaaaaaaaaa\/figure-images\/sample\.png"/);
     assert.match(knowlResponse.text, /href="\/preview\/aaaaaaaaaaaaaaaa\/dimension\.html#dimension-defn-basis"/);
-    assert.ok(knowlResponse.text.includes("out.join(BSS + '\\n')"));
+    assert.ok(knowlResponse.text.includes("replaceDelimitedCommands(tex, ['syseq','spalignsys'], convertSpAlign)"));
     assert.match(knowlResponse.text, /inlineMath:\[\[/);
 
     const cssResponse = await request(app).get(`/preview/${previewSessionId}/css/ila.css`);

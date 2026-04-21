@@ -41,6 +41,52 @@ const preTeXtPreviewFixes = `
 .mathbook-content .knowl-output .incontext {
   margin-bottom: 0 !important;
 }
+
+.mathbook-content .pretex-display,
+.pretex-display {
+  display: flow-root !important;
+  clear: both;
+  position: relative;
+  max-width: 100%;
+  margin: 1em 0 !important;
+  padding: 0.15em 0;
+  text-align: center;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.mathbook-content .pretex-display > svg.pretex,
+.pretex-display > svg.pretex {
+  display: block !important;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.mathbook-content li > .pretex-display {
+  margin: 0.75em 0 !important;
+}
+
+mjx-container {
+  line-height: normal;
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+}
+mjx-container[display="true"] {
+  display: block !important;
+  clear: both;
+  text-align: center;
+  margin: 0.75em 0 !important;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 0.25em 0;
+}
+mjx-container[display="true"] > svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}
 </style>`;
 
 const mathBoxPreviewFixes = `

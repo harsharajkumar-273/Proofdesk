@@ -43,7 +43,132 @@ function titleOf(el: Element, counters: Counters): string {
 
 /** Grab raw math content — preserve LaTeX exactly for MathJax */
 function math(el: Element): string {
-  return el.textContent ?? '';
+  return preprocessLatexForPreview(el.textContent ?? '');
+}
+
+function splitTopLevel(text: string, delimiter: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth = Math.max(0, depth - 1);
+    } else if (ch === delimiter && depth === 0) {
+      parts.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+
+  parts.push(text.slice(start));
+  return parts;
+}
+
+function findMatchingBrace(text: string, openIndex: number): number {
+  let depth = 0;
+
+  for (let i = openIndex; i < text.length; i++) {
+    const ch = text[i];
+
+    if (ch === '\\') {
+      i++;
+      continue;
+    }
+
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+function formatSyseqRow(row: string): string {
+  let next = row
+    .replace(/\\amp/g, '&')
+    .replace(/\\\./g, '{}')
+    .replace(/\\\+/g, '+')
+    .replace(/\\rlap\{([^}]*)\}/g, '$1')
+    .replace(/\\rlap\./g, '.')
+    .replace(/\\[rb]\b/g, '')
+    .trim();
+
+  if (!next) return '';
+
+  if (!next.includes('&')) {
+    next = next.replace(/\s*=\s*/, ' &= ');
+  }
+
+  return next;
+}
+
+function convertSyseq(inner: string): string {
+  const rows = splitTopLevel(inner, ';')
+    .map(formatSyseqRow)
+    .filter(Boolean);
+
+  if (rows.length === 0) return '';
+
+  return `\\begin{aligned}${rows.join('\\\\\n')}\\end{aligned}`;
+}
+
+function replaceDelimitedCommands(
+  text: string,
+  commandNames: string[],
+  replacer: (inner: string) => string
+): string {
+  let result = '';
+  let index = 0;
+
+  while (index < text.length) {
+    const command = commandNames.find((name) => text.startsWith(`\\${name}{`, index));
+
+    if (!command) {
+      result += text[index];
+      index++;
+      continue;
+    }
+
+    const openIndex = index + command.length + 1;
+    const closeIndex = findMatchingBrace(text, openIndex);
+
+    if (closeIndex < 0) {
+      result += text.slice(index);
+      break;
+    }
+
+    result += replacer(text.slice(openIndex + 1, closeIndex));
+    index = closeIndex + 1;
+  }
+
+  return result;
+}
+
+function preprocessLatexForPreview(tex: string): string {
+  let next = tex
+    .replace(/\$([^$]*)\$/g, '$1')
+    .replace(/\\expandafter\\(syseq|spalignsys)\\expandafter\s*\{/g, '\\$1{')
+    .replace(/\\spalignsysdelims\s*(?:\\\{|\(|\[|\.)?(?:\\\}|\)|\]|\.)?/g, '')
+    .replace(/\\spalignsystabspace\s*=\s*[^\\\s]+/g, '')
+    .replace(/\\hfil[lr]?\b/g, '')
+    .replace(/\}%\s*$/gm, '}');
+
+  next = replaceDelimitedCommands(next, ['syseq', 'spalignsys'], convertSyseq);
+  next = next.replace(/\\\./g, '{}').replace(/\\\+/g, '+');
+
+  return next;
 }
 
 function convertNode(node: Node, counters: Counters): string {
@@ -374,7 +499,29 @@ p  { margin: .7rem 0; }
 .ptx-qed { float: right; }
 
 /* Equations */
-.ptx-equation { text-align: center; margin: 1rem 0; overflow-x: auto; }
+.ptx-equation { display: flow-root; clear: both; text-align: center; margin: 1rem 0; max-width: 100%; overflow-x: auto; overflow-y: visible; }
+
+/* MathJax SVG — prevent display math from overlapping surrounding text */
+mjx-container {
+  line-height: normal;
+  overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+}
+mjx-container[display="true"] {
+  display: block !important;
+  clear: both;
+  text-align: center;
+  margin: 0.75em 0 !important;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding: 0.25em 0;
+}
+mjx-container[display="true"] > svg {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+}
 
 /* Figures */
 figure.ptx-figure { margin: 1.5rem 0; text-align: center; }

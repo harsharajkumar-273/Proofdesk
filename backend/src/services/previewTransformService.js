@@ -68,40 +68,98 @@ const pretexFallback = String.raw`
   'use strict';
   var mjaxReady=false, observing=false;
 
-  function preprocessLatex(tex){
-    var BS  = String.fromCharCode(92);
-    var BSS = BS + BS;
-
-    // Strip lone $ delimiters that confuse MathJax inside display mode
-    tex = tex.replace(/\$([^$]*)\$/g, '$1');
-    // Remove TeX layout commands MathJax doesn't know
-    tex = tex.replace(new RegExp(BSS + 'hfil[lr]?\\b', 'g'), '');
-    tex = tex.replace(/\}%\s*$/gm, '}');
-
-    tex = tex.split(BS + 'amp').join('&');
-    tex = tex.replace(new RegExp(BSS + 'spalign(?:sys)?delims[^' + BSS + '{]*', 'g'), '');
-
-    function convertSpAlign(inner) {
-      var rows = inner.split(';');
-      var out  = rows.map(function(r) {
-        return r.trim()
-          .split(BS + '.').join('{}')
-          .split(BS + '+').join('+');
-      }).filter(function(r) { return r.length > 0; });
-      return BS + 'begin{aligned}' + out.join(BSS + '\n') + BS + 'end{aligned}';
+  function splitTopLevel(text, delimiter){
+    var parts=[], depth=0, start=0;
+    for(var i=0;i<text.length;i++){
+      var ch=text[i];
+      if(ch==='\\'){ i++; continue; }
+      if(ch==='{') depth++;
+      else if(ch==='}') depth=Math.max(0, depth-1);
+      else if(ch===delimiter && depth===0){
+        parts.push(text.slice(start,i));
+        start=i+1;
+      }
     }
+    parts.push(text.slice(start));
+    return parts;
+  }
 
-    var expandPat = new RegExp(
-      BSS + 'expandafter' + BSS + 'syseq' + BSS + 'expandafter' +
-      BS + '{([\\s\\S]*?)' + BS + '}', 'g'
-    );
-    tex = tex.replace(expandPat, function(m, inner) { return convertSpAlign(inner); });
+  function findMatchingBrace(text, openIndex){
+    var depth=0;
+    for(var i=openIndex;i<text.length;i++){
+      var ch=text[i];
+      if(ch==='\\'){ i++; continue; }
+      if(ch==='{') depth++;
+      else if(ch==='}'){
+        depth--;
+        if(depth===0) return i;
+      }
+    }
+    return -1;
+  }
 
-    var syseqPat = new RegExp(BSS + '(?:syseq|spalignsys)' + BS + '{([\\s\\S]*?)' + BS + '}', 'g');
-    tex = tex.replace(syseqPat, function(m, inner) { return convertSpAlign(inner); });
+  function formatSyseqRow(row){
+    var next=row
+      .replace(/\\amp/g, '&')
+      .replace(/\\\./g, '{}')
+      .replace(/\\\+/g, '+')
+      .replace(/\\rlap\{([^}]*)\}/g, '$1')
+      .replace(/\\rlap\./g, '.')
+      .replace(/\\[rb]\b/g, '')
+      .trim();
 
-    tex = tex.split(BS + '.').join('{}');
-    tex = tex.split(BS + '+').join('+');
+    if(!next) return '';
+    if(next.indexOf('&')===-1) next=next.replace(/\s*=\s*/, ' &= ');
+    return next;
+  }
+
+  function convertSpAlign(inner){
+    var rows=splitTopLevel(inner, ';').map(formatSyseqRow).filter(Boolean);
+    if(rows.length===0) return '';
+    return '\\begin{aligned}' + rows.join('\\\\\n') + '\\end{aligned}';
+  }
+
+  function replaceDelimitedCommands(tex, commandNames, replacer){
+    var result='', index=0;
+    while(index<tex.length){
+      var command=null;
+      for(var i=0;i<commandNames.length;i++){
+        if(tex.indexOf('\\' + commandNames[i] + '{', index)===index){
+          command=commandNames[i];
+          break;
+        }
+      }
+
+      if(!command){
+        result+=tex[index];
+        index++;
+        continue;
+      }
+
+      var openIndex=index+command.length+1;
+      var closeIndex=findMatchingBrace(tex, openIndex);
+      if(closeIndex<0){
+        result+=tex.slice(index);
+        break;
+      }
+
+      result+=replacer(tex.slice(openIndex+1, closeIndex));
+      index=closeIndex+1;
+    }
+    return result;
+  }
+
+  function preprocessLatex(tex){
+    tex = tex
+      .replace(/\$([^$]*)\$/g, '$1')
+      .replace(/\\expandafter\\(syseq|spalignsys)\\expandafter\s*\{/g, '\\$1{')
+      .replace(/\\spalignsysdelims\s*(?:\\\{|\(|\[|\.)?(?:\\\}|\)|\]|\.)?/g, '')
+      .replace(/\\spalignsystabspace\s*=\s*[^\\\s]+/g, '')
+      .replace(/\\hfil[lr]?\b/g, '')
+      .replace(/\}%\s*$/gm, '}');
+
+    tex = replaceDelimitedCommands(tex, ['syseq','spalignsys'], convertSpAlign);
+    tex = tex.replace(/\\\./g, '{}').replace(/\\\+/g, '+');
 
     return tex;
   }
@@ -161,13 +219,15 @@ const pretexFallback = String.raw`
       var css=document.createElement('style');
       css.id='pretex-mjax-css';
       css.textContent=[
-        'mjx-container[display="true"]{display:block!important;margin:0.8em auto!important;text-align:center;overflow-x:auto;overflow-y:visible;}',
+        'mjx-container{max-width:100%;overflow-x:auto;overflow-y:visible;}',
+        'mjx-container[display="true"]{display:block!important;clear:both;margin:0.8em auto!important;text-align:center;overflow-x:auto;overflow-y:visible;}',
         'mjx-container[display="true"] svg{vertical-align:baseline!important;}',
         'mjx-container[display="false"]{display:inline-block!important;margin:0 0.1em!important;vertical-align:middle;}',
         'mjx-container svg{max-width:100%;height:auto;}',
-        '.pretex-display{display:block;margin:1em 0;text-align:center;overflow-x:auto;clear:both;}',
+        '.pretex-display{display:flow-root!important;margin:1em 0!important;padding:0.15em 0;text-align:center;max-width:100%;overflow-x:auto;overflow-y:visible;clear:both;}',
+        '.pretex-display>svg.pretex{display:block!important;max-width:100%;height:auto;margin:0 auto;}',
         'p mjx-container[display="true"]{display:block!important;margin:0.8em auto!important;}',
-        'figure,div.mathbox,.mathbox{overflow:visible!important;}'
+        'figure,div.mathbox,.mathbox{max-width:100%;}'
       ].join('\n');
       document.head.appendChild(css);
     }
@@ -365,13 +425,17 @@ const buildPreviewHtml = (raw, sessionBase, { isKnowlFile }) => {
 
   const mathLayoutCss = `${ilaAddOnRef}
 <style id="pretex-layout-fix">
-mjx-container[display="true"]{display:block!important;margin:0.8em auto!important;text-align:center;overflow-x:auto;overflow-y:visible;}
+mjx-container{max-width:100%;overflow-x:auto;overflow-y:visible;}
+mjx-container[display="true"]{display:block!important;clear:both;margin:0.8em auto!important;text-align:center;overflow-x:auto;overflow-y:visible;}
 mjx-container[display="true"] svg{vertical-align:baseline!important;}
 mjx-container[display="false"]{display:inline-block!important;margin:0 0.1em!important;vertical-align:middle;}
 mjx-container svg{max-width:100%;height:auto;}
-.pretex-display{display:block;margin:1em 0;text-align:center;overflow-x:auto;clear:both;}
+.pretex-display{display:flow-root!important;clear:both;position:relative;max-width:100%;margin:1em 0!important;padding:0.15em 0;text-align:center;overflow-x:auto;overflow-y:visible;}
+.pretex-display > svg.pretex{display:block!important;max-width:100%;height:auto;margin:0 auto;}
+.mathbook-content li > .pretex-display{margin:0.75em 0!important;}
 p>mjx-container{vertical-align:middle;}
-figure,div.mathbox,.mathbox{overflow:visible!important;}
+figure,div.mathbox,.mathbox{max-width:100%;}
+.mathbook-content .mathbox iframe{display:block;width:100%;height:100%;}
 
 .mathbook-content .preface .definition-like > .heading .title,
 .mathbook-content .preface .theorem-like > .heading .title,
