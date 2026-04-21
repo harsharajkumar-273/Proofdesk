@@ -1,0 +1,380 @@
+import React from 'react';
+import { Link } from 'react-router-dom';
+import {
+  ArrowRight,
+  BookOpenText,
+  Check,
+  Code2,
+  Eye,
+  Github,
+  GitBranch,
+  LayoutTemplate,
+  Search,
+  Share2,
+  Users,
+  Zap,
+} from 'lucide-react';
+import { isLocalTestModeEnabled } from '../utils/localTestMode';
+import { PRODUCT_NAME } from '../utils/brand';
+
+interface LandingPageProps {
+  hasWorkspaceAccess: boolean;
+  entryNotice?: {
+    tone: 'error' | 'info';
+    title: string;
+    detail: string;
+  } | null;
+}
+
+const FEATURES = [
+  {
+    icon: Eye,
+    title: 'Live Preview',
+    desc: 'Edit source XML and see the fully-rendered textbook update in real time — equations, figures, and all.',
+  },
+  {
+    icon: Users,
+    title: 'Real-Time Collaboration',
+    desc: 'Co-authors share cursors and edits in the same session. No conflicting file versions, no email threads.',
+  },
+  {
+    icon: Search,
+    title: 'Full-Text Search',
+    desc: 'Search every file in the repository instantly. Click a result and jump straight to that line in the editor.',
+  },
+  {
+    icon: Share2,
+    title: 'Shareable Previews',
+    desc: 'Generate a public link to the compiled textbook in one click. No GitHub account needed to view it.',
+  },
+  {
+    icon: GitBranch,
+    title: 'Git Built-in',
+    desc: 'Commit, push, pull, and manage branches without leaving the browser. Full git workflow, no terminal required.',
+  },
+  {
+    icon: Zap,
+    title: 'Export Anywhere',
+    desc: 'Download the compiled output as a self-contained ZIP and host it anywhere — no server dependency.',
+  },
+];
+
+const STEPS = [
+  {
+    n: '01',
+    title: 'Sign in with GitHub',
+    desc: 'Connect your GitHub account and select the PreTeXt course repository you want to work on.',
+  },
+  {
+    n: '02',
+    title: 'Open the workspace',
+    desc: 'Proofdesk clones the repository, builds the textbook, and opens a split editor + live preview in under a minute.',
+  },
+  {
+    n: '03',
+    title: 'Edit, review, publish',
+    desc: 'Write source in the editor, watch the preview update, and push your changes back to GitHub when ready.',
+  },
+];
+
+const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNotice = null }) => {
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
+  const showLocalTestAccess = isLocalTestModeEnabled();
+
+  return (
+    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50">
+
+      {/* ── Nav ── */}
+      <nav className="fixed top-0 inset-x-0 z-50 border-b border-zinc-100 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+              <BookOpenText className="w-4.5 h-4.5 text-white" />
+            </div>
+            <span className="font-bold text-lg tracking-tight">{PRODUCT_NAME}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {hasWorkspaceAccess ? (
+              <Link
+                to="/workspace"
+                className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                Open Workspace <ArrowRight className="w-3.5 h-3.5" />
+              </Link>
+            ) : (
+              <a
+                href={`${backendUrl}/auth/github`}
+                className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                <Github className="w-3.5 h-3.5" /> Sign in
+              </a>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      {/* ── Hero ── */}
+      <section className="pt-32 pb-20 px-6">
+        <div className="max-w-6xl mx-auto">
+
+          {entryNotice && (
+            <div className={`mb-8 max-w-lg mx-auto p-4 rounded-xl border text-sm flex gap-3 ${
+              entryNotice.tone === 'error'
+                ? 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-950/30 dark:border-rose-800 dark:text-rose-300'
+                : 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-300'
+            }`}>
+              <div>
+                <p className="font-semibold">{entryNotice.title}</p>
+                <p className="opacity-80 mt-0.5">{entryNotice.detail}</p>
+              </div>
+            </div>
+          )}
+
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <div className="inline-flex items-center gap-2 px-3 py-1 mb-6 rounded-full bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900 text-indigo-700 dark:text-indigo-300 text-xs font-bold uppercase tracking-widest">
+              Open-Source · PreTeXt · Math Publishing
+            </div>
+            <h1 className="text-5xl lg:text-6xl font-extrabold tracking-tight leading-[1.05] mb-6">
+              The editor your<br />
+              <span className="text-indigo-600 dark:text-indigo-400">math textbook</span> deserves.
+            </h1>
+            <p className="text-xl text-zinc-500 dark:text-zinc-400 leading-relaxed max-w-2xl mx-auto mb-10">
+              Proofdesk is a browser-based workspace for professors and course authors.
+              Write PreTeXt source, see rendered equations instantly, collaborate with co-authors,
+              and publish — all without leaving the browser.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              {hasWorkspaceAccess ? (
+                <Link
+                  to="/workspace"
+                  className="flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-base hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none active:scale-[0.98]"
+                >
+                  Open Workspace <ArrowRight className="w-4 h-4" />
+                </Link>
+              ) : (
+                <>
+                  <a
+                    data-testid="github-login-button"
+                    href={`${backendUrl}/auth/github`}
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 text-white font-semibold text-base hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 dark:shadow-none active:scale-[0.98]"
+                  >
+                    <Github className="w-5 h-5" /> Sign in with GitHub
+                  </a>
+                  {showLocalTestAccess && (
+                    <a
+                      data-testid="local-demo-login"
+                      href={`${backendUrl}/auth/local-test`}
+                      className="flex items-center gap-2 px-6 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-semibold text-base hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all"
+                    >
+                      Try Local Demo
+                    </a>
+                  )}
+                </>
+              )}
+            </div>
+            <p className="mt-4 text-xs text-zinc-400">Free to use · No credit card · GitHub account required</p>
+          </div>
+
+          {/* Product Mockup */}
+          <div className="relative max-w-5xl mx-auto rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800 shadow-2xl shadow-zinc-200/60 dark:shadow-none">
+            {/* Browser chrome */}
+            <div className="bg-zinc-100 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-4 py-3 flex items-center gap-3">
+              <div className="flex gap-1.5">
+                <div className="w-3 h-3 rounded-full bg-red-400" />
+                <div className="w-3 h-3 rounded-full bg-yellow-400" />
+                <div className="w-3 h-3 rounded-full bg-green-400" />
+              </div>
+              <div className="flex-1 mx-4">
+                <div className="max-w-xs mx-auto bg-white dark:bg-zinc-800 rounded-md px-3 py-1 text-xs text-zinc-500 dark:text-zinc-400 font-mono text-center border border-zinc-200 dark:border-zinc-700">
+                  proofdesk.app/editor
+                </div>
+              </div>
+            </div>
+            {/* Simulated editor UI */}
+            <div className="bg-zinc-950 flex" style={{ height: '340px' }}>
+              {/* Sidebar */}
+              <div className="w-44 border-r border-zinc-800 bg-zinc-900 p-3 flex-shrink-0">
+                <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 px-1">Explorer</div>
+                {['src/', 'images/', 'output/'].map((f, i) => (
+                  <div key={f} className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${i === 0 ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
+                    {f}
+                  </div>
+                ))}
+                <div className="mt-1 pl-3">
+                  {['chapter1.ptx', 'chapter2.ptx', 'preface.ptx'].map((f, i) => (
+                    <div key={f} className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${i === 0 ? 'text-indigo-400 bg-indigo-950/40' : 'text-zinc-500'}`}>
+                      <Code2 className="w-3 h-3 flex-shrink-0" />
+                      {f}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Editor pane */}
+              <div className="flex-1 border-r border-zinc-800 p-4 font-mono text-xs leading-relaxed overflow-hidden">
+                <div className="text-zinc-500 select-none mb-1 text-[10px]">chapter1.ptx</div>
+                {[
+                  ['text-zinc-500', '<section xml:id="lin-systems">'],
+                  ['text-zinc-400', '  <title>Linear Systems</title>'],
+                  ['text-zinc-500', '  <p>Consider the system'],
+                  ['text-zinc-500', '    <me>'],
+                  ['text-indigo-400', '      Ax = b'],
+                  ['text-zinc-500', '    </me>'],
+                  ['text-zinc-500', '  </p>'],
+                  ['text-zinc-400', '  <theorem xml:id="thm-existence">'],
+                  ['text-zinc-500', '    <statement>'],
+                  ['text-zinc-400', '      <p>A solution exists if and only if'],
+                  ['text-zinc-500', '        <m>b \\in \\Col(A)</m>.'],
+                  ['text-zinc-400', '      </p>'],
+                ].map(([cls, line], i) => (
+                  <div key={i} className="flex gap-3">
+                    <span className="text-zinc-700 w-4 text-right flex-shrink-0">{i + 1}</span>
+                    <span className={cls}>{line}</span>
+                  </div>
+                ))}
+                <div className="flex gap-3 mt-0.5">
+                  <span className="text-zinc-700 w-4 text-right flex-shrink-0">13</span>
+                  <span className="text-zinc-500 border-l-2 border-indigo-500 pl-1 animate-pulse">&nbsp;</span>
+                </div>
+              </div>
+              {/* Preview pane */}
+              <div className="flex-1 bg-white p-5 overflow-hidden">
+                <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <Eye className="w-3 h-3" /> Live Preview
+                  <span className="ml-auto flex items-center gap-1 text-green-600 font-normal">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
+                    Draft
+                  </span>
+                </div>
+                <h2 className="text-sm font-bold text-zinc-900 mb-2">1.1 Linear Systems</h2>
+                <p className="text-[11px] text-zinc-600 leading-relaxed mb-3">Consider the system</p>
+                <div className="text-center my-3 p-2 bg-zinc-50 rounded text-sm font-serif text-zinc-800 italic">
+                  <span className="font-bold not-italic font-sans text-zinc-900">Ax</span>
+                  <span className="mx-1 text-zinc-600">=</span>
+                  <span className="font-bold not-italic font-sans text-zinc-900">b</span>
+                </div>
+                <div className="border border-zinc-200 rounded-lg p-2.5 mt-3">
+                  <div className="text-[10px] font-bold text-zinc-400 uppercase mb-1">Theorem 1.1</div>
+                  <p className="text-[11px] text-zinc-600 leading-relaxed">
+                    A solution exists if and only if <em className="text-zinc-800 not-italic font-medium">b ∈ Col(A)</em>.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Features ── */}
+      <section className="py-20 px-6 bg-zinc-50 dark:bg-zinc-900/50">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-extrabold tracking-tight mb-3">Everything a course author needs</h2>
+            <p className="text-zinc-500 dark:text-zinc-400 max-w-xl mx-auto">
+              Built specifically for PreTeXt math publishing. No generic IDE hacks.
+            </p>
+          </div>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {FEATURES.map(({ icon: Icon, title, desc }) => (
+              <div key={title} className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:border-indigo-200 dark:hover:border-indigo-800 transition-colors group">
+                <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 flex items-center justify-center mb-4 group-hover:bg-indigo-100 dark:group-hover:bg-indigo-900/40 transition-colors">
+                  <Icon className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                </div>
+                <h3 className="font-bold text-zinc-900 dark:text-zinc-50 mb-1.5">{title}</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">{desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── How it works ── */}
+      <section className="py-20 px-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-extrabold tracking-tight mb-3">Up and running in minutes</h2>
+            <p className="text-zinc-500 dark:text-zinc-400">
+              No local setup. No Docker. No command line. Just a browser.
+            </p>
+          </div>
+          <div className="relative">
+            <div className="absolute left-[39px] top-10 bottom-10 w-px bg-zinc-200 dark:bg-zinc-800 hidden sm:block" />
+            <div className="space-y-8">
+              {STEPS.map(({ n, title, desc }) => (
+                <div key={n} className="flex gap-6 items-start">
+                  <div className="w-20 h-20 flex-shrink-0 rounded-2xl bg-indigo-600 flex flex-col items-center justify-center text-white shadow-lg shadow-indigo-200 dark:shadow-none">
+                    <span className="text-[10px] font-bold opacity-60 tracking-widest">{n}</span>
+                  </div>
+                  <div className="pt-4">
+                    <h3 className="font-bold text-zinc-900 dark:text-zinc-50 text-lg mb-1">{title}</h3>
+                    <p className="text-zinc-500 dark:text-zinc-400 leading-relaxed">{desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── CTA ── */}
+      <section className="py-20 px-6 bg-indigo-600 dark:bg-indigo-700">
+        <div className="max-w-3xl mx-auto text-center">
+          <h2 className="text-3xl font-extrabold text-white mb-4 tracking-tight">
+            Start editing your textbook today.
+          </h2>
+          <p className="text-indigo-200 mb-8 text-lg">
+            Free for educators. Open source. Works with any PreTeXt repository.
+          </p>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            {hasWorkspaceAccess ? (
+              <Link
+                to="/workspace"
+                className="flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 transition-all shadow active:scale-[0.98]"
+              >
+                Open Workspace <ArrowRight className="w-4 h-4" />
+              </Link>
+            ) : (
+              <a
+                href={`${backendUrl}/auth/github`}
+                className="flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 transition-all shadow active:scale-[0.98]"
+              >
+                <Github className="w-5 h-5" /> Sign in with GitHub
+              </a>
+            )}
+          </div>
+          <div className="mt-6 flex items-center justify-center gap-6 text-indigo-200 text-sm">
+            {['No setup required', 'GitHub integration', 'Export anytime'].map(t => (
+              <span key={t} className="flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5" /> {t}
+              </span>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Footer ── */}
+      <footer className="border-t border-zinc-100 dark:border-zinc-800 py-8 px-6">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-zinc-400">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-indigo-600 rounded-md flex items-center justify-center">
+              <BookOpenText className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="font-semibold text-zinc-700 dark:text-zinc-300">{PRODUCT_NAME}</span>
+            <span className="text-zinc-300 dark:text-zinc-700">·</span>
+            <span>© 2026</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <a href="https://github.com/harsharajkumar/proofdesk" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
+              <Github className="w-4 h-4" /> GitHub
+            </a>
+            <a href="#" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
+              <LayoutTemplate className="w-4 h-4 inline mr-1" />Docs
+            </a>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default LandingPage;

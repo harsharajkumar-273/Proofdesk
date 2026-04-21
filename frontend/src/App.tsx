@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import './App.css';
 import { PRODUCT_NAME } from './utils/brand';
 
-const ProfessorDashboardPage = lazy(() => import('./components/ProfessorDashboardPage'));
+const LandingPage = lazy(() => import('./components/LandingPage'));
 const RepoInputPage = lazy(() => import('./components/RepoInputPage'));
 const EditorPage = lazy(() => import('./components/EditorPage'));
 
@@ -173,7 +173,7 @@ function App() {
       <Routes>
         <Route
           path="/"
-          element={<ProfessorDashboardPage hasWorkspaceAccess={hasWorkspaceAccess} entryNotice={entryNotice} />}
+          element={<LandingPage hasWorkspaceAccess={hasWorkspaceAccess} entryNotice={entryNotice} />}
         />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/workspace" element={hasWorkspaceAccess ? <RepoInputPage /> : <Navigate to="/" replace />} />
