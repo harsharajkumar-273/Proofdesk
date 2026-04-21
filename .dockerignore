@@ -23,6 +23,10 @@ frontend/.env.*
 .tmp
 .proofdesk-data
 backend/.proofdesk-data
+
+# Heavy build outputs
 builds/output
 builds/test-output
-builds/ila-repo
+builds/ila-repo/html
+builds/ila-repo/node_modules
+builds/ila-repo/vendor
