@@ -1,6 +1,8 @@
 name: Deploy To AWS EC2
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -20,9 +22,8 @@ jobs:
       PREWARM_REPOS: ${{ secrets.PREWARM_REPOS || 'QBobWatson/ila' }}
       PROOFDESK_MONITORING_WEBHOOK_URL: ${{ secrets.PROOFDESK_MONITORING_WEBHOOK_URL }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Validate required secrets
+      - name: Check deployment secrets
+        id: deployment_secrets
         shell: bash
         run: |
           set -euo pipefail
@@ -33,9 +34,24 @@ jobs:
               missing=1
             fi
           done
-          exit "$missing"
+
+          if [[ "$missing" == "0" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            exit 1
+          fi
+
+          echo "::notice::Skipping EC2 deploy because required deployment secrets are not configured."
+
+      - uses: actions/checkout@v4
+        if: steps.deployment_secrets.outputs.ready == 'true'
 
       - name: Write production env file
+        if: steps.deployment_secrets.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -53,6 +69,7 @@ jobs:
           EOF
 
       - name: Prepare SSH
+        if: steps.deployment_secrets.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -62,6 +79,7 @@ jobs:
           ssh-keyscan -H "${AWS_EC2_HOST}" >> ~/.ssh/known_hosts
 
       - name: Upload release bundle
+        if: steps.deployment_secrets.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -82,6 +100,7 @@ jobs:
           scp -i ~/.ssh/proofdesk_deploy_key .env.production.generated "${AWS_EC2_USER}@${AWS_EC2_HOST}:${APP_DIR}/.env"
 
       - name: Restart Docker Compose stack
+        if: steps.deployment_secrets.outputs.ready == 'true'
         shell: bash
         run: |
           set -euo pipefail
