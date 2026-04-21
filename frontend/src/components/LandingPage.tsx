@@ -9,6 +9,7 @@ import {
   Github,
   GitBranch,
   LayoutTemplate,
+  Play,
   Search,
   Share2,
   Users,
@@ -94,6 +95,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
             <span className="font-bold text-lg tracking-tight">{PRODUCT_NAME}</span>
           </div>
           <div className="flex items-center gap-3">
+            <Link
+              to="/demo"
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <Play className="w-3.5 h-3.5" /> Try Demo
+            </Link>
             {hasWorkspaceAccess ? (
               <Link
                 to="/workspace"
@@ -160,6 +167,12 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
                   >
                     <Github className="w-5 h-5" /> Sign in with GitHub
                   </a>
+                  <Link
+                    to="/demo"
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-semibold text-base hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all"
+                  >
+                    <Play className="w-4 h-4" /> Try Demo
+                  </Link>
                   {showLocalTestAccess && (
                     <a
                       data-testid="local-demo-login"
@@ -334,12 +347,20 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
                 Open Workspace <ArrowRight className="w-4 h-4" />
               </Link>
             ) : (
-              <a
-                href={`${backendUrl}/auth/github`}
-                className="flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 transition-all shadow active:scale-[0.98]"
-              >
-                <Github className="w-5 h-5" /> Sign in with GitHub
-              </a>
+              <>
+                <a
+                  href={`${backendUrl}/auth/github`}
+                  className="flex items-center gap-2 px-7 py-3.5 rounded-xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 transition-all shadow active:scale-[0.98]"
+                >
+                  <Github className="w-5 h-5" /> Sign in with GitHub
+                </a>
+                <Link
+                  to="/demo"
+                  className="flex items-center gap-2 px-7 py-3.5 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white font-bold text-base transition-all shadow active:scale-[0.98]"
+                >
+                  <Play className="w-4 h-4" /> Try Demo
+                </Link>
+              </>
             )}
           </div>
           <div className="mt-6 flex items-center justify-center gap-6 text-indigo-200 text-sm">

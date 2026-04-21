@@ -4,6 +4,7 @@ import './App.css';
 import { PRODUCT_NAME } from './utils/brand';
 
 const LandingPage = lazy(() => import('./components/LandingPage'));
+const DemoPage = lazy(() => import('./components/DemoPage'));
 const RepoInputPage = lazy(() => import('./components/RepoInputPage'));
 const EditorPage = lazy(() => import('./components/EditorPage'));
 
@@ -175,6 +176,7 @@ function App() {
           path="/"
           element={<LandingPage hasWorkspaceAccess={hasWorkspaceAccess} entryNotice={entryNotice} />}
         />
+        <Route path="/demo" element={<DemoPage />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/workspace" element={hasWorkspaceAccess ? <RepoInputPage /> : <Navigate to="/" replace />} />
         <Route path="/repo-input" element={<Navigate to="/workspace" replace />} />

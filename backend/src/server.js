@@ -550,6 +550,18 @@ app.get('/team-sessions/:code', requireAccessToken, async (req, res) => {
 
 app.use('/preview', createPreviewRouter());
 
+// ============= PUBLIC DEMO (no auth) =============
+
+app.get('/demo', (req, res) => {
+  const firstRepo = (process.env.PREWARM_REPOS || 'QBobWatson/ila').split(',')[0].trim();
+  const [owner, repo] = firstRepo.split('/');
+  const cached = buildExecutor.buildCache.get(`${owner}/${repo}`);
+  if (!cached) {
+    return res.status(503).json({ error: 'Demo build not ready yet — try again in a few minutes.', building: true });
+  }
+  res.json({ sessionId: cached.sessionId, owner, repo });
+});
+
 // ============= PUBLIC SHARED PREVIEW (no auth) =============
 
 app.get('/shared/:token', async (req, res) => {
