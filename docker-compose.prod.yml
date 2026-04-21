@@ -10,6 +10,10 @@ services:
         VITE_ENABLE_LOCAL_TEST_MODE: "false"
     ports:
       - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -37,7 +41,7 @@ services:
       PROOFDESK_MONITORING_WEBHOOK_URL: ${PROOFDESK_MONITORING_WEBHOOK_URL:-}
       PREWARM_REPOS: ${PREWARM_REPOS:-}
       PROOFDESK_SMOKE_REPO: ${PROOFDESK_SMOKE_REPO:-QBobWatson/ila}
-      PROOFDESK_SECURE_COOKIES: ${PROOFDESK_SECURE_COOKIES:-false}
+      PROOFDESK_SECURE_COOKIES: "true"
     depends_on:
       redis:
         condition: service_healthy

@@ -122,3 +122,38 @@ jobs:
             docker compose -f docker-compose.prod.yml ps
             docker image prune -f
           "
+
+      - name: Issue Let's Encrypt certificate (first deploy only)
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
+            DOMAIN=proofdesk.duckdns.org
+            EMAIL=harsharajkumar273@gmail.com
+            CERT=/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem
+
+            # Skip if a valid non-self-signed cert already exists
+            if [ -f \"\${CERT}\" ] && openssl x509 -in \"\${CERT}\" -noout -issuer 2>/dev/null | grep -qi 'let.s encrypt'; then
+              echo 'Real cert already present — skipping issuance.'
+              exit 0
+            fi
+
+            echo 'Installing certbot and getting certificate via webroot…'
+            sudo apt-get install -y certbot
+            sudo mkdir -p /var/www/certbot
+
+            sudo certbot certonly --webroot \
+              -w /var/www/certbot \
+              -d \${DOMAIN} \
+              --non-interactive --agree-tos -m \${EMAIL} --no-eff-email
+
+            # Reload nginx so it picks up the real cert (replaces self-signed placeholder)
+            docker compose -f ${APP_DIR}/docker-compose.prod.yml exec nginx nginx -s reload
+            echo 'Certificate issued and nginx reloaded.'
+
+            # Set up auto-renewal cron if not already present
+            if ! crontab -l 2>/dev/null | grep -q certbot; then
+              (crontab -l 2>/dev/null; echo '0 3 * * * certbot renew --deploy-hook \"docker compose -f ${APP_DIR}/docker-compose.prod.yml exec nginx nginx -s reload\" --quiet') | crontab -
+              echo 'Auto-renewal cron installed.'
+            fi
+          "
