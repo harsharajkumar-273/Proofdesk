@@ -22,6 +22,13 @@ jobs:
       PREWARM_REPOS: ${{ secrets.PREWARM_REPOS || 'QBobWatson/ila' }}
       PROOFDESK_MONITORING_WEBHOOK_URL: ${{ secrets.PROOFDESK_MONITORING_WEBHOOK_URL }}
     steps:
+      - name: Free disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift || true
+          sudo apt-get clean -y || true
+          df -h /tmp
+
       - name: Check deployment secrets
         id: deployment_secrets
         shell: bash
@@ -106,6 +113,9 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
             set -euo pipefail
+            docker image prune -af --filter 'until=24h' || true
+            docker builder prune -f --filter 'until=24h' || true
+            df -h /
             cd ${APP_DIR}
             tar -xzf proofdesk-release.tgz
             docker compose -f docker-compose.prod.yml up --build -d
