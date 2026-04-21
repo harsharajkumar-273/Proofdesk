@@ -96,7 +96,6 @@ const PATCHED_TOOLCHAIN_FILES = [
 // Sharing it means: first build = 30 min, every subsequent build = 2-5 min.
 const SHARED_DOCKER_VOLUMES = [
   '-v mra-pretex-cache:/home/vagrant/cache',
-  '-v mra-vagrant-build:/home/vagrant/build',
 ].join(' ');
 
 class BuildExecutor {
@@ -283,9 +282,10 @@ class BuildExecutor {
     return false;
   }
 
-  async _copyWorkspaceSnapshot(sourceRepoPath, sourceOutputPath, baseDir) {
+  async _copyWorkspaceSnapshot(sourceRepoPath, sourceOutputPath, sourceBuildPath, baseDir) {
     const repoPath = path.join(baseDir, 'repo');
     const outputPath = path.join(baseDir, 'output');
+    const buildPath = path.join(baseDir, 'build');
 
     await fs.rm(baseDir, { recursive: true, force: true });
     await fs.mkdir(baseDir, { recursive: true });
@@ -305,7 +305,17 @@ class BuildExecutor {
       await fs.mkdir(outputPath, { recursive: true });
     }
 
-    return { repoPath, outputPath };
+    if (sourceBuildPath) {
+      try {
+        await fs.cp(sourceBuildPath, buildPath, { recursive: true, force: true });
+      } catch {
+        await fs.mkdir(buildPath, { recursive: true });
+      }
+    } else {
+      await fs.mkdir(buildPath, { recursive: true });
+    }
+
+    return { repoPath, outputPath, buildPath };
   }
 
   async _getLocalMirrorCommit(owner, repo) {
@@ -394,8 +404,10 @@ class BuildExecutor {
       const baseDir = path.join(this.workDir, sessionId);
       const repoPath = path.join(baseDir, 'repo');
       const outputPath = path.join(baseDir, 'output');
+      const buildPath = path.join(baseDir, 'build');
 
       await fs.mkdir(baseDir, { recursive: true });
+      await fs.mkdir(buildPath, { recursive: true });
       await localTestRepoService.copyRepositoryTo(repoPath);
       await fs.mkdir(outputPath, { recursive: true });
 
@@ -405,6 +417,7 @@ class BuildExecutor {
         token,
         repoPath,
         outputPath,
+        buildPath,
         fromCache: false,
         localTestMode: true,
         defaultBranch,
@@ -435,11 +448,12 @@ class BuildExecutor {
         console.log(`[BuildCache] HIT ${repoKey}@${commitHash.slice(0, 7)} — no build needed`);
         const sessionId = crypto.randomBytes(8).toString('hex');
         const baseDir = path.join(this.workDir, sessionId);
-        const workspace = await this._copyWorkspaceSnapshot(cached.repoPath, cached.outputPath, baseDir);
+        const workspace = await this._copyWorkspaceSnapshot(cached.repoPath, cached.outputPath, cached.buildPath, baseDir);
         this.sessions.set(sessionId, {
           owner, repo, token,
           repoPath:   workspace.repoPath,
           outputPath: workspace.outputPath,
+          buildPath:  workspace.buildPath,
           fromCache:  true,
           defaultBranch,
         });
@@ -455,13 +469,14 @@ class BuildExecutor {
       const existing  = await this.inProgress.get(repoKey);
       const sessionId = crypto.randomBytes(8).toString('hex');
       const baseDir = path.join(this.workDir, sessionId);
-      const workspace = await this._copyWorkspaceSnapshot(existing.repoPath, existing.outputPath, baseDir);
+      const workspace = await this._copyWorkspaceSnapshot(existing.repoPath, existing.outputPath, existing.buildPath, baseDir);
       this.sessions.set(sessionId, {
         owner,
         repo,
         token,
         repoPath: workspace.repoPath,
         outputPath: workspace.outputPath,
+        buildPath: workspace.buildPath,
         fromCache: true,
         defaultBranch,
       });
@@ -475,10 +490,12 @@ class BuildExecutor {
     const baseDir    = path.join(this.workDir, sessionId);
     const repoPath   = path.join(baseDir, 'repo');
     const outputPath = path.join(baseDir, 'output');
+    const buildPath  = path.join(baseDir, 'build');
     let seededFromLocal = false;
 
     await fs.mkdir(repoPath,   { recursive: true });
     await fs.mkdir(outputPath, { recursive: true });
+    await fs.mkdir(buildPath,  { recursive: true });
 
     if (preferSeed) {
       console.log(`[BuildExecutor] Attempting to seed from local mirror for ${repoKey}`);
@@ -493,6 +510,7 @@ class BuildExecutor {
           token,
           repoPath,
           outputPath,
+          buildPath,
           commitHash,
           fromCache: seededFromLocal,
           seededFromLocal,
@@ -515,7 +533,7 @@ class BuildExecutor {
       })
       .then(async () => {
         await this._syncPatchedToolchainFiles(repoPath);
-        return { repoPath, outputPath };
+        return { repoPath, outputPath, buildPath };
       });
     
     this.inProgress.set(repoKey, buildPromise);
@@ -536,6 +554,7 @@ class BuildExecutor {
       token,
       repoPath,
       outputPath,
+      buildPath,
       commitHash,
       fromCache: seededFromLocal,
       seededFromLocal,
@@ -621,11 +640,12 @@ class BuildExecutor {
     } catch {}
     await githubCacheStore.checkAndRestore(session.owner, session.repo, commitHash);
 
-    // Mount shared volumes so the pretex equation cache is reused across builds
+    // Mount session build dir to /home/vagrant/build inside container
     const cmd = [
       'docker run --rm',
       `-v "${session.repoPath}:/repo"`,
       `-v "${session.outputPath}:/output"`,
+      `-v "${session.buildPath}:/home/vagrant/build"`,
       SHARED_DOCKER_VOLUMES,
       this.image,
     ].join(' ');
@@ -702,6 +722,7 @@ class BuildExecutor {
           cacheVersion: BUILD_CACHE_VERSION,
           repoPath:   session.repoPath,
           outputPath: session.outputPath,
+          buildPath:  session.buildPath,
           sessionId,
           builtAt: Date.now(),
         });

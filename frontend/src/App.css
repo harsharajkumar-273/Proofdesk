@@ -1959,6 +1959,55 @@ body {
   backdrop-filter: blur(14px);
 }
 
+.editor-topbar-actions,
+.editor-statusbar {
+  scrollbar-width: none;
+}
+
+.editor-topbar-actions::-webkit-scrollbar,
+.editor-statusbar::-webkit-scrollbar {
+  display: none;
+}
+
+.editor-source-pane {
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .editor-workspace-split {
+    flex-direction: column;
+  }
+
+  .editor-source-pane,
+  .editor-preview-surface {
+    width: 100% !important;
+    min-height: 0;
+    flex: 1 1 50%;
+  }
+
+  .editor-split-resizer {
+    width: 100% !important;
+    height: 4px !important;
+    cursor: row-resize !important;
+  }
+
+  .editor-split-resizer > div {
+    height: 100%;
+  }
+
+  .editor-split-resizer svg {
+    transform: rotate(0deg);
+  }
+
+  .editor-preview-toolbar {
+    overflow-x: auto;
+  }
+
+  .editor-preview-toolbar > div {
+    min-width: max-content;
+  }
+}
+
 .editor-page-shell iframe[title="Build Preview"],
 .editor-page-shell iframe[title="Live Preview"] {
   background: #ffffff;

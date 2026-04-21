@@ -135,7 +135,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   return (
     <>
       <div
-        className="overflow-hidden"
+        className="editor-source-pane overflow-hidden"
         style={{ width: `${editorWidth}%` }}
       >
         <React.Suspense fallback={<div className="flex h-full items-center justify-center bg-gray-900 text-sm text-gray-400">Loading editor…</div>}>
@@ -144,7 +144,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
       </div>
 
       <div
-        className="w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-500 transition-colors flex-shrink-0"
+        className="editor-split-resizer w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-500 transition-colors flex-shrink-0"
         onMouseDown={onEditorResizeStart}
         style={{ cursor: 'col-resize' }}
       >
@@ -215,7 +215,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 title="Open the preview page that best matches the active source file"
               >
                 <ArrowUpRight className="h-3 w-3" />
-                Related Page
+                <span className="hidden sm:inline">Related Page</span>
               </button>
               {sessionId && (previewUrl || compiledOutput) && (
                 <>
@@ -226,9 +226,9 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                     title="Copy shareable link (valid 7 days, no login needed)"
                   >
                     {shareState === 'copied' ? (
-                      <><Check className="h-3 w-3 text-green-400" /><span className="text-green-400">Copied!</span></>
+                      <><Check className="h-3 w-3 text-green-400" /><span className="hidden text-green-400 sm:inline">Copied!</span></>
                     ) : (
-                      <><Link className="h-3 w-3" />Share</>
+                      <><Link className="h-3 w-3" /><span className="hidden sm:inline">Share</span></>
                     )}
                   </button>
                   <button
@@ -237,7 +237,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                     title="Download compiled output as ZIP"
                   >
                     <Download className="h-3 w-3" />
-                    Export ZIP
+                    <span className="hidden sm:inline">Export ZIP</span>
                   </button>
                 </>
               )}

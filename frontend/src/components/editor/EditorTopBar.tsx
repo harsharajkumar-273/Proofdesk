@@ -101,33 +101,33 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
   onLogout,
   navigateToRepoInput,
 }) => (
-  <header className="glass-header h-14 flex items-center justify-between px-4 z-40">
-    <div className="flex items-center gap-3">
+  <header className="glass-header z-40 flex min-h-14 flex-wrap items-center justify-between gap-2 px-2 py-2 sm:h-14 sm:flex-nowrap sm:px-4 sm:py-0">
+    <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
       <button
         onClick={navigateToRepoInput}
-        className="p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all active:scale-95"
+        className="flex-shrink-0 p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all active:scale-95"
         title="Back to Dashboard"
       >
         <ArrowLeft className="w-4 h-4" />
       </button>
       
-      <div className="h-6 w-px bg-zinc-200 mx-1" />
+      <div className="hidden h-6 w-px bg-zinc-200 mx-1 sm:block" />
 
-      <div className="relative group">
+      <div className="relative min-w-0 group">
         <button
           onClick={() => {
             setShowRepoSwitcher(!showRepoSwitcher);
             if (!showRepoSwitcher) fetchUserRepos();
           }}
-          className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm font-semibold text-zinc-900 transition-all active:scale-[0.98]"
+          className="flex min-w-0 items-center gap-2 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm font-semibold text-zinc-900 transition-all active:scale-[0.98]"
         >
           <FolderTree className="w-4 h-4 text-indigo-600" />
-          <span className="max-w-[200px] truncate">{repo ? repo.fullName : 'Select Repository'}</span>
+          <span className="max-w-[170px] truncate sm:max-w-[200px]">{repo ? repo.fullName : 'Select Repository'}</span>
           <ChevronDown className={`w-3.5 h-3.5 text-zinc-400 transition-transform ${showRepoSwitcher ? 'rotate-180' : ''}`} />
         </button>
 
         {showRepoSwitcher && (
-          <div className="absolute top-full left-0 mt-2 w-80 bg-white border border-zinc-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-left">
+          <div className="absolute top-full left-0 mt-2 w-[min(20rem,calc(100vw-1rem))] bg-white border border-zinc-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-left">
             <div className="p-3 border-b border-zinc-100 bg-zinc-50/50">
               <div className="flex items-center gap-2 px-2 py-1.5 bg-white border border-zinc-200 rounded-lg shadow-sm">
                 <Search className="w-3.5 h-3.5 text-zinc-400" />
@@ -162,11 +162,11 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       </div>
     </div>
 
-    <div className="flex items-center gap-2">
-      <div className="flex items-center bg-zinc-100 p-1 rounded-xl border border-zinc-200 mr-2">
+    <div className="editor-topbar-actions flex w-full min-w-0 items-center justify-start gap-1 overflow-x-auto pb-1 sm:w-auto sm:flex-none sm:justify-end sm:gap-2 sm:overflow-visible sm:pb-0">
+      <div className="mr-1 flex flex-shrink-0 items-center bg-zinc-100 p-1 rounded-xl border border-zinc-200 sm:mr-2">
         <button
           onClick={switchToSoloMode}
-          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all ${
+          className={`px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all sm:px-3 ${
             !collaborationEnabled
               ? 'bg-white text-indigo-600 shadow-sm'
               : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200'
@@ -177,7 +177,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
         <button
           data-testid="team-mode-toggle"
           onClick={switchToTeamMode}
-          className={`px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 ${
+          className={`px-2 py-1.5 text-[11px] font-bold uppercase tracking-wider rounded-lg transition-all flex items-center gap-1.5 sm:px-3 ${
             collaborationEnabled
               ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200'
               : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-200'
@@ -189,7 +189,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       </div>
 
       {collaborationEnabled && teamSession?.code && (
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-shrink-0 items-center gap-1.5">
           <button
             aria-label={`Code ${teamSession.code}`}
             onClick={() => void copyTeamInviteCode()}
@@ -201,29 +201,29 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
         </div>
       )}
 
-      <div className="h-6 w-px bg-zinc-200 mx-1" />
+      <div className="h-6 w-px flex-shrink-0 bg-zinc-200 mx-1" />
 
       <button
         onClick={openSaveReview}
         disabled={saving || unsavedCount === 0}
-        className="btn-primary py-1.5 px-4 h-9 !bg-zinc-900 hover:!bg-zinc-800"
+        className="btn-primary h-9 flex-shrink-0 px-3 py-1.5 !bg-zinc-900 hover:!bg-zinc-800 sm:px-4"
       >
         <Save className="w-3.5 h-3.5" />
-        <span className="text-xs font-bold">Save All {unsavedCount > 0 && `(${unsavedCount})`}</span>
+        <span className="hidden text-xs font-bold sm:inline">Save All {unsavedCount > 0 && `(${unsavedCount})`}</span>
       </button>
 
       <button
         data-testid="build-repository-button"
         onClick={compileRepository}
         disabled={compiling}
-        className="btn-primary py-1.5 px-4 h-9"
+        className="btn-primary h-9 flex-shrink-0 px-3 py-1.5 sm:px-4"
       >
         {compiling ? (
           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
         ) : (
           <Play className="w-3.5 h-3.5" />
         )}
-        <span className="text-xs font-bold">{compiling ? 'Building' : 'Build Preview'}</span>
+        <span className="hidden text-xs font-bold md:inline">{compiling ? 'Building' : 'Build Preview'}</span>
       </button>
 
       <button
@@ -232,7 +232,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
           setLiveEditMode((value) => !value);
           setLiveEditStatus('');
         }}
-        className={`h-9 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
+        className={`h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
           liveEditMode
             ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm'
             : 'bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300'
@@ -240,20 +240,20 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
         title="Live Sync — auto-builds on change"
       >
         <Zap className={`w-3.5 h-3.5 ${liveEditMode ? 'fill-indigo-500 text-indigo-500' : ''} ${liveEditMode && isRebuilding ? 'animate-pulse' : ''}`} />
-        <span>{liveEditMode ? 'Live Sync' : 'Static'}</span>
+        <span className="hidden md:inline">{liveEditMode ? 'Live Sync' : 'Static'}</span>
       </button>
 
-      <div className="h-6 w-px bg-zinc-200 mx-1" />
+      <div className="h-6 w-px flex-shrink-0 bg-zinc-200 mx-1" />
 
       <button
         onClick={() => setTerminalOpen(!terminalOpen)}
-        className={`p-2 rounded-lg transition-all ${terminalOpen ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
+        className={`flex-shrink-0 p-2 rounded-lg transition-all ${terminalOpen ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
         title="Toggle Integrated Terminal"
       >
         <TerminalIcon className="w-4 h-4" />
       </button>
 
-      <div className="relative">
+      <div className="relative flex-shrink-0">
         <button
           onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
           className="flex items-center gap-1 p-0.5 pr-1.5 bg-zinc-100 rounded-full border border-zinc-200 hover:bg-zinc-200 transition-all active:scale-95"
