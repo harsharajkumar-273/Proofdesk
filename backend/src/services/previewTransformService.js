@@ -98,12 +98,9 @@ li>.pretex-display{
 }
 .pretex-bind{
   display:inline-block!important;
-  vertical-align:middle!important;
-  line-height:0;
 }
 .pretex-inline{
   display:inline-block!important;
-  vertical-align:middle!important;
 }
 mjx-container{
   max-width:100%!important;
