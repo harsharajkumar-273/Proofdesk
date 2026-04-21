@@ -7,6 +7,8 @@ const LandingPage = lazy(() => import('./components/LandingPage'));
 const DemoPage = lazy(() => import('./components/DemoPage'));
 const RepoInputPage = lazy(() => import('./components/RepoInputPage'));
 const EditorPage = lazy(() => import('./components/EditorPage'));
+const TermsPage = lazy(() => import('./components/TermsPage'));
+const PrivacyPage = lazy(() => import('./components/PrivacyPage'));
 
 const RouteLoading = () => (
   <div className="simple-shell">
@@ -184,6 +186,8 @@ function App() {
           path="/editor"
           element={hasWorkspaceAccess ? <EditorPage onLogout={handleLogout} /> : <Navigate to="/" replace />}
         />
+        <Route path="/terms" element={<TermsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

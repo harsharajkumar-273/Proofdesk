@@ -8,7 +8,6 @@ import {
   Eye,
   Github,
   GitBranch,
-  LayoutTemplate,
   Play,
   Search,
   Share2,
@@ -87,7 +86,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
 
       {/* ── Nav ── */}
       <nav className="fixed top-0 inset-x-0 z-50 border-b border-zinc-100 dark:border-zinc-800 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
               <BookOpenText className="w-4.5 h-4.5 text-white" />
@@ -97,7 +96,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
           <div className="flex items-center gap-3">
             <Link
               to="/demo"
-              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              className="hidden items-center gap-1.5 px-4 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors sm:flex"
             >
               <Play className="w-3.5 h-3.5" /> Try Demo
             </Link>
@@ -204,27 +203,29 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
               </div>
             </div>
             {/* Simulated editor UI */}
-            <div className="bg-zinc-950 flex" style={{ height: '340px' }}>
+            <div className="flex h-[540px] flex-col bg-zinc-950 sm:h-[340px] sm:flex-row">
               {/* Sidebar */}
-              <div className="w-44 border-r border-zinc-800 bg-zinc-900 p-3 flex-shrink-0">
+              <div className="h-32 flex-shrink-0 border-b border-zinc-800 bg-zinc-900 p-3 sm:h-auto sm:w-44 sm:border-b-0 sm:border-r">
                 <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 px-1">Explorer</div>
-                {['src/', 'images/', 'output/'].map((f, i) => (
-                  <div key={f} className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${i === 0 ? 'text-zinc-300' : 'text-zinc-500'}`}>
-                    <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
-                    {f}
-                  </div>
-                ))}
-                <div className="mt-1 pl-3">
-                  {['chapter1.ptx', 'chapter2.ptx', 'preface.ptx'].map((f, i) => (
-                    <div key={f} className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${i === 0 ? 'text-indigo-400 bg-indigo-950/40' : 'text-zinc-500'}`}>
-                      <Code2 className="w-3 h-3 flex-shrink-0" />
+                <div className="grid grid-cols-3 gap-1 sm:block">
+                  {['src/', 'images/', 'output/'].map((f, i) => (
+                    <div key={f} className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${i === 0 ? 'text-zinc-300' : 'text-zinc-500'}`}>
+                      <div className="w-1.5 h-1.5 rounded-full bg-zinc-600" />
                       {f}
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1 sm:mt-1 sm:block sm:pl-3">
+                  {['chapter1.ptx', 'chapter2.ptx', 'preface.ptx'].map((f, i) => (
+                    <div key={f} className={`flex min-w-0 items-center gap-2 rounded px-2 py-1 text-xs ${i === 0 ? 'text-indigo-400 bg-indigo-950/40' : 'text-zinc-500'}`}>
+                      <Code2 className="w-3 h-3 flex-shrink-0" />
+                      <span className="truncate">{f}</span>
                     </div>
                   ))}
                 </div>
               </div>
               {/* Editor pane */}
-              <div className="flex-1 border-r border-zinc-800 p-4 font-mono text-xs leading-relaxed overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-hidden border-b border-zinc-800 p-4 font-mono text-xs leading-relaxed sm:border-b-0 sm:border-r">
                 <div className="text-zinc-500 select-none mb-1 text-[10px]">chapter1.ptx</div>
                 {[
                   ['text-zinc-500', '<section xml:id="lin-systems">'],
@@ -251,7 +252,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
                 </div>
               </div>
               {/* Preview pane */}
-              <div className="flex-1 bg-white p-5 overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-hidden bg-white p-5">
                 <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                   <Eye className="w-3 h-3" /> Live Preview
                   <span className="ml-auto flex items-center gap-1 text-green-600 font-normal">
@@ -388,9 +389,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
             <a href="https://github.com/harsharajkumar/proofdesk" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
               <Github className="w-4 h-4" /> GitHub
             </a>
-            <a href="#" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
-              <LayoutTemplate className="w-4 h-4 inline mr-1" />Docs
-            </a>
+            <Link to="/terms" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">Terms</Link>
+            <Link to="/privacy" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">Privacy</Link>
           </div>
         </div>
       </footer>
