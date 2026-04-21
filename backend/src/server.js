@@ -590,6 +590,15 @@ app.get('/shared/:token/*', async (req, res) => {
     res.setHeader('Content-Type', mime);
     res.setHeader('Cache-Control', ['.html', '.htm'].includes(ext) ? 'no-store' : 'public, max-age=300');
     res.setHeader('X-Proofdesk-Shared', '1');
+
+    if (['.html', '.htm'].includes(ext)) {
+      const EQ_FIX = `<style id="proofdesk-eq-fix">.pretex-display{display:flow-root!important;clear:both;max-width:100%;margin:1em 0!important;text-align:center;overflow-x:auto;}.pretex-display>svg.pretex{display:block!important;vertical-align:baseline!important;max-width:100%;height:auto;margin:0 auto;}.pretex-bind{display:inline-block;vertical-align:middle;line-height:0;}.pretex-inline{display:inline-block;vertical-align:middle;}mjx-container[display="true"]{display:block!important;clear:both;text-align:center;margin:0.8em auto!important;overflow-x:auto;}</style>`;
+      let html = content.toString('utf-8');
+      if (!html.includes('proofdesk-eq-fix')) {
+        html = html.includes('</head>') ? html.replace('</head>', `${EQ_FIX}\n</head>`) : EQ_FIX + html;
+      }
+      return res.send(html);
+    }
     res.send(content);
   } catch {
     res.status(404).send('File not found');
