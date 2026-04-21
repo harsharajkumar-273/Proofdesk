@@ -102,7 +102,7 @@ class BuildExecutor {
   constructor() {
     this.image   = process.env.PROOFDESK_DOCKER_IMAGE || 'mra-pretext-builder';
     this.workspaceRoot = path.resolve(__dirname, '../../..');
-    this.localRepoToolchainRoot = path.join(this.workspaceRoot, 'builds', 'ila-repo');
+    this.localRepoToolchainRoot = path.join(__dirname, '../assets/ila-toolchain');
     this.dockerDir = path.join(this.workspaceRoot, 'docker');
     this.imageEnsurePromise = null;
 
