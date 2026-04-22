@@ -123,12 +123,15 @@ jobs:
             set -euo pipefail
             # Extremely aggressive cleanup
             docker system prune -af --volumes || true
+            # Manually clear bind-mounted data dir which holds the 11GB
+            sudo rm -rf /var/lib/proofdesk/* || true
             # Clean up system logs older than 3 days
             sudo find /var/log -type f -mtime +3 -delete || true
             # Show what is taking space
-            sudo du -sh /var/lib/docker /var/lib/proofdesk /var/log /tmp | sort -h || true
+            sudo du -sh /var/lib/docker /var/lib/proofdesk /var/log /tmp 2>/dev/null | sort -h || true
             df -h /
             cd ${APP_DIR}
+
             tar -xzf proofdesk-release.tgz
             docker compose -f docker-compose.prod.yml up --build -d
             docker compose -f docker-compose.prod.yml ps
