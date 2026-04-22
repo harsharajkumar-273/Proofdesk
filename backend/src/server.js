@@ -1113,6 +1113,16 @@ export const startServer = () => {
   ensureCollaborationServer();
   ensureTerminalServer();
   ensureRealtimeUpgradeRouting();
+
+  // Start the periodic cleanup task (every hour) to prevent disk exhaustion
+  buildExecutor.startPeriodicCleanup();
+  // Trigger an initial cleanup run after a short delay to free space immediately
+  setTimeout(() => {
+    buildExecutor.runGlobalCleanup().catch(err => {
+      console.error('[Cleanup] Initial cleanup run failed:', err.message);
+    });
+  }, 10000);
+
   return server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`  GITHUB_CLIENT_ID:  ${process.env.GITHUB_CLIENT_ID ? 'set' : 'NOT SET'}`);

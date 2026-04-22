@@ -139,6 +139,91 @@ class BuildExecutor {
     return getProofdeskDataRoot();
   }
 
+  startPeriodicCleanup() {
+    const ONE_HOUR = 60 * 60 * 1000;
+    const interval = setInterval(() => this.runGlobalCleanup(), ONE_HOUR);
+    if (typeof interval.unref === 'function') {
+      interval.unref();
+    }
+    console.log('[BuildExecutor] Periodic cleanup task started (1h interval)');
+  }
+
+  async runGlobalCleanup() {
+    console.log('[BuildExecutor] Running global cleanup check...');
+    const now = Date.now();
+    const MAX_AGE = Number(process.env.PROOFDESK_CACHE_TTL_MS) || 24 * 60 * 60 * 1000; // 24h
+
+    // 1. Clean up stale build cache entries (older than 24h)
+    for (const [repoKey, entry] of this.buildCache.entries()) {
+      if (now - entry.builtAt > MAX_AGE) {
+        console.log(`[BuildCache] Evicting expired entry for ${repoKey} (built ${new Date(entry.builtAt).toISOString()})`);
+        const baseDir = path.dirname(entry.repoPath);
+        
+        // Ensure no active session is using it
+        const isStillActive = [...this.sessions.values()].some(s => 
+          path.resolve(path.dirname(s.repoPath)) === path.resolve(baseDir)
+        );
+
+        if (!isStillActive) {
+          try {
+            await fs.rm(baseDir, { recursive: true, force: true });
+            this.buildCache.delete(repoKey);
+            artifactCache.invalidateSession(entry.sessionId);
+          } catch (err) {
+            console.warn(`[BuildCache] Failed to delete expired dir ${baseDir}:`, err.message);
+          }
+        }
+      }
+    }
+
+    // 2. Cap total cache size (max 5 builds locally to keep disk usage around 5GB)
+    const MAX_CACHE_SIZE = Number(process.env.PROOFDESK_MAX_CACHE_ENTRIES) || 5;
+    if (this.buildCache.size > MAX_CACHE_SIZE) {
+      const sorted = [...this.buildCache.entries()].sort((a, b) => a[1].builtAt - b[1].builtAt);
+      const toRemove = sorted.slice(0, this.buildCache.size - MAX_CACHE_SIZE);
+      
+      for (const [repoKey, entry] of toRemove) {
+        console.log(`[BuildCache] Evicting oldest entry for ${repoKey} to free space`);
+        const baseDir = path.dirname(entry.repoPath);
+        
+        const isStillActive = [...this.sessions.values()].some(s => 
+          path.resolve(path.dirname(s.repoPath)) === path.resolve(baseDir)
+        );
+
+        if (!isStillActive) {
+          try {
+            await fs.rm(baseDir, { recursive: true, force: true });
+            this.buildCache.delete(repoKey);
+            artifactCache.invalidateSession(entry.sessionId);
+          } catch (err) {
+            console.warn(`[BuildCache] Failed to delete dir ${baseDir}:`, err.message);
+          }
+        }
+      }
+    }
+
+    await this._saveCache();
+
+    // 3. Clean up orphans in .proofdesk-data that aren't in sessions OR buildCache
+    try {
+      const dirs = await fs.readdir(this.workDir);
+      for (const dir of dirs) {
+        if (!/^[0-9a-f]{16}$/.test(dir)) continue;
+        
+        const fullPath = path.join(this.workDir, dir);
+        const inSessions = this.sessions.has(dir);
+        const inCache = [...this.buildCache.values()].some(e => path.dirname(e.repoPath) === fullPath);
+        
+        if (!inSessions && !inCache) {
+          console.log(`[BuildExecutor] Deleting orphaned data directory: ${dir}`);
+          await fs.rm(fullPath, { recursive: true, force: true });
+        }
+      }
+    } catch (err) {
+      console.error('[BuildExecutor] Orphan cleanup error:', err.message);
+    }
+  }
+
   scheduleCleanup(sessionId) {
     const ttlMs = Number(process.env.PROOFDESK_SESSION_TTL_MS) || 2 * 60 * 60 * 1000;
     const timer = setTimeout(() => this.cleanup(sessionId), ttlMs);
