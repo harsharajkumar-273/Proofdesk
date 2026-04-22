@@ -21,6 +21,7 @@ jobs:
       GITHUB_PERSONAL_TOKEN: ${{ secrets.PROOFDESK_GITHUB_PERSONAL_TOKEN }}
       PREWARM_REPOS: ${{ secrets.PREWARM_REPOS || 'QBobWatson/ila' }}
       PROOFDESK_MONITORING_WEBHOOK_URL: ${{ secrets.PROOFDESK_MONITORING_WEBHOOK_URL }}
+      DOMAIN: ${{ secrets.DOMAIN }}
     steps:
       - name: Free disk space
         shell: bash
@@ -62,8 +63,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # If DOMAIN is not provided, try to extract it from FRONTEND_URL
+          ACTUAL_DOMAIN="${DOMAIN}"
+          if [[ -z "${ACTUAL_DOMAIN}" ]]; then
+            ACTUAL_DOMAIN=$(echo "${FRONTEND_URL}" | sed -E 's/https?:\/\/([^/]+).*/\1/')
+          fi
+
           cat > .env.production.generated <<EOF
           FRONTEND_URL=${FRONTEND_URL}
+          DOMAIN=${ACTUAL_DOMAIN}
           GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
           GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
           GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI}
@@ -128,8 +136,9 @@ jobs:
         shell: bash
         run: |
           ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
-            DOMAIN=proofdesk.duckdns.org
+            DOMAIN=${{ secrets.DOMAIN || 'proofdesk.duckdns.org' }}
             EMAIL=harsharajkumar273@gmail.com
+
             CERT=/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem
 
             # Skip if a valid non-self-signed cert already exists

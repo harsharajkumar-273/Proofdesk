@@ -8,6 +8,8 @@ services:
       args:
         VITE_BACKEND_URL: ${FRONTEND_URL}
         VITE_ENABLE_LOCAL_TEST_MODE: "false"
+    environment:
+      DOMAIN: ${DOMAIN:-proofdesk.duckdns.org}
     ports:
       - "80:80"
       - "443:443"
@@ -51,7 +53,7 @@ services:
       # Bind-mount (not named volume) so spawned builder containers can access the same host path
       - /var/lib/proofdesk:/var/lib/proofdesk
       # Expose the docker build context so the backend can build mra-pretext-builder if missing
-      - /opt/proofdesk/docker:/docker:ro
+      - ./docker:/docker:ro
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:4000/health/ready', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 10s

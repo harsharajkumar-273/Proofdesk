@@ -47,7 +47,8 @@ cp .env.production.example .env
 
 Edit `.env` and set:
 
-- `FRONTEND_URL`
+- `FRONTEND_URL` (e.g., `https://proofdesk.example.com`)
+- `DOMAIN` (e.g., `proofdesk.example.com`)
 - `GITHUB_CLIENT_ID`
 - `GITHUB_CLIENT_SECRET`
 - `GITHUB_REDIRECT_URI`

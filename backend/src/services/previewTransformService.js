@@ -62,7 +62,7 @@ const rewriteCssUrls = (content, sessionBase, allowedRelativeDirs = []) => {
   );
 };
 
-const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve-v2';
+const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve-v3';
 
 const PROOFDESK_PRETEX_LAYOUT_FIX = String.raw`
 <style id="proofdesk-pretex-layout-fix" data-proofdesk-pretex-layout-version="${PROOFDESK_PRETEX_LAYOUT_FIX_VERSION}">
@@ -75,9 +75,9 @@ const PROOFDESK_PRETEX_LAYOUT_FIX = String.raw`
   max-width:100%!important;
   box-sizing:border-box!important;
   min-height:var(--proofdesk-pretex-display-height, 1.2em);
-  margin:1.2em 0!important;
-  padding:0.4em 0!important;
-  line-height:normal!important;
+  margin:1.5em 0!important;
+  padding:0.6em 0!important;
+  line-height:1.2!important;
   text-align:center!important;
   text-indent:0!important;
   float:none!important;
@@ -131,9 +131,9 @@ mjx-container[display="true"]{
   max-width:100%!important;
   box-sizing:border-box!important;
   min-height:var(--proofdesk-mathjax-display-height, 1.2em);
-  margin:1.2em auto!important;
-  padding:0.4em 0!important;
-  line-height:normal!important;
+  margin:1.6em auto!important;
+  padding:0.8em 0!important;
+  line-height:1.2!important;
   text-align:center!important;
   overflow-x:auto!important;
   overflow-y:visible!important;

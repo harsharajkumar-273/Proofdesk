@@ -587,15 +587,15 @@ const DISPLAY_MATH_LAYOUT_GUARD = `
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-  min-height: var(--proofdesk-pretex-display-height, 0);
-  margin: 1em 0 !important;
-  padding: 0.2em 0 !important;
-  line-height: normal !important;
+  min-height: var(--proofdesk-pretex-display-height, 1.2em);
+  margin: 1.5em 0 !important;
+  padding: 0.6em 0 !important;
+  line-height: 1.2 !important;
   text-align: center !important;
   text-indent: 0 !important;
   float: none !important;
   overflow-x: auto !important;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
   isolation: isolate !important;
 }
 .ptx-equation + *,
@@ -616,7 +616,7 @@ mjx-container {
   max-width: 100% !important;
   line-height: normal !important;
   overflow-x: auto !important;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
 }
 mjx-container[display="true"] {
   display: block !important;
@@ -624,13 +624,13 @@ mjx-container[display="true"] {
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-  min-height: var(--proofdesk-mathjax-display-height, 0);
-  margin: 0.85em auto !important;
-  padding: 0.25em 0 !important;
-  line-height: normal !important;
+  min-height: var(--proofdesk-mathjax-display-height, 1.2em);
+  margin: 1.6em auto !important;
+  padding: 0.8em 0 !important;
+  line-height: 1.2 !important;
   text-align: center !important;
   overflow-x: auto !important;
-  overflow-y: auto !important;
+  overflow-y: visible !important;
 }
 mjx-container[display="true"] > svg {
   display: block !important;

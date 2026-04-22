@@ -2,6 +2,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
+import fsSync from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
@@ -103,7 +104,13 @@ class BuildExecutor {
     this.image   = process.env.PROOFDESK_DOCKER_IMAGE || 'mra-pretext-builder';
     this.workspaceRoot = path.resolve(__dirname, '../../..');
     this.localRepoToolchainRoot = path.join(__dirname, '../assets/ila-toolchain');
-    this.dockerDir = path.join(this.workspaceRoot, 'docker');
+    
+    // In production, the docker build context is mounted to /docker.
+    // In local dev, it is at the workspace root.
+    this.dockerDir = fsSync.existsSync('/docker') 
+      ? '/docker' 
+      : path.join(this.workspaceRoot, 'docker');
+
     this.imageEnsurePromise = null;
 
     // Active sessions: sessionId → { owner, repo, repoPath, outputPath, fromCache }
