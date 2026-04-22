@@ -575,28 +575,32 @@ a { color: #2c7be5; }
 a:hover { text-decoration: underline; }
 `;
 
-const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve';
+const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve-v4';
 
 const DISPLAY_MATH_LAYOUT_GUARD = `
 <style id="proofdesk-pretex-layout-fix" data-proofdesk-pretex-layout-version="${PROOFDESK_PRETEX_LAYOUT_FIX_VERSION}">
 .ptx-equation,
 .pretex-display {
-  display: flow-root !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
   clear: both !important;
   position: relative !important;
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-  min-height: var(--proofdesk-pretex-display-height, 1.2em);
-  margin: 1.5em 0 !important;
-  padding: 0.6em 0 !important;
-  line-height: 1.2 !important;
+  min-height: var(--proofdesk-pretex-display-height, 2.5em);
+  margin: 2em 0 !important;
+  padding: 0.8em 0 !important;
+  line-height: 1.5 !important;
   text-align: center !important;
   text-indent: 0 !important;
   float: none !important;
   overflow-x: auto !important;
   overflow-y: visible !important;
   isolation: isolate !important;
+  contain: layout;
 }
 .ptx-equation + *,
 .pretex-display + * {
@@ -619,18 +623,22 @@ mjx-container {
   overflow-y: visible !important;
 }
 mjx-container[display="true"] {
-  display: block !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
   clear: both !important;
   width: 100% !important;
   max-width: 100% !important;
   box-sizing: border-box !important;
-  min-height: var(--proofdesk-mathjax-display-height, 1.2em);
-  margin: 1.6em auto !important;
-  padding: 0.8em 0 !important;
-  line-height: 1.2 !important;
+  min-height: var(--proofdesk-mathjax-display-height, 2.5em);
+  margin: 2em auto !important;
+  padding: 1em 0 !important;
+  line-height: 1.5 !important;
   text-align: center !important;
   overflow-x: auto !important;
   overflow-y: visible !important;
+  contain: layout;
 }
 mjx-container[display="true"] > svg {
   display: block !important;
@@ -703,7 +711,7 @@ mjx-container[display="true"] > svg {
     svg.style.overflow = 'visible';
 
     const height = getSvgVisualHeight(svg, display);
-    if (height > 1) {
+    if (height > 5) {
       display.style.setProperty('--proofdesk-pretex-display-height', Math.ceil(height) + 'px');
     }
   }
@@ -714,18 +722,21 @@ mjx-container[display="true"] > svg {
     const displays = Array.from(scope.querySelectorAll('.pretex-display'));
     if (scope.classList && scope.classList.contains('pretex-display')) displays.unshift(scope);
     displays.forEach((display) => {
-      display.style.display = 'flow-root';
+      display.style.display = 'flex';
+      display.style.flexDirection = 'column';
+      display.style.alignItems = 'center';
+      display.style.justifyContent = 'center';
       display.style.clear = 'both';
       display.style.position = 'relative';
       display.style.width = '100%';
       display.style.maxWidth = '100%';
       display.style.boxSizing = 'border-box';
-      display.style.lineHeight = 'normal';
+      display.style.lineHeight = '1.5';
       display.style.textAlign = 'center';
       display.style.textIndent = '0';
       display.style.float = 'none';
       display.style.overflowX = 'auto';
-      display.style.overflowY = 'auto';
+      display.style.overflowY = 'visible';
 
       Array.from(display.children).forEach((child) => {
         if (child.matches && child.matches('svg.pretex')) reserveSvg(display, child);
@@ -733,15 +744,18 @@ mjx-container[display="true"] > svg {
     });
 
     Array.from(scope.querySelectorAll('mjx-container[display="true"]')).forEach((math) => {
-      math.style.display = 'block';
+      math.style.display = 'flex';
+      math.style.flexDirection = 'column';
+      math.style.alignItems = 'center';
+      math.style.justifyContent = 'center';
       math.style.clear = 'both';
       math.style.width = '100%';
       math.style.maxWidth = '100%';
       math.style.boxSizing = 'border-box';
-      math.style.lineHeight = 'normal';
+      math.style.lineHeight = '1.5';
       math.style.textAlign = 'center';
       math.style.overflowX = 'auto';
-      math.style.overflowY = 'auto';
+      math.style.overflowY = 'visible';
 
       const svg = math.querySelector(':scope > svg');
       if (svg) {
@@ -751,7 +765,7 @@ mjx-container[display="true"] > svg {
         svg.style.marginLeft = 'auto';
         svg.style.marginRight = 'auto';
         const height = getSvgVisualHeight(svg, math);
-        if (height > 1) {
+        if (height > 5) {
           math.style.setProperty('--proofdesk-mathjax-display-height', Math.ceil(height) + 'px');
         }
       }
