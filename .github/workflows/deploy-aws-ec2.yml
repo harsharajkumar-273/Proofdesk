@@ -121,10 +121,13 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
             set -euo pipefail
-            docker image prune -af --filter 'until=24h' || true
-            docker builder prune -f --filter 'until=24h' || true
+            # More aggressive cleanup to free up space
+            docker image prune -af || true
+            docker builder prune -af || true
+            docker system prune -f --filter 'until=24h' || true
             df -h /
             cd ${APP_DIR}
+
             tar -xzf proofdesk-release.tgz
             docker compose -f docker-compose.prod.yml up --build -d
             docker compose -f docker-compose.prod.yml ps
