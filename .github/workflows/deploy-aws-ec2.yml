@@ -121,13 +121,14 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
             set -euo pipefail
-            # More aggressive cleanup to free up space
-            docker image prune -af || true
-            docker builder prune -af || true
-            docker system prune -f --filter 'until=24h' || true
+            # Extremely aggressive cleanup
+            docker system prune -af --volumes || true
+            # Clean up system logs older than 3 days
+            sudo find /var/log -type f -mtime +3 -delete || true
+            # Show what is taking space
+            sudo du -sh /var/lib/docker /var/lib/proofdesk /var/log /tmp | sort -h || true
             df -h /
             cd ${APP_DIR}
-
             tar -xzf proofdesk-release.tgz
             docker compose -f docker-compose.prod.yml up --build -d
             docker compose -f docker-compose.prod.yml ps
