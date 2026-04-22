@@ -62,7 +62,7 @@ const rewriteCssUrls = (content, sessionBase, allowedRelativeDirs = []) => {
   );
 };
 
-const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve-v4';
+const PROOFDESK_PRETEX_LAYOUT_FIX_VERSION = '2026-04-21-display-math-reserve-v5';
 
 const PROOFDESK_PRETEX_LAYOUT_FIX = String.raw`
 <style id="proofdesk-pretex-layout-fix" data-proofdesk-pretex-layout-version="${PROOFDESK_PRETEX_LAYOUT_FIX_VERSION}">
@@ -77,7 +77,7 @@ const PROOFDESK_PRETEX_LAYOUT_FIX = String.raw`
   width:100%!important;
   max-width:100%!important;
   box-sizing:border-box!important;
-  min-height:var(--proofdesk-pretex-display-height, 2.5em);
+  min-height:var(--proofdesk-pretex-display-height, 1.5em);
   margin:2em 0!important;
   padding:0.8em 0!important;
   line-height:1.5!important;
@@ -129,18 +129,15 @@ mjx-container{
   overflow-y:visible!important;
 }
 mjx-container[display="true"]{
-  display:flex!important;
-  flex-direction:column!important;
-  align-items:center!important;
-  justify-content:center!important;
+  display:block!important;
   clear:both!important;
   width:100%!important;
   max-width:100%!important;
   box-sizing:border-box!important;
-  min-height:var(--proofdesk-mathjax-display-height, 2.5em);
+  min-height:var(--proofdesk-mathjax-display-height, 1.5em);
   margin:2em auto!important;
   padding:1em 0!important;
-  line-height:1.5!important;
+  line-height:normal!important;
   text-align:center!important;
   overflow-x:auto!important;
   overflow-y:visible!important;
@@ -247,15 +244,12 @@ mjx-container[display="true"]>svg{
     });
 
     Array.from(scope.querySelectorAll('mjx-container[display="true"]')).forEach(function(math){
-      math.style.display='flex';
-      math.style.flexDirection='column';
-      math.style.alignItems='center';
-      math.style.justifyContent='center';
+      math.style.display='block';
       math.style.clear='both';
       math.style.width='100%';
       math.style.maxWidth='100%';
       math.style.boxSizing='border-box';
-      math.style.lineHeight='1.5';
+      math.style.lineHeight='normal';
       math.style.textAlign='center';
       math.style.overflowX='auto';
       math.style.overflowY='visible';
