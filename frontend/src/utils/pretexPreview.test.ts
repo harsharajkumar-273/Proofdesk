@@ -9,7 +9,7 @@ describe('pretexPreview', () => {
     expect(html).toContain('\\(x+y\\)');
     expect(html).toContain('id="proofdesk-pretex-layout-fix"');
     expect(html).toContain('id="proofdesk-pretex-layout-guard"');
-    expect(html).toContain('data-proofdesk-pretex-layout-version="2026-04-21-display-math-reserve"');
+    expect(html).toContain('data-proofdesk-pretex-layout-version="2026-04-21-display-math-reserve-v4"');
     expect(html).toContain('getSvgVisualHeight');
   });
 
