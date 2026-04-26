@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, CheckCircle2, AlertCircle, Cpu, Zap, Files } from 'lucide-react';
+import { User, CheckCircle2, AlertCircle, AlertTriangle, Cpu, Zap, Files } from 'lucide-react';
 
 interface EditorStatusBarProps {
   compilationMode: 'repository' | 'file';
@@ -8,6 +8,9 @@ interface EditorStatusBarProps {
   openTabsCount: number;
   unsavedCount: number;
   userLogin?: string;
+  errorCount?: number;
+  warningCount?: number;
+  onOpenProblems?: () => void;
 }
 
 const EditorStatusBar: React.FC<EditorStatusBarProps> = ({
@@ -17,6 +20,9 @@ const EditorStatusBar: React.FC<EditorStatusBarProps> = ({
   openTabsCount,
   unsavedCount,
   userLogin,
+  errorCount = 0,
+  warningCount = 0,
+  onOpenProblems,
 }) => (
   <footer className="editor-statusbar h-7 bg-zinc-100 dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-4 overflow-x-auto px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-500 flex-shrink-0 z-40">
     <div className="flex flex-shrink-0 items-center gap-3 sm:gap-5">
@@ -48,6 +54,27 @@ const EditorStatusBar: React.FC<EditorStatusBarProps> = ({
         </div>
       )}
     </div>
+
+    {(errorCount > 0 || warningCount > 0) && (
+      <button
+        onClick={onOpenProblems}
+        className="flex flex-shrink-0 items-center gap-2 hover:opacity-80 transition-opacity"
+        title="Open Problems panel"
+      >
+        {errorCount > 0 && (
+          <span className="flex items-center gap-1 text-rose-600 dark:text-rose-400">
+            <AlertCircle className="w-3 h-3" />
+            <span>{errorCount}</span>
+          </span>
+        )}
+        {warningCount > 0 && (
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <AlertTriangle className="w-3 h-3" />
+            <span>{warningCount}</span>
+          </span>
+        )}
+      </button>
+    )}
 
     <div className="flex flex-shrink-0 items-center gap-3 sm:gap-5">
       <div className="flex items-center gap-1.5">

@@ -138,6 +138,25 @@ jobs:
             docker image prune -f
           "
 
+      - name: Smoke test deployment
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_URL="${FRONTEND_URL}/health/ready"
+          echo "Smoke testing ${SMOKE_URL} (up to 5 attempts, 10 s apart)"
+          for attempt in 1 2 3 4 5; do
+            sleep 10
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SMOKE_URL}" --max-time 15 || echo "000")
+            if [[ "${HTTP_STATUS}" == "200" ]]; then
+              echo "Smoke test PASSED (attempt ${attempt}): ${SMOKE_URL} returned 200"
+              exit 0
+            fi
+            echo "  Attempt ${attempt}: got HTTP ${HTTP_STATUS}"
+          done
+          echo "Smoke test FAILED: ${SMOKE_URL} did not return 200 after 5 attempts" >&2
+          exit 1
+
       - name: Issue Let's Encrypt certificate (first deploy only)
         if: steps.deployment_secrets.outputs.ready == 'true'
         shell: bash

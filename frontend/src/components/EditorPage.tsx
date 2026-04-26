@@ -9,10 +9,11 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import TypeScriptWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker?worker';
 import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
-import { 
+import {
   GitBranch, Search, FolderTree,
   Terminal as TerminalIcon,
-  RefreshCw
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import { applyHandshakeTheme } from '../themes/handshakeTheme';
 import '../themes/handshakeeditor.css';
@@ -25,6 +26,8 @@ import EditorTabBar from './editor/EditorTabBar';
 import WorkspaceNoticeBanner from './editor/WorkspaceNoticeBanner';
 import EditorExplorerPane from './editor/EditorExplorerPane';
 import EditorSearchPane from './editor/EditorSearchPane';
+import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
+import BuildLogPanel from './editor/BuildLogPanel';
 import {
   buildPreviewHref,
   getLanguageFromFilename,
@@ -63,6 +66,9 @@ import {
 } from '../utils/editorWorkspace';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile, pretexToHtml } from '../utils/pretexPreview';
+import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
+import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
+import { parseBuildErrors } from '../utils/buildErrorParser';
 import { MonacoYjsCollaborationSession } from '../utils/yjsCollaboration';
 
 const monacoGlobal = self as Window & typeof globalThis & {
@@ -239,6 +245,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   
   const [buildSessionId, setBuildSessionId] = useState<string | null>(null);
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
+  const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
+  const [buildErrors, setBuildErrors] = useState<Diagnostic[]>([]);
+  const [pdfBuilding, setPdfBuilding] = useState<boolean>(false);
+  const pdfPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
@@ -291,7 +301,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
   const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
-  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'debug' | 'extensions'>('explorer');
+  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'debug' | 'extensions'>('explorer');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
@@ -329,7 +339,34 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     () => Object.values(reviewMarkers).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [reviewMarkers]
   );
+
+  const allDiagnostics = useMemo<Diagnostic[]>(() => {
+    const result: Diagnostic[] = [];
+    for (const tab of tabs) {
+      if (isMathValidatableFile(tab.path)) {
+        for (const issue of validateMathInBuffer(tab.content, tab.path)) {
+          result.push({ filePath: tab.path, fileName: tab.name, ...issue });
+        }
+      }
+      if (isPtxFile(tab.path)) {
+        for (const issue of validatePtxBuffer(tab.content, tab.path)) {
+          result.push({ filePath: tab.path, fileName: tab.name, ...issue });
+        }
+      }
+    }
+    // Build errors: match parsed errors against open tabs
+    for (const err of buildErrors) {
+      const tab = tabs.find(
+        (t) => t.path === err.filePath || err.filePath.endsWith(t.name),
+      );
+      if (tab) result.push({ ...err, filePath: tab.path, fileName: tab.name });
+    }
+    return result;
+  }, [tabs, buildErrors]);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof Monaco | null>(null);
+  const mathValidationTimerRef = useRef<number | null>(null);
+  const ptxValidationTimerRef = useRef<number | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
   
   const sidebarResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
@@ -620,8 +657,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
     editorRef.current = editor;
+    monacoRef.current = monaco;
     setEditorReady(true);
-    
+
     applyHandshakeTheme(monaco);
     
     editor.updateOptions({
@@ -845,6 +883,129 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
+
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const model = editor?.getModel?.();
+    if (!monaco || !model) return;
+
+    if (!activeTab || !isMathValidatableFile(activeTab.path)) {
+      monaco.editor.setModelMarkers(model, 'proofdesk-math', []);
+      return;
+    }
+
+    if (mathValidationTimerRef.current !== null) {
+      window.clearTimeout(mathValidationTimerRef.current);
+    }
+
+    const content = activeTab.content;
+    const path = activeTab.path;
+    mathValidationTimerRef.current = window.setTimeout(() => {
+      const latestEditor = editorRef.current;
+      const latestModel = latestEditor?.getModel?.();
+      const latestMonaco = monacoRef.current;
+      if (!latestModel || !latestMonaco) return;
+      if (activeTabRef.current?.path !== path) return;
+
+      const issues = validateMathInBuffer(content, path);
+      const markers = issues.map((issue) => ({
+        severity: latestMonaco.MarkerSeverity.Error,
+        message: issue.message,
+        source: issue.source,
+        startLineNumber: issue.startLineNumber,
+        startColumn: issue.startColumn,
+        endLineNumber: issue.endLineNumber,
+        endColumn: issue.endColumn,
+      }));
+      latestMonaco.editor.setModelMarkers(latestModel, 'proofdesk-math', markers);
+    }, 300);
+
+    return () => {
+      if (mathValidationTimerRef.current !== null) {
+        window.clearTimeout(mathValidationTimerRef.current);
+        mathValidationTimerRef.current = null;
+      }
+    };
+  }, [activeTab, editorReady]);
+
+  // Slice 2: PreTeXt tag structure validation (nesting rules, unmatched tags)
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const model = editor?.getModel?.();
+    if (!monaco || !model) return;
+
+    if (!activeTab || !isPtxFile(activeTab.path)) {
+      monaco.editor.setModelMarkers(model, 'proofdesk-ptx', []);
+      return;
+    }
+
+    if (ptxValidationTimerRef.current !== null) {
+      window.clearTimeout(ptxValidationTimerRef.current);
+    }
+
+    const content = activeTab.content;
+    const path = activeTab.path;
+    ptxValidationTimerRef.current = window.setTimeout(() => {
+      const latestEditor = editorRef.current;
+      const latestModel = latestEditor?.getModel?.();
+      const latestMonaco = monacoRef.current;
+      if (!latestModel || !latestMonaco) return;
+      if (activeTabRef.current?.path !== path) return;
+
+      const issues = validatePtxBuffer(content, path);
+      const markers = issues.map((issue) => ({
+        severity: issue.severity === 'error'
+          ? latestMonaco.MarkerSeverity.Error
+          : latestMonaco.MarkerSeverity.Warning,
+        message: issue.message,
+        source: issue.source,
+        startLineNumber: issue.startLineNumber,
+        startColumn: issue.startColumn,
+        endLineNumber: issue.endLineNumber,
+        endColumn: issue.endColumn,
+      }));
+      latestMonaco.editor.setModelMarkers(latestModel, 'proofdesk-ptx', markers);
+    }, 300);
+
+    return () => {
+      if (ptxValidationTimerRef.current !== null) {
+        window.clearTimeout(ptxValidationTimerRef.current);
+        ptxValidationTimerRef.current = null;
+      }
+    };
+  }, [activeTab, editorReady]);
+
+  // Apply build-error markers for the currently visible tab whenever the
+  // active tab or the set of build errors changes.
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const model = editorRef.current?.getModel?.();
+    if (!monaco || !model) return;
+    if (!activeTab || buildErrors.length === 0) {
+      monaco.editor.setModelMarkers(model, 'proofdesk-build', []);
+      return;
+    }
+    const tabErrors = buildErrors.filter(
+      (e) => e.filePath === activeTab.path || e.filePath.endsWith(activeTab.name),
+    );
+    monaco.editor.setModelMarkers(
+      model,
+      'proofdesk-build',
+      tabErrors.map((e) => ({
+        startLineNumber: e.startLineNumber,
+        startColumn: e.startColumn,
+        endLineNumber: e.endLineNumber,
+        endColumn: e.endColumn,
+        message: e.message,
+        severity: e.severity === 'error'
+          ? monaco.MarkerSeverity.Error
+          : monaco.MarkerSeverity.Warning,
+        source: 'Build',
+      })),
+    );
+  }, [activeTabId, buildErrors, editorReady]);
 
   useEffect(() => {
     setRecentFiles(readRecentFiles(repo?.fullName || null));
@@ -1407,6 +1568,19 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
 
     if (!data.success) {
+      // Parse build errors and surface them as inline Monaco markers
+      const parsed = parseBuildErrors(
+        data.stdout || '',
+        data.stderr || '',
+        tabs.map((t) => t.path),
+      );
+      setBuildErrors(
+        parsed.map((e) => ({
+          ...e,
+          fileName: e.filePath.split('/').pop() ?? e.filePath,
+        })),
+      );
+
       setWorkspaceNotice({
         tone: 'error',
         title: data.error || 'Build failed',
@@ -1427,6 +1601,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       }
       return false;
     }
+
+    setBuildErrors([]);
 
     if (entryFile && nextSessionId) {
       setPreviewFromEntry(nextSessionId, entryFile);
@@ -1450,7 +1626,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   const initializeBuildSession = async (
     repoData: Repository | null = repo,
-    options: { quiet?: boolean; statusMessage?: string } = {}
+    options: { quiet?: boolean; statusMessage?: string; xmlId?: string | null } = {}
   ): Promise<string | null> => {
     if (!repoData) return null;
 
@@ -1469,7 +1645,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           owner: repoData.owner,
           repo: repoData.name,
           defaultBranch: repoData.defaultBranch,
-          preferSeed: options.quiet === true
+          preferSeed: options.quiet === true,
+          ...(options.xmlId ? { xmlId: options.xmlId } : {}),
         })
       }, 'Build initialization failed');
 
@@ -1480,17 +1657,21 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           title: 'Build already in progress',
           advice: 'A build is already running for this repository. Checking back automatically in 20 seconds...',
         });
-        setCompiledOutput(`
-          <div style="background: #1e1e1e; color: #ccc; padding: 20px; font-family: monospace;">
-            <h2 style="color:#4fc3f7;">Build in progress…</h2>
-            <p>Another build is already running for this repository.</p>
-            <p>This page will automatically check back in 20 seconds.</p>
-          </div>
-        `);
         setTimeout(() => {
           void initializeBuildSession(repoData, options);
         }, 20000);
         return workspaceSessionId || null;
+      }
+
+      // Fresh Docker build kicked off in background — open log stream
+      if ((data as { building?: boolean }).building) {
+        const sid = data.sessionId || workspaceSessionId;
+        if (sid) {
+          buildSessionIdRef.current = sid;
+          setBuildSessionId(sid);
+          setStreamingBuildSessionId(sid);
+        }
+        return sid || null;
       }
 
       const applied = applyBuildResponse(data, { quiet: options.quiet });
@@ -1541,10 +1722,79 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     return buildInitPromiseRef.current;
   };
 
+  // Extract the first xml:id from the active PTX/XML file — used for per-section builds.
+  const activeSectionXmlId = useMemo<string | null>(() => {
+    if (!activeTab) return null;
+    const ext = activeTab.path.split('.').pop()?.toLowerCase();
+    if (ext !== 'xml' && ext !== 'ptx') return null;
+    const m = /xml:id="([a-zA-Z0-9_-]+)"/.exec(activeTab.content);
+    return m?.[1] ?? null;
+  // Recompute when the tab or its content changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab?.id, activeTab?.content]);
+
   const compileRepository = async (repoData: Repository | null = repo) => {
     setLiveEditStatus('');
     setSrcDocContent(null);
     await initializeBuildSession(repoData);
+  };
+
+  const compileSectionById = async () => {
+    if (!activeSectionXmlId) return;
+    setLiveEditStatus('');
+    setSrcDocContent(null);
+    await initializeBuildSession(repo, { xmlId: activeSectionXmlId });
+  };
+
+  const handleExportZip = () => {
+    const sessionId = buildSessionIdRef.current;
+    if (!sessionId) return;
+    const a = document.createElement('a');
+    a.href = `${API_URL}/build/export/${sessionId}`;
+    a.download = repo ? `${repo.name}-proofdesk.zip` : 'proofdesk-export.zip';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const handleExportPdf = async () => {
+    const sessionId = buildSessionIdRef.current;
+    if (!sessionId || pdfBuilding) return;
+
+    setPdfBuilding(true);
+    try {
+      await apiRequest(`/build/pdf/${sessionId}`, { method: 'POST' });
+    } catch {
+      setPdfBuilding(false);
+      return;
+    }
+
+    // Poll until ready
+    if (pdfPollRef.current) clearInterval(pdfPollRef.current);
+    pdfPollRef.current = setInterval(async () => {
+      const sid = buildSessionIdRef.current;
+      if (!sid) { clearInterval(pdfPollRef.current!); setPdfBuilding(false); return; }
+      try {
+        const { status } = await apiRequest<{ status: string }>(`/build/pdf-status/${sid}`);
+        if (status === 'ready') {
+          clearInterval(pdfPollRef.current!);
+          setPdfBuilding(false);
+          const a = document.createElement('a');
+          a.href = `${API_URL}/build/pdf-download/${sid}`;
+          a.download = repo ? `${repo.name}.pdf` : 'textbook.pdf';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        } else if (status === 'idle') {
+          // Build finished but no PDF was produced
+          clearInterval(pdfPollRef.current!);
+          setPdfBuilding(false);
+        }
+      } catch {
+        clearInterval(pdfPollRef.current!);
+        setPdfBuilding(false);
+      }
+    }, 5000);
   };
 
   const saveFile = async (tab: Tab | undefined = activeTab) => {
@@ -1903,6 +2153,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         saving={saving}
         unsavedCount={unsavedTabs.length}
         compileRepository={() => compileRepository()}
+        compileSectionById={activeSectionXmlId ? compileSectionById : undefined}
+        activeSectionXmlId={activeSectionXmlId}
         compiling={compiling}
         liveEditMode={liveEditMode}
         setLiveEditMode={setLiveEditModeState}
@@ -1916,6 +2168,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         copyTeamInviteCode={copyTeamInviteCode}
         createTeamSession={createTeamSession}
         teamSessionNotice={teamSessionNotice}
+        onExportZip={handleExportZip}
+        canExport={!!buildSessionId}
+        onExportPdf={handleExportPdf}
+        pdfBuilding={pdfBuilding}
+        canExportPdf={!!buildSessionId}
         terminalOpen={terminalOpen}
         setTerminalOpen={setTerminalOpen}
         profileDropdownOpen={profileDropdownOpen}
@@ -1985,6 +2242,33 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             title="Source Control"
           >
             <GitBranch className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={() => {
+              if (activityBarTab === 'problems' && sidebarOpen) setSidebarOpen(false);
+              else {
+                setActivityBarTab('problems');
+                setSidebarOpen(true);
+              }
+            }}
+            className={`relative p-2.5 rounded-xl transition-all active:scale-90 ${
+              activityBarTab === 'problems' && sidebarOpen
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : allDiagnostics.some((d) => d.severity === 'error')
+                  ? 'text-rose-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                  : allDiagnostics.length > 0
+                    ? 'text-amber-500 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+                    : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="Problems"
+          >
+            <AlertCircle className="w-5 h-5" />
+            {allDiagnostics.some((d) => d.severity === 'error') && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 flex items-center justify-center rounded-full bg-rose-500 text-white text-[9px] font-bold px-0.5">
+                {allDiagnostics.filter((d) => d.severity === 'error').length}
+              </span>
+            )}
           </button>
 
           <div className="mt-auto flex flex-col gap-4">
@@ -2071,6 +2355,14 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                       void fetchFileTree(repo);
                     }
                   }}
+                />
+              )}
+
+              {activityBarTab === 'problems' && (
+                <EditorProblemsPane
+                  diagnostics={allDiagnostics}
+                  activeFilePath={activeTab?.path}
+                  onNavigate={openFileInTab}
                 />
               )}
             </div>
@@ -2174,7 +2466,25 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         openTabsCount={tabs.length}
         unsavedCount={unsavedTabs.length}
         userLogin={userData?.login}
+        errorCount={allDiagnostics.filter((d) => d.severity === 'error').length}
+        warningCount={allDiagnostics.filter((d) => d.severity === 'warning').length}
+        onOpenProblems={() => {
+          setActivityBarTab('problems');
+          setSidebarOpen(true);
+        }}
       />
+
+      {streamingBuildSessionId && (
+        <BuildLogPanel
+          sessionId={streamingBuildSessionId}
+          apiUrl={API_URL}
+          onComplete={(result) => {
+            setStreamingBuildSessionId(null);
+            applyBuildResponse(result as BuildResponse);
+          }}
+          onClose={() => setStreamingBuildSessionId(null)}
+        />
+      )}
 
       <SaveReviewDialog
         isOpen={saveReviewOpen}

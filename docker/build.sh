@@ -996,36 +996,62 @@ open('/home/vagrant/cache/pretex-cache/placeholder.png', 'wb').write(png)
         echo "  Created placeholder PNG in pretex-cache"
     fi
 
-    echo "Step 5b: Building HTML ($(nproc) parallel jobs)..."
-    scons html -j$(nproc) 2>&1 || true
-    
-    HTML_COUNT=$(find /home/vagrant -name "*.html" -type f 2>/dev/null | wc -l)
-    REPO_HTML_COUNT=$(find /repo/html -name "*.html" -type f 2>/dev/null | wc -l)
-    TOTAL_HTML=$((HTML_COUNT + REPO_HTML_COUNT))
-    
-    echo "  Found $TOTAL_HTML HTML files in build directories"
-    
-    if [ "$TOTAL_HTML" -gt 10 ]; then
-        echo "✓ HTML generation succeeded ($TOTAL_HTML files)"
-        BUILD_SUCCESS=true
+    if [ "${BUILD_PDF:-}" = "1" ]; then
+        echo "Step 5b: Building PDF via scons print ($(nproc) parallel jobs)..."
+        scons print -j$(nproc) 2>&1 || true
 
-        if [ -f "/home/vagrant/cache/css/ila.css" ] && [ $(stat -c%s "/home/vagrant/build/css/ila.css" 2>/dev/null || echo 0) -lt 1000 ]; then
-            echo "  Refreshing bundled ila.css from cache before export..."
-            cp /home/vagrant/cache/css/ila.css /home/vagrant/build/css/ila.css
+        # Locate the generated PDF
+        PDF_FILE=$(find /home/vagrant /repo -name "*.pdf" -type f 2>/dev/null | head -1)
+        if [ -n "$PDF_FILE" ]; then
+            echo "✓ PDF found: $PDF_FILE"
+            mkdir -p /output
+            cp "$PDF_FILE" /output/textbook.pdf
+            BUILD_SUCCESS=true
+        else
+            echo "⚠️  scons print produced no PDF — aborting PDF build"
+        fi
+    else
+        echo "Step 5b: Building HTML ($(nproc) parallel jobs)..."
+        if [ -n "${SECTION_XMLID:-}" ]; then
+            echo "  Per-section build targeting xmlid: ${SECTION_XMLID}"
+            if scons "html/${SECTION_XMLID}.html" -j$(nproc) 2>&1; then
+                echo "  ✓ Per-section SCons build succeeded"
+            else
+                echo "  ⚠️  Per-section build failed — falling back to full HTML build"
+                scons html -j$(nproc) 2>&1 || true
+            fi
+        else
+            scons html -j$(nproc) 2>&1 || true
         fi
 
-        if [ -f "/home/vagrant/cache/js/ila.js" ] && [ $(stat -c%s "/home/vagrant/build/js/ila.js" 2>/dev/null || echo 0) -lt 200 ]; then
-            echo "  Refreshing bundled ila.js from cache before export..."
-            cp /home/vagrant/cache/js/ila.js /home/vagrant/build/js/ila.js
+        HTML_COUNT=$(find /home/vagrant -name "*.html" -type f 2>/dev/null | wc -l)
+        REPO_HTML_COUNT=$(find /repo/html -name "*.html" -type f 2>/dev/null | wc -l)
+        TOTAL_HTML=$((HTML_COUNT + REPO_HTML_COUNT))
+
+        echo "  Found $TOTAL_HTML HTML files in build directories"
+
+        if [ "$TOTAL_HTML" -gt 10 ]; then
+            echo "✓ HTML generation succeeded ($TOTAL_HTML files)"
+            BUILD_SUCCESS=true
+
+            if [ -f "/home/vagrant/cache/css/ila.css" ] && [ $(stat -c%s "/home/vagrant/build/css/ila.css" 2>/dev/null || echo 0) -lt 1000 ]; then
+                echo "  Refreshing bundled ila.css from cache before export..."
+                cp /home/vagrant/cache/css/ila.css /home/vagrant/build/css/ila.css
+            fi
+
+            if [ -f "/home/vagrant/cache/js/ila.js" ] && [ $(stat -c%s "/home/vagrant/build/js/ila.js" 2>/dev/null || echo 0) -lt 200 ]; then
+                echo "  Refreshing bundled ila.js from cache before export..."
+                cp /home/vagrant/cache/js/ila.js /home/vagrant/build/js/ila.js
+            fi
+
+            echo "  Copying generated files to /output..."
+            [ -e /output ] && [ ! -d /output ] && rm -f /output
+            mkdir -p /output 2>/dev/null || true
+            [ -d "/home/vagrant/build" ] && cp -r /home/vagrant/build/* /output/ 2>/dev/null
+            [ -d "/home/vagrant/cache" ] && cp -r /home/vagrant/cache/* /output/ 2>/dev/null
+            [ -d "/home/vagrant/output-html" ] && cp -r /home/vagrant/output-html/* /output/ 2>/dev/null
+            [ -d "/repo/html" ] && cp -r /repo/html/* /output/ 2>/dev/null
         fi
-        
-        echo "  Copying generated files to /output..."
-        [ -e /output ] && [ ! -d /output ] && rm -f /output
-        mkdir -p /output 2>/dev/null || true
-        [ -d "/home/vagrant/build" ] && cp -r /home/vagrant/build/* /output/ 2>/dev/null
-        [ -d "/home/vagrant/cache" ] && cp -r /home/vagrant/cache/* /output/ 2>/dev/null  
-        [ -d "/home/vagrant/output-html" ] && cp -r /home/vagrant/output-html/* /output/ 2>/dev/null
-        [ -d "/repo/html" ] && cp -r /repo/html/* /output/ 2>/dev/null
     fi
     
 elif [ -f "project.ptx" ]; then
@@ -1041,17 +1067,29 @@ elif [ -f "project.ptx" ]; then
     done
     
     if [ "$BUILD_SUCCESS" != "true" ]; then
-        for target in web html runestone print; do
-            echo "  Trying: pretext build $target"
-            pretext build $target -a 2>&1 || pretext build $target 2>&1 || true
-            
-            if [ -d "output/$target" ] && [ -n "$(find output/$target -name '*.html' 2>/dev/null | head -1)" ]; then
-                echo "✓ pretext build $target produced HTML output"
+        if [ "${BUILD_PDF:-}" = "1" ]; then
+            echo "  Trying: pretext build print"
+            pretext build print -a 2>&1 || pretext build print 2>&1 || true
+            PDF_FILE=$(find output/print -name "*.pdf" -type f 2>/dev/null | head -1)
+            if [ -n "$PDF_FILE" ]; then
+                echo "✓ pretext build print produced: $PDF_FILE"
+                mkdir -p /output
+                cp "$PDF_FILE" /output/textbook.pdf
                 BUILD_SUCCESS=true
-                cp -r output/$target/* /output/ 2>/dev/null
-                break
             fi
-        done
+        else
+            for target in web html runestone print; do
+                echo "  Trying: pretext build $target"
+                pretext build $target -a 2>&1 || pretext build $target 2>&1 || true
+
+                if [ -d "output/$target" ] && [ -n "$(find output/$target -name '*.html' 2>/dev/null | head -1)" ]; then
+                    echo "✓ pretext build $target produced HTML output"
+                    BUILD_SUCCESS=true
+                    cp -r output/$target/* /output/ 2>/dev/null
+                    break
+                fi
+            done
+        fi
     fi
     
 elif [ -f "Makefile" ]; then
@@ -1062,31 +1100,37 @@ fi
 
 echo ""
 echo "=== Step 6: Copying output ==="
-[ -e /output ] && [ ! -d /output ] && rm -f /output
-mkdir -p /output 2>/dev/null || true
 
-[ -d "/home/vagrant/build" ] && cp -r /home/vagrant/build/* /output/ 2>/dev/null && echo "  Copied /home/vagrant/build"
-[ -d "/home/vagrant/cache" ] && cp -r /home/vagrant/cache/* /output/ 2>/dev/null && echo "  Copied /home/vagrant/cache"
-[ -d "/home/vagrant/output-html" ] && cp -r /home/vagrant/output-html/* /output/ 2>/dev/null && echo "  Copied /home/vagrant/output-html"
-[ -d "/repo/html" ] && cp -r /repo/html/* /output/ 2>/dev/null && echo "  Copied /repo/html"
+if [ "${BUILD_PDF:-}" = "1" ]; then
+    # PDF build — output was already written to /output/textbook.pdf above; nothing more to copy.
+    echo "  PDF mode: skipping HTML asset copy"
+else
+    [ -e /output ] && [ ! -d /output ] && rm -f /output
+    mkdir -p /output 2>/dev/null || true
 
-for dir in "build/html" "build" "html" "static" "output" "_build/html" "dist" "public"; do
-    [ -d "/repo/$dir" ] && cp -r "/repo/$dir"/* /output/ 2>/dev/null && echo "  Copied /repo/$dir"
-done
+    [ -d "/home/vagrant/build" ] && cp -r /home/vagrant/build/* /output/ 2>/dev/null && echo "  Copied /home/vagrant/build"
+    [ -d "/home/vagrant/cache" ] && cp -r /home/vagrant/cache/* /output/ 2>/dev/null && echo "  Copied /home/vagrant/cache"
+    [ -d "/home/vagrant/output-html" ] && cp -r /home/vagrant/output-html/* /output/ 2>/dev/null && echo "  Copied /home/vagrant/output-html"
+    [ -d "/repo/html" ] && cp -r /repo/html/* /output/ 2>/dev/null && echo "  Copied /repo/html"
 
-for asset_dir in "mathbook-assets" "css" "js" "images" "fonts" "static" "demos"; do
-    if [ -d "/repo/$asset_dir" ]; then
-        mkdir -p "/output/$asset_dir"
-        rsync -a --exclude='node_modules' "/repo/$asset_dir/" "/output/$asset_dir/" 2>/dev/null || \
-            cp -r "/repo/$asset_dir"/* "/output/$asset_dir/" 2>/dev/null
-        echo "  Copied asset: $asset_dir"
+    for dir in "build/html" "build" "html" "static" "output" "_build/html" "dist" "public"; do
+        [ -d "/repo/$dir" ] && cp -r "/repo/$dir"/* /output/ 2>/dev/null && echo "  Copied /repo/$dir"
+    done
+
+    for asset_dir in "mathbook-assets" "css" "js" "images" "fonts" "static" "demos"; do
+        if [ -d "/repo/$asset_dir" ]; then
+            mkdir -p "/output/$asset_dir"
+            rsync -a --exclude='node_modules' "/repo/$asset_dir/" "/output/$asset_dir/" 2>/dev/null || \
+                cp -r "/repo/$asset_dir"/* "/output/$asset_dir/" 2>/dev/null
+            echo "  Copied asset: $asset_dir"
+        fi
+    done
+
+    if [ -d "/repo/mathbox" ]; then
+        mkdir -p "/output/mathbox"
+        rsync -a --exclude='node_modules' "/repo/mathbox/" "/output/mathbox/" 2>/dev/null || true
+        echo "  Copied asset: mathbox"
     fi
-done
-
-if [ -d "/repo/mathbox" ]; then
-    mkdir -p "/output/mathbox"
-    rsync -a --exclude='node_modules' "/repo/mathbox/" "/output/mathbox/" 2>/dev/null || true
-    echo "  Copied asset: mathbox"
 fi
 
 echo ""

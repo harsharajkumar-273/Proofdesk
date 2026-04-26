@@ -2,6 +2,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
+import helmet from 'helmet';
 import { Octokit } from '@octokit/rest';
 import path from 'path';
 import fs from 'fs/promises';
@@ -88,6 +89,24 @@ const createRateLimiter = ({ windowMs, maxRequests }) => {
 // 20 requests per minute per token for the GitHub search API
 const repoSearchRateAllowed = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 
+// 3 fresh Docker builds per 10 minutes per token
+const buildInitRateAllowed = createRateLimiter({ windowMs: 10 * 60_000, maxRequests: 3 });
+
+// Verifies that the authenticated user owns the workspace session identified by
+// :sessionId in the URL.  Skips the check when no login is available (bearer
+// token / local-test mode) or when the session predates the ownership field.
+const checkWorkspaceOwner = (req, res, next) => {
+  const { sessionId } = req.params;
+  const login = req.authSession?.user?.login;
+  if (!login || !sessionId) return next();
+  const session = buildExecutor.sessions.get(sessionId);
+  if (!session) return next();
+  if (session.creatorLogin && session.creatorLogin !== login) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+  next();
+};
+
 loadRuntimeEnv(__dirname);
 
 const app = express();
@@ -97,6 +116,7 @@ const MATHJAX_ASSET_DIR = path.resolve(__dirname, '../node_modules/mathjax-full/
 let processMonitoringAttached = false;
 
 // Middleware
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/assets/mathjax', express.static(MATHJAX_ASSET_DIR, {
@@ -305,6 +325,8 @@ app.post('/workspace/init', requireAccessToken, async (req, res) => {
     const workspace = await prepareWorkspace(owner, repo, token, {
       preferSeed: Boolean(preferSeed),
       defaultBranch: defaultBranch || 'main',
+      creatorLogin: req.authSession?.user?.login || null,
+      notifyEmail: req.authSession?.user?.email || null,
     });
     await ensureWorkspaceGitReady(workspace.sessionId);
     const tree = await getWorkspaceTree(workspace.sessionId);
@@ -318,7 +340,7 @@ app.post('/workspace/init', requireAccessToken, async (req, res) => {
   }
 });
 
-app.get('/workspace/:sessionId/tree', requireAccessToken, async (req, res) => {
+app.get('/workspace/:sessionId/tree', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const tree = await getWorkspaceTree(req.params.sessionId, String(req.query.path || ''));
     res.json(tree);
@@ -328,7 +350,7 @@ app.get('/workspace/:sessionId/tree', requireAccessToken, async (req, res) => {
   }
 });
 
-app.get('/workspace/:sessionId/contents/*', requireAccessToken, async (req, res) => {
+app.get('/workspace/:sessionId/contents/*', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const file = await getWorkspaceFileContent(req.params.sessionId, req.params[0]);
     res.json(file);
@@ -338,7 +360,7 @@ app.get('/workspace/:sessionId/contents/*', requireAccessToken, async (req, res)
   }
 });
 
-app.put('/workspace/:sessionId/contents/*', requireAccessToken, async (req, res) => {
+app.put('/workspace/:sessionId/contents/*', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const result = await updateWorkspaceFileContent(
       req.params.sessionId,
@@ -352,7 +374,7 @@ app.put('/workspace/:sessionId/contents/*', requireAccessToken, async (req, res)
   }
 });
 
-app.get('/workspace/:sessionId/review-markers', requireAccessToken, async (req, res) => {
+app.get('/workspace/:sessionId/review-markers', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const markers = await getWorkspaceReviewMarkers(req.params.sessionId);
     res.json(markers);
@@ -362,7 +384,7 @@ app.get('/workspace/:sessionId/review-markers', requireAccessToken, async (req, 
   }
 });
 
-app.put('/workspace/:sessionId/review-markers', requireAccessToken, async (req, res) => {
+app.put('/workspace/:sessionId/review-markers', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     await saveWorkspaceReviewMarkers(req.params.sessionId, req.body ?? {});
     res.json({ success: true });
@@ -372,7 +394,7 @@ app.put('/workspace/:sessionId/review-markers', requireAccessToken, async (req, 
   }
 });
 
-app.get('/workspace/:sessionId/search', requireAccessToken, async (req, res) => {
+app.get('/workspace/:sessionId/search', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const query = String(req.query.q || '').trim();
   if (query.length < 2) {
     return res.json({ results: [] });
@@ -386,7 +408,7 @@ app.get('/workspace/:sessionId/search', requireAccessToken, async (req, res) => 
   }
 });
 
-app.get('/workspace/:sessionId/git/status', requireAccessToken, async (req, res) => {
+app.get('/workspace/:sessionId/git/status', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const status = await getWorkspaceGitStatus(req.params.sessionId);
     res.json(status);
@@ -396,7 +418,7 @@ app.get('/workspace/:sessionId/git/status', requireAccessToken, async (req, res)
   }
 });
 
-app.get('/workspace/:sessionId/git/diff', requireAccessToken, async (req, res) => {
+app.get('/workspace/:sessionId/git/diff', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const filePath = String(req.query.path || '').trim();
   if (!filePath) {
     return res.status(400).json({ error: 'path is required' });
@@ -411,7 +433,7 @@ app.get('/workspace/:sessionId/git/diff', requireAccessToken, async (req, res) =
   }
 });
 
-app.post('/workspace/:sessionId/git/stage', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/stage', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const filePath = String(req.body?.path || '').trim();
   if (!filePath) {
     return res.status(400).json({ error: 'path is required' });
@@ -426,7 +448,7 @@ app.post('/workspace/:sessionId/git/stage', requireAccessToken, async (req, res)
   }
 });
 
-app.post('/workspace/:sessionId/git/unstage', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/unstage', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const filePath = String(req.body?.path || '').trim();
   if (!filePath) {
     return res.status(400).json({ error: 'path is required' });
@@ -441,7 +463,7 @@ app.post('/workspace/:sessionId/git/unstage', requireAccessToken, async (req, re
   }
 });
 
-app.post('/workspace/:sessionId/git/stage-all', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/stage-all', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const status = await stageAllWorkspaceFiles(req.params.sessionId);
     res.json(status);
@@ -451,7 +473,7 @@ app.post('/workspace/:sessionId/git/stage-all', requireAccessToken, async (req, 
   }
 });
 
-app.post('/workspace/:sessionId/git/unstage-all', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/unstage-all', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const status = await unstageAllWorkspaceFiles(req.params.sessionId);
     res.json(status);
@@ -461,7 +483,7 @@ app.post('/workspace/:sessionId/git/unstage-all', requireAccessToken, async (req
   }
 });
 
-app.post('/workspace/:sessionId/git/commit', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/commit', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const result = await commitWorkspaceChanges(req.params.sessionId, req.body?.message || '');
     res.json(result);
@@ -471,7 +493,7 @@ app.post('/workspace/:sessionId/git/commit', requireAccessToken, async (req, res
   }
 });
 
-app.post('/workspace/:sessionId/git/pull', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/pull', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const result = await pullWorkspaceBranch(req.params.sessionId, req.accessToken);
     res.json(result);
@@ -481,7 +503,7 @@ app.post('/workspace/:sessionId/git/pull', requireAccessToken, async (req, res) 
   }
 });
 
-app.post('/workspace/:sessionId/git/push', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/push', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const result = await pushWorkspaceBranch(req.params.sessionId, req.accessToken);
     res.json(result);
@@ -491,7 +513,7 @@ app.post('/workspace/:sessionId/git/push', requireAccessToken, async (req, res) 
   }
 });
 
-app.post('/workspace/:sessionId/git/branch', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/branch', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const status = await switchWorkspaceBranch(req.params.sessionId, req.body?.branchName || '', req.accessToken);
     res.json(status);
@@ -501,7 +523,7 @@ app.post('/workspace/:sessionId/git/branch', requireAccessToken, async (req, res
   }
 });
 
-app.post('/workspace/:sessionId/git/pull-request', requireAccessToken, async (req, res) => {
+app.post('/workspace/:sessionId/git/pull-request', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const result = await createWorkspacePullRequest(req.params.sessionId, req.body || {}, req.accessToken);
     res.json(result);
@@ -616,19 +638,67 @@ app.get('/shared/:token/*', async (req, res) => {
 
 // ============= BUILD ROUTES (NEW - REAL COMPILATION) =============
 
+// Stream build logs via SSE — client connects immediately after /build/init returns { building: true }
+app.get('/build/logs/:sessionId', requireAccessToken, checkWorkspaceOwner, (req, res) => {
+  const { sessionId } = req.params;
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // tell nginx not to buffer this stream
+  res.flushHeaders();
+
+  // Send a heartbeat immediately so the client knows the connection is live
+  res.write(': connected\n\n');
+
+  const unsub = buildExecutor.subscribeToLogs(sessionId, (event) => {
+    if (event.type === 'line') {
+      res.write(`data: ${JSON.stringify({ line: event.line, stream: event.stream })}\n\n`);
+    } else if (event.type === 'done') {
+      res.write(`event: done\ndata: ${JSON.stringify(event.result)}\n\n`);
+      res.end();
+    }
+  });
+
+  // Keep-alive ping every 15 s so proxies don't close idle connections
+  const pingTimer = setInterval(() => res.write(': ping\n\n'), 15000);
+
+  req.on('close', () => {
+    clearInterval(pingTimer);
+    unsub();
+  });
+});
+
 // Initialize build session
 app.post('/build/init', requireAccessToken, async (req, res) => {
   const token = req.accessToken;
-  const { owner, repo, preferSeed, defaultBranch, sessionId } = req.body;
+  const { owner, repo, preferSeed, defaultBranch, sessionId, xmlId } = req.body;
+
+  // Rate-limit fresh (non-cached) build requests to prevent Docker container spam
+  const rateLimitKey = token || req.ip;
+  if (!buildInitRateAllowed(rateLimitKey)) {
+    return res.status(429).json({
+      error: 'Build rate limit exceeded. Please wait a few minutes before starting another build.',
+      retryAfter: 600,
+    });
+  }
 
   if (sessionId) {
+    const existingSession = buildExecutor.sessions.get(sessionId);
+    const initLogin = req.authSession?.user?.login;
+    if (initLogin && existingSession?.creatorLogin && existingSession.creatorLogin !== initLogin) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
     try {
       getWorkspaceSession(sessionId);
-      const buildResult = await buildExecutor.build(sessionId);
-      return res.json({
-        sessionId,
-        ...buildResult,
-      });
+      const result = await buildExecutor.startBuild(sessionId, { xmlId: xmlId || null });
+      if (result === null) {
+        return res.json({ sessionId, building: true });
+      }
+      return res.json({ sessionId, ...result });
     } catch (error) {
       return res.status(404).json({ error: error.message || 'Workspace session not found' });
     }
@@ -649,13 +719,14 @@ app.post('/build/init', requireAccessToken, async (req, res) => {
     const workspace = await prepareWorkspace(owner, repo, token, {
       preferSeed,
       defaultBranch: defaultBranch || 'main',
+      creatorLogin: req.authSession?.user?.login || null,
+      notifyEmail: req.authSession?.user?.email || null,
     });
-    const buildResult = await buildExecutor.build(workspace.sessionId);
-    
-    res.json({
-      sessionId: workspace.sessionId,
-      ...buildResult
-    });
+    const result = await buildExecutor.startBuild(workspace.sessionId, { xmlId: xmlId || null });
+    if (result === null) {
+      return res.json({ sessionId: workspace.sessionId, building: true });
+    }
+    res.json({ sessionId: workspace.sessionId, ...result });
   } catch (error) {
     console.error('Build initialization error:', error);
     await recordMonitoringEvent({
@@ -683,6 +754,11 @@ app.post('/build/init', requireAccessToken, async (req, res) => {
 // Update file and rebuild
 app.post('/build/update', requireAccessToken, async (req, res) => {
   const { sessionId, filePath, content } = req.body;
+  const updateLogin = req.authSession?.user?.login;
+  const updateSession = buildExecutor.sessions.get(sessionId);
+  if (updateLogin && updateSession?.creatorLogin && updateSession.creatorLogin !== updateLogin) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
 
   try {
     console.log(`Updating file ${filePath} and rebuilding`);
@@ -721,6 +797,12 @@ app.post('/build/quick-update', requireAccessToken, async (req, res) => {
 
   if (!/^[0-9a-f]{16}$/.test(sessionId)) {
     return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const quickLogin = req.authSession?.user?.login;
+  const quickSession = buildExecutor.sessions.get(sessionId);
+  if (quickLogin && quickSession?.creatorLogin && quickSession.creatorLogin !== quickLogin) {
+    return res.status(403).json({ error: 'Access denied' });
   }
 
   const ext = path.extname(filePath).toLowerCase();
@@ -780,7 +862,7 @@ async function walkDir(dir) {
 }
 
 // Serve build artifact
-app.get('/build/artifact/:sessionId/*', requireAccessToken, async (req, res) => {
+app.get('/build/artifact/:sessionId/*', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const { sessionId } = req.params;
   const artifactPath = req.params[0];
 
@@ -822,7 +904,7 @@ app.get('/build/artifact/:sessionId/*', requireAccessToken, async (req, res) => 
 });
 
 // Export compiled output as ZIP
-app.get('/build/export/:sessionId', requireAccessToken, async (req, res) => {
+app.get('/build/export/:sessionId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const { sessionId } = req.params;
 
   if (!/^[0-9a-f]{16}$/.test(sessionId)) {
@@ -842,8 +924,69 @@ app.get('/build/export/:sessionId', requireAccessToken, async (req, res) => {
   }
 });
 
+// Start or poll a PDF build for the current session
+app.post('/build/pdf/:sessionId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
+  const { sessionId } = req.params;
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  try {
+    // Fire-and-forget; the client polls /build/pdf-status/:sessionId
+    buildExecutor.buildPdf(sessionId).catch(() => {});
+    res.json({ pdfBuilding: true });
+  } catch (error) {
+    res.status(404).json({ error: error.message });
+  }
+});
+
+// Poll whether a PDF build has finished
+app.get('/build/pdf-status/:sessionId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
+  const { sessionId } = req.params;
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const session = buildExecutor.sessions.get(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  if (buildExecutor.pdfBuilds.has(sessionId)) {
+    return res.json({ status: 'building' });
+  }
+
+  if (session.pdfReady) {
+    return res.json({ status: 'ready' });
+  }
+
+  res.json({ status: 'idle' });
+});
+
+// Download the compiled PDF
+app.get('/build/pdf-download/:sessionId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
+  const { sessionId } = req.params;
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  const session = buildExecutor.sessions.get(sessionId);
+  if (!session || !session.pdfReady) {
+    return res.status(503).json({ error: 'PDF not ready — start a PDF build first' });
+  }
+
+  const pdfPath = path.join(session.outputPath, 'textbook.pdf');
+  try {
+    await import('fs/promises').then(m => m.access(pdfPath));
+  } catch {
+    return res.status(404).json({ error: 'PDF file not found' });
+  }
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="proofdesk-${sessionId.slice(0, 8)}.pdf"`);
+  import('fs').then(({ createReadStream }) => createReadStream(pdfPath).pipe(res));
+});
+
 // Create a shareable public link for the current built output
-app.post('/build/share/:sessionId', requireAccessToken, async (req, res) => {
+app.post('/build/share/:sessionId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   const { sessionId } = req.params;
 
   if (!/^[0-9a-f]{16}$/.test(sessionId)) {
@@ -875,6 +1018,11 @@ app.post('/build/share/:sessionId', requireAccessToken, async (req, res) => {
 // Cleanup session
 app.post('/build/cleanup', requireAccessToken, async (req, res) => {
   const { sessionId } = req.body;
+  const cleanupLogin = req.authSession?.user?.login;
+  const cleanupSession = buildExecutor.sessions.get(sessionId);
+  if (cleanupLogin && cleanupSession?.creatorLogin && cleanupSession.creatorLogin !== cleanupLogin) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
 
   try {
     await buildExecutor.cleanup(sessionId);

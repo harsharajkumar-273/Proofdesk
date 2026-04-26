@@ -2,7 +2,10 @@ import React from 'react';
 import {
   ArrowLeft,
   ChevronDown,
+  Download,
+  FileText,
   FolderTree,
+  Layers,
   LogOut,
   Play,
   RefreshCw,
@@ -50,6 +53,8 @@ interface EditorTopBarProps {
   saving: boolean;
   unsavedCount: number;
   compileRepository: () => void;
+  compileSectionById?: () => void;
+  activeSectionXmlId?: string | null;
   compiling: boolean;
   liveEditMode: boolean;
   setLiveEditMode: React.Dispatch<React.SetStateAction<boolean>>;
@@ -63,6 +68,11 @@ interface EditorTopBarProps {
   copyTeamInviteCode: () => Promise<void>;
   createTeamSession: () => Promise<void>;
   teamSessionNotice: string;
+  onExportZip: () => void;
+  canExport: boolean;
+  onExportPdf: () => void;
+  pdfBuilding: boolean;
+  canExportPdf: boolean;
   terminalOpen: boolean;
   setTerminalOpen: (value: boolean) => void;
   profileDropdownOpen: boolean;
@@ -83,6 +93,8 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
   saving,
   unsavedCount,
   compileRepository,
+  compileSectionById,
+  activeSectionXmlId,
   compiling,
   liveEditMode,
   setLiveEditMode,
@@ -94,6 +106,11 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
   teamSessionBusy,
   teamSession,
   copyTeamInviteCode,
+  onExportZip,
+  canExport,
+  onExportPdf,
+  pdfBuilding,
+  canExportPdf,
   terminalOpen,
   setTerminalOpen,
   profileDropdownOpen,
@@ -224,6 +241,42 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
           <Play className="w-3.5 h-3.5" />
         )}
         <span className="hidden text-xs font-bold md:inline">{compiling ? 'Building' : 'Build Preview'}</span>
+      </button>
+
+      {compileSectionById && activeSectionXmlId && (
+        <button
+          onClick={compileSectionById}
+          disabled={compiling}
+          className="h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed"
+          title={`Rebuild only "${activeSectionXmlId}" section (faster)`}
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">Section</span>
+        </button>
+      )}
+
+      <button
+        onClick={onExportZip}
+        disabled={!canExport}
+        className="h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={canExport ? 'Download compiled output as ZIP' : 'Run a build first to enable export'}
+      >
+        <Download className="w-3.5 h-3.5" />
+        <span className="hidden md:inline">Export ZIP</span>
+      </button>
+
+      <button
+        onClick={onExportPdf}
+        disabled={!canExportPdf || pdfBuilding}
+        className="h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={canExportPdf ? 'Export textbook as PDF (may take a few minutes)' : 'Run a build first to enable PDF export'}
+      >
+        {pdfBuilding ? (
+          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+        ) : (
+          <FileText className="w-3.5 h-3.5" />
+        )}
+        <span className="hidden md:inline">{pdfBuilding ? 'Building PDF…' : 'Export PDF'}</span>
       </button>
 
       <button

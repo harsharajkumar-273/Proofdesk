@@ -1,5 +1,5 @@
 // backend/src/services/buildExecutor.js
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -10,6 +10,7 @@ import localTestRepoService from './localTestRepoService.js';
 import { syncPreviewBundle } from './previewBundleService.js';
 import { getProofdeskDataRoot, getProofdeskDataPath } from '../utils/dataPaths.js';
 import githubCacheStore from './githubCacheStore.js';
+import { sendBuildCompleteNotification, isEmailConfigured } from './emailService.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -133,6 +134,16 @@ class BuildExecutor {
 
     // Restore persisted cache from previous server runs
     this._loadCache();
+
+    // Per-session build log buffers for SSE streaming
+    // sessionId → { lines: Array<{line,stream}>, subscribers: Set<fn>, done: boolean, result: object|null }
+    this.buildLogs = new Map();
+
+    // Promises for in-flight background builds
+    this.buildPromises = new Map();
+
+    // In-flight PDF builds: sessionId → Promise<string|null>  (resolves to pdfPath)
+    this.pdfBuilds = new Map();
   }
 
   get workDir() {
@@ -230,6 +241,129 @@ class BuildExecutor {
     if (typeof timer.unref === 'function') {
       timer.unref();
     }
+  }
+
+  /* ─── Build log streaming (SSE) ─────────────────────────────────────────── */
+
+  static _stripAnsi(str) {
+    // Strip ANSI escape codes and handle \r (progress-bar overwrites)
+    const parts = str.split('\r');
+    return parts[parts.length - 1].replace(/\x1B\[[0-9;]*[mGKHFABCDEJIiRSTnhlLMPXZ]/g, '');
+  }
+
+  _initLog(sessionId) {
+    if (!this.buildLogs.has(sessionId)) {
+      this.buildLogs.set(sessionId, { lines: [], subscribers: new Set(), done: false, result: null });
+    }
+  }
+
+  _appendLog(sessionId, rawLine, stream = 'stdout') {
+    const entry = this.buildLogs.get(sessionId);
+    if (!entry) return;
+    const line = BuildExecutor._stripAnsi(rawLine).trimEnd();
+    if (!line) return;
+    const record = { line, stream };
+    entry.lines.push(record);
+    if (entry.lines.length > 2000) entry.lines.shift();
+    for (const fn of entry.subscribers) fn({ type: 'line', ...record });
+  }
+
+  _finishLog(sessionId, result) {
+    const entry = this.buildLogs.get(sessionId);
+    if (!entry) return;
+    entry.done = true;
+    entry.result = result;
+    for (const fn of entry.subscribers) fn({ type: 'done', result });
+    entry.subscribers.clear();
+
+    // Send email notification for real Docker builds (not cache hits or local test)
+    const session = this.sessions.get(sessionId);
+    if (
+      session?.notifyEmail
+      && !session.fromCache
+      && !session.localTestMode
+      && isEmailConfigured()
+    ) {
+      sendBuildCompleteNotification({
+        to: session.notifyEmail,
+        repoOwner: session.owner,
+        repoName: session.repo,
+        success: result?.success === true,
+      });
+    }
+  }
+
+  subscribeToLogs(sessionId, onEvent) {
+    this._initLog(sessionId);
+    const entry = this.buildLogs.get(sessionId);
+    for (const record of entry.lines) {
+      onEvent({ type: 'line', ...record });
+    }
+    if (entry.done) {
+      onEvent({ type: 'done', result: entry.result });
+      return () => {};
+    }
+    entry.subscribers.add(onEvent);
+    return () => entry.subscribers.delete(onEvent);
+  }
+
+  /* ─── Docker execution with line-by-line log streaming ───────────────────── */
+
+  _spawnDockerWithLogs(cmd, sessionId) {
+    return new Promise((resolve, reject) => {
+      const proc = spawn(cmd, { shell: true });
+      let stdout = '';
+      let stderr = '';
+      const buf = { out: '', err: '' };
+
+      const flushLines = (key, stream, data) => {
+        buf[key] += data;
+        let idx;
+        while ((idx = buf[key].indexOf('\n')) !== -1) {
+          const line = buf[key].slice(0, idx);
+          buf[key] = buf[key].slice(idx + 1);
+          this._appendLog(sessionId, line, stream);
+        }
+      };
+
+      proc.stdout.on('data', (chunk) => {
+        const text = chunk.toString();
+        stdout += text;
+        flushLines('out', 'stdout', text);
+      });
+
+      proc.stderr.on('data', (chunk) => {
+        const text = chunk.toString();
+        stderr += text;
+        flushLines('err', 'stderr', text);
+      });
+
+      const killTimer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        reject(Object.assign(new Error('Docker build timed out after 60 minutes'), { stdout, stderr }));
+      }, 3600000);
+
+      proc.on('close', (code) => {
+        clearTimeout(killTimer);
+        if (buf.out) this._appendLog(sessionId, buf.out, 'stdout');
+        if (buf.err) this._appendLog(sessionId, buf.err, 'stderr');
+        if (code === 0) {
+          resolve({ stdout, stderr });
+        } else {
+          const err = new Error(`Docker process exited with code ${code}`);
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+        }
+      });
+
+      proc.on('error', (err) => {
+        clearTimeout(killTimer);
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+      });
+    });
   }
 
   async _ensureImageAvailableNow() {
@@ -513,6 +647,8 @@ class BuildExecutor {
         fromCache: false,
         localTestMode: true,
         defaultBranch,
+        creatorLogin: options.creatorLogin || null,
+        notifyEmail: options.notifyEmail || null,
       });
       this.scheduleCleanup(sessionId);
 
@@ -548,6 +684,8 @@ class BuildExecutor {
           buildPath:  workspace.buildPath,
           fromCache:  true,
           defaultBranch,
+          creatorLogin: options.creatorLogin || null,
+        notifyEmail: options.notifyEmail || null,
         });
         this.scheduleCleanup(sessionId);
         console.log(`[BuildExecutor] Cache HIT prepared in ${Date.now() - startTime}ms`);
@@ -571,6 +709,8 @@ class BuildExecutor {
         buildPath: workspace.buildPath,
         fromCache: true,
         defaultBranch,
+        creatorLogin: options.creatorLogin || null,
+        notifyEmail: options.notifyEmail || null,
       });
       this.scheduleCleanup(sessionId);
       console.log(`[BuildExecutor] Deduped build prepared in ${Date.now() - startTime}ms`);
@@ -607,6 +747,8 @@ class BuildExecutor {
           fromCache: seededFromLocal,
           seededFromLocal,
           defaultBranch,
+          creatorLogin: options.creatorLogin || null,
+        notifyEmail: options.notifyEmail || null,
         });
         this.scheduleCleanup(sessionId);
 
@@ -651,6 +793,8 @@ class BuildExecutor {
       fromCache: seededFromLocal,
       seededFromLocal,
       defaultBranch,
+      creatorLogin: options.creatorLogin || null,
+      notifyEmail: options.notifyEmail || null,
     });
     // 2-hour TTL on uncached sessions
     this.scheduleCleanup(sessionId);
@@ -661,7 +805,7 @@ class BuildExecutor {
 
   /* ─── build: run Docker, cache result ───────────────────────────────────── */
 
-  async build(sessionId) {
+  async build(sessionId, options = {}) {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('Invalid build session');
 
@@ -733,14 +877,16 @@ class BuildExecutor {
     await githubCacheStore.checkAndRestore(session.owner, session.repo, commitHash);
 
     // Mount session build dir to /home/vagrant/build inside container
+    const xmlId = options.xmlId && /^[a-zA-Z0-9_-]+$/.test(options.xmlId) ? options.xmlId : null;
     const cmd = [
       'docker run --rm',
+      xmlId ? `-e SECTION_XMLID="${xmlId}"` : '',
       `-v "${session.repoPath}:/repo"`,
       `-v "${session.outputPath}:/output"`,
       `-v "${session.buildPath}:/home/vagrant/build"`,
       SHARED_DOCKER_VOLUMES,
       this.image,
-    ].join(' ');
+    ].filter(Boolean).join(' ');
 
     console.log(`Running build: ${cmd}`);
 
@@ -764,11 +910,9 @@ class BuildExecutor {
 
     this.dockerBuildsInProgress.add(repoKey);
     try {
-      const { stdout, stderr } = await execAsync(cmd, {
-        timeout: 3600000, // 60 min hard limit
-        maxBuffer: 50 * 1024 * 1024,
-      });
-      if (stderr) console.log('Build stderr:', stderr);
+      this._initLog(sessionId);
+      const { stdout, stderr } = await this._spawnDockerWithLogs(cmd, sessionId);
+      if (stderr) console.log('Build stderr (last 500 chars):', stderr.slice(-500));
 
       const artifacts = await this.findArtifacts(session.outputPath);
       const entryFile = await this.findEntry(session.outputPath);
@@ -838,6 +982,47 @@ class BuildExecutor {
     } finally {
       this.dockerBuildsInProgress.delete(repoKey);
     }
+  }
+
+  /* ─── startBuild: non-blocking build entry point ────────────────────────── */
+
+  async startBuild(sessionId, options = {}) {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error('Invalid build session');
+
+    // Cache hits and local-test mode complete in milliseconds — run synchronously
+    if (session.fromCache || session.localTestMode) {
+      const result = await this.build(sessionId, options);
+      this._initLog(sessionId);
+      this._finishLog(sessionId, result);
+      return result;
+    }
+
+    // Fresh Docker build: kick off in background, return null so caller opens SSE
+    this._initLog(sessionId);
+    if (!this.buildPromises.has(sessionId)) {
+      const promise = this.build(sessionId, options)
+        .then((result) => {
+          this._finishLog(sessionId, result);
+          this.buildPromises.delete(sessionId);
+          return result;
+        })
+        .catch((err) => {
+          const errResult = {
+            success: false,
+            error: err.message,
+            stdout: err.stdout || '',
+            stderr: err.stderr || err.message,
+            sessionId,
+          };
+          this._finishLog(sessionId, errResult);
+          this.buildPromises.delete(sessionId);
+          return errResult;
+        });
+      this.buildPromises.set(sessionId, promise);
+    }
+
+    return null; // null = streaming mode; caller should open /build/logs/:sessionId
   }
 
   /* ─── prewarm: build a repo in the background at server startup ──────────── */
@@ -1004,6 +1189,75 @@ class BuildExecutor {
     await archive.finalize();
   }
 
+  /* ─── buildPdf ──────────────────────────────────────────────────────────── */
+
+  async buildPdf(sessionId) {
+    if (!/^[0-9a-f]{16}$/.test(sessionId)) throw new Error('Invalid session ID');
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error('Build session not found — run a build first');
+
+    const pdfPath = path.join(session.outputPath, 'textbook.pdf');
+
+    // Return cached result if the PDF was already produced for this session
+    if (session.pdfReady) {
+      try {
+        await fs.access(pdfPath);
+        return pdfPath;
+      } catch {
+        session.pdfReady = false;
+      }
+    }
+
+    // Deduplicate concurrent requests
+    if (this.pdfBuilds.has(sessionId)) {
+      return this.pdfBuilds.get(sessionId);
+    }
+
+    const promise = (async () => {
+      try {
+        await this.ensureImageAvailable();
+      } catch (err) {
+        console.error('[PDF] Docker image unavailable:', err.message);
+        return null;
+      }
+
+      const cmd = [
+        'docker run --rm',
+        '-e BUILD_PDF=1',
+        `-v "${session.repoPath}:/repo"`,
+        `-v "${session.outputPath}:/output"`,
+        `-v "${session.buildPath}:/home/vagrant/build"`,
+        SHARED_DOCKER_VOLUMES,
+        this.image,
+        'pdf',
+      ].join(' ');
+
+      console.log(`[PDF] Running: ${cmd}`);
+      try {
+        const { stdout, stderr } = await execAsync(cmd, { maxBuffer: 50 * 1024 * 1024, timeout: 30 * 60 * 1000 });
+        if (stderr) console.log('[PDF] stderr tail:', stderr.slice(-500));
+        console.log('[PDF] stdout tail:', stdout.slice(-500));
+      } catch (err) {
+        console.error('[PDF] Docker error:', err.message);
+        return null;
+      }
+
+      try {
+        await fs.access(pdfPath);
+        session.pdfReady = true;
+        console.log(`[PDF] Ready: ${pdfPath}`);
+        return pdfPath;
+      } catch {
+        console.error('[PDF] textbook.pdf not found after build');
+        return null;
+      }
+    })();
+
+    this.pdfBuilds.set(sessionId, promise);
+    promise.finally(() => this.pdfBuilds.delete(sessionId));
+    return promise;
+  }
+
   /* ─── cleanup ────────────────────────────────────────────────────────────── */
 
   async cleanup(sessionId) {
@@ -1038,6 +1292,8 @@ class BuildExecutor {
     }
     artifactCache.invalidateSession(sessionId);
     this.sessions.delete(sessionId);
+    this.buildLogs.delete(sessionId);
+    this.buildPromises.delete(sessionId);
   }
 }
 

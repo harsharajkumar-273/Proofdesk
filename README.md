@@ -622,4 +622,61 @@ As usage grows, the single-host architecture will be replaced with:
                   
   -Planned rendering: force-directed graph using Cytoscape.js. Parsing handled server-side when a     
   repository is opened, outputting a language-agnostic JSON graph consumed by the frontend.
+
+### Mathematical Validation Engine
+
+  - Real-time syntax checking for LaTeX and PreTeXt markup directly in the Monaco editor, surfaced
+  as inline diagnostics (squigglies, gutter markers, a "Problems" pane). The current workflow is
+  costly: a malformed `\begin{align}` or unclosed `<theorem>` only reveals itself when the 15–20 min
+  Docker build fails.
+
+  - Planned scope: KaTeX-based validation for inline math, a lightweight PreTeXt schema validator
+  for tag structure, and warnings for common pitfalls (mismatched delimiters, undefined macros,
+  wrong environment nesting). Runs on every keystroke, debounced, entirely client-side — no
+  round-trip to the backend.
+
+### Interactive Math Preview
+
+  - Today the preview pane is read-only HTML. This upgrade makes every rendered equation clickable:
+  clicking an equation in the preview opens an inline MathEditor bubble pre-populated with its LaTeX
+  source, edits are written back to the underlying XML, and the preview updates in place.
+
+  - Extends the existing `MathEditor.tsx` and `PreviewPane.tsx` with bidirectional mapping between
+  rendered SVG/MathML nodes and their source positions in the XML. Useful for professors who want to
+  tweak a single equation without hunting for it in a 2,000-line chapter file.
+
+### Cross-Reference Validation
+
+  - Deterministic (non-AI) checker that resolves every `<xref>`, `\ref{}`, `\eqref{}`, and `\label{}`
+  across the entire repository and flags: undefined targets, orphaned labels that nothing references,
+  duplicate labels, and circular references. Complements the AI-based detection noted in
+  "AI-Assisted Authoring" above — deterministic rules run continuously and are exact; AI catches the
+  softer cases (missing notation, inconsistent terminology).
+
+  - Runs on the server when a workspace opens and incrementally on save. Surfaced in the editor as
+  diagnostics and in a dedicated "Cross-references" panel listing all refs/labels with one-click
+  navigation to both the source and the target.
+
+### Accessibility and Screen Reader Support
+
+  - A pass over the editor shell and the rendered textbook output to meet WCAG 2.1 AA for
+  mathematical content. PreTeXt already emits MathML alongside SVG; Proofdesk will surface that
+  MathML in the preview so screen readers (NVDA, JAWS, VoiceOver) can read equations aloud, and
+  add `aria-label` fallbacks generated from LaTeX source.
+
+  - Editor-side work includes full keyboard navigation of the file tree, git panel, and preview
+  pane; visible focus rings across the dark theme; ARIA roles on custom components; and a
+  high-contrast theme option. Important for institutional adoption where accessibility compliance
+  is non-negotiable.
+
+### Mobile Reviewer Mode (Responsive / PWA)
+
+  - Authoring a PreTeXt textbook on a phone is impractical, but *reviewing* one is not. A responsive
+  layout and PWA manifest turns the existing shareable preview links into a mobile-friendly review
+  experience: reviewers can open a shared link on their phone, scroll through rendered chapters,
+  leave inline comments on paragraphs, and resume offline.
+
+  - Scope is deliberately narrow — no editor, no terminal, no git panel on mobile. Reuses the
+  existing `POST /build/share/:sessionId` token flow and the planned inline-comment layer. Delivered
+  as a PWA rather than a separate native app to avoid maintaining two codebases.
                 

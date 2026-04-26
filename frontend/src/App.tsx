@@ -47,14 +47,20 @@ const getEntryNotice = (errorCode: string | null): EntryNotice | null => {
     case 'auth_failed':
       return {
         tone: 'error',
-        title: 'GitHub sign-in did not complete.',
-        detail: 'Retry the sign-in flow. If this keeps happening, verify the deployed GitHub OAuth callback URL and client secret.',
+        title: 'Sign-in did not complete.',
+        detail: 'Retry the sign-in flow. If this keeps happening, verify the OAuth callback URL and client credentials.',
       };
     case 'github_not_configured':
       return {
         tone: 'info',
         title: 'GitHub sign-in is not configured.',
         detail: 'For local development, you can use "Local Demo Mode" to access the workspace without a GitHub account.',
+      };
+    case 'google_not_configured':
+      return {
+        tone: 'info',
+        title: 'Google sign-in is not configured.',
+        detail: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI must be set to enable Google sign-in.',
       };
     case 'no_code':
       return {

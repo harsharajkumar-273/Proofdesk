@@ -349,12 +349,12 @@ class AuthSessionStore {
     );
   }
 
-  createOAuthState(res) {
+  createOAuthState(res, cookieName = OAUTH_STATE_COOKIE_NAME) {
     const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
     const state = crypto.randomBytes(16).toString('hex');
     res.append(
       'Set-Cookie',
-      toCookieHeader(OAUTH_STATE_COOKIE_NAME, state, {
+      toCookieHeader(cookieName, state, {
         maxAge: OAUTH_STATE_TTL_SECONDS,
         path: '/',
         httpOnly: true,
@@ -365,16 +365,16 @@ class AuthSessionStore {
     return state;
   }
 
-  readOAuthState(req) {
+  readOAuthState(req, cookieName = OAUTH_STATE_COOKIE_NAME) {
     const cookies = parseCookies(req.headers.cookie || '');
-    return cookies[OAUTH_STATE_COOKIE_NAME] || null;
+    return cookies[cookieName] || null;
   }
 
-  clearOAuthState(res) {
+  clearOAuthState(res, cookieName = OAUTH_STATE_COOKIE_NAME) {
     const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
     res.append(
       'Set-Cookie',
-      toCookieHeader(OAUTH_STATE_COOKIE_NAME, '', {
+      toCookieHeader(cookieName, '', {
         maxAge: 0,
         path: '/',
         httpOnly: true,

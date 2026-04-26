@@ -59,6 +59,10 @@ export const getRuntimeConfig = (env = process.env) => {
     githubClientIdConfigured: hasConfiguredValue(env.GITHUB_CLIENT_ID),
     githubClientSecretConfigured: hasConfiguredValue(env.GITHUB_CLIENT_SECRET),
     githubRedirectUriConfigured: hasConfiguredValue(githubRedirectUri),
+    googleOauthConfigured:
+      hasConfiguredValue(env.GOOGLE_CLIENT_ID)
+      && hasConfiguredValue(env.GOOGLE_CLIENT_SECRET)
+      && hasConfiguredValue(env.GOOGLE_REDIRECT_URI),
     sessionSecretConfigured,
     localTestModeEnabled,
     prewarmRepoCount: countCsvEntries(env.PREWARM_REPOS),
@@ -127,22 +131,22 @@ export const validateRuntimeConfig = (env = process.env, options = {}) => {
     );
   }
 
-  if (!githubOauthConfigured && !config.localTestModeEnabled) {
+  if (!githubOauthConfigured && !config.googleOauthConfigured && !config.localTestModeEnabled) {
     errors.push(
       issue(
         'auth_unavailable',
-        'Neither GitHub OAuth nor local test mode is enabled. Users will not be able to enter the workspace.'
+        'No authentication provider is enabled. Configure GitHub OAuth, Google OAuth, or local test mode.'
       )
     );
   }
 
-  if (githubOauthConfigured && !config.sessionSecretConfigured) {
+  if ((githubOauthConfigured || config.googleOauthConfigured) && !config.sessionSecretConfigured) {
     (strict ? errors : warnings).push(
       issue(
         'session_secret_missing',
         strict
-          ? 'Set PROOFDESK_SESSION_SECRET so GitHub access tokens are encrypted at rest in the session store.'
-          : 'PROOFDESK_SESSION_SECRET is not set. Proofdesk will avoid persisting reusable GitHub sessions across restarts.'
+          ? 'Set PROOFDESK_SESSION_SECRET so OAuth tokens are encrypted at rest in the session store.'
+          : 'PROOFDESK_SESSION_SECRET is not set. Proofdesk will avoid persisting reusable OAuth sessions across restarts.'
       )
     );
   }

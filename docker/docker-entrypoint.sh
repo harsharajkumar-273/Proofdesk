@@ -10,6 +10,11 @@ run_build() {
   /build.sh
 }
 
+run_pdf_build() {
+  mkdir -p "${OUTPUT_PATH}"
+  BUILD_PDF=1 /build.sh
+}
+
 start_server() {
   cd "${OUTPUT_PATH}"
   exec python3 -m http.server "${PORT}" --bind 0.0.0.0
@@ -46,6 +51,9 @@ watch_loop() {
 case "${1:-build}" in
   build)
     run_build
+    ;;
+  pdf)
+    run_pdf_build
     ;;
   serve)
     start_server
