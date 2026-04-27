@@ -28,6 +28,7 @@ import EditorExplorerPane from './editor/EditorExplorerPane';
 import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
+import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
 import {
   buildPreviewHref,
   getLanguageFromFilename,
@@ -197,6 +198,23 @@ interface WorkspaceNotice {
   actionType?: 'signin' | 'retry-build' | 'open-preview';
 }
 
+interface WorkspaceSnapshot {
+  repo: Repository;
+  sessionId: string | null;
+  tabs: Tab[];
+  activeTabId: string | null;
+  fileTree: FileNode[];
+  folderContents: Record<string, FileNode[]>;
+  buildResult: BuildResponse | null;
+  buildErrors: Diagnostic[];
+  previewUrl: string | null;
+  previewEntryFile: string | null;
+  expandedFolders: Set<string>;
+  compilationMode: 'repository' | 'file';
+  liveEditMode: boolean;
+  recentFiles: RecentFileEntry[];
+}
+
 type EditorTimer = ReturnType<typeof window.setTimeout> | null;
 
 type EditorTestWindow = Window & {
@@ -333,6 +351,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
+  // ── Multi-repo workspace management ──────────────────────────────────────────
+  const [openRepoKeys, setOpenRepoKeys] = useState<string[]>([]);
+  const [activeRepoKey, setActiveRepoKey] = useState<string | null>(null);
+  const workspaceSnapshots = useRef<Map<string, WorkspaceSnapshot>>(new Map());
+
   const activeTab = tabs.find(t => t.id === activeTabId);
   const unsavedTabs = useMemo(() => tabs.filter((tab) => tab.hasUnsavedChanges), [tabs]);
   const reviewEntries = useMemo(
@@ -397,6 +420,94 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
 
     window.sessionStorage.removeItem('teamSession');
+  };
+
+  const saveCurrentSnapshot = () => {
+    if (!repo) return;
+    workspaceSnapshots.current.set(repo.fullName, {
+      repo,
+      sessionId: buildSessionIdRef.current,
+      tabs,
+      activeTabId,
+      fileTree,
+      folderContents,
+      buildResult,
+      buildErrors,
+      previewUrl: previewUrlRef.current,
+      previewEntryFile: previewEntryFileRef.current,
+      expandedFolders,
+      compilationMode,
+      liveEditMode,
+      recentFiles,
+    });
+  };
+
+  const restoreFromSnapshot = (snapshot: WorkspaceSnapshot) => {
+    setRepo(snapshot.repo);
+    buildSessionIdRef.current = snapshot.sessionId;
+    setBuildSessionId(snapshot.sessionId);
+    activeTabIdRef.current = snapshot.activeTabId;
+    activeTabRef.current = snapshot.tabs.find((t) => t.id === snapshot.activeTabId) ?? null;
+    setTabs(snapshot.tabs);
+    setActiveTabId(snapshot.activeTabId);
+    setFileTree(snapshot.fileTree);
+    setFolderContents(snapshot.folderContents);
+    setBuildResult(snapshot.buildResult);
+    setBuildErrors(snapshot.buildErrors);
+    previewUrlRef.current = snapshot.previewUrl;
+    setPreviewUrl(snapshot.previewUrl);
+    previewEntryFileRef.current = snapshot.previewEntryFile;
+    setPreviewEntryFile(snapshot.previewEntryFile);
+    setExpandedFolders(snapshot.expandedFolders);
+    setCompilationModeState(snapshot.compilationMode);
+    setLiveEditModeState(snapshot.liveEditMode);
+    setRecentFiles(snapshot.recentFiles);
+    setSrcDocContent(null);
+    setWorkspaceNotice(null);
+    workspaceInitPromiseRef.current = null;
+    buildInitPromiseRef.current = null;
+    rebuildInFlightRef.current = false;
+    queuedRebuildRef.current = null;
+    setStreamingBuildSessionId(null);
+    setLoading(false);
+    setCompiling(false);
+    setSaving(false);
+  };
+
+  const closeRepo = (repoKey: string) => {
+    const newKeys = openRepoKeys.filter((k) => k !== repoKey);
+
+    const sessionToClean =
+      repoKey === activeRepoKey
+        ? buildSessionIdRef.current
+        : workspaceSnapshots.current.get(repoKey)?.sessionId ?? null;
+
+    if (sessionToClean) {
+      fetch(`${API_URL}/build/cleanup`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: sessionToClean }),
+      }).catch(() => {});
+    }
+
+    workspaceSnapshots.current.delete(repoKey);
+
+    if (repoKey === activeRepoKey) {
+      const nextKey = newKeys[newKeys.length - 1] ?? null;
+      if (nextKey) {
+        const snap = workspaceSnapshots.current.get(nextKey);
+        if (snap) {
+          restoreFromSnapshot(snap);
+          setActiveRepoKey(nextKey);
+          sessionStorage.setItem('selectedRepo', JSON.stringify(snap.repo));
+        }
+      } else {
+        navigate('/repo-input');
+      }
+    }
+
+    setOpenRepoKeys(newKeys);
   };
 
   const showTeamNotice = (message: string) => {
@@ -779,6 +890,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           }
           
           setRepo(parsed);
+          setActiveRepoKey(parsed.fullName);
+          setOpenRepoKeys((prev) =>
+            prev.includes(parsed.fullName) ? prev : [...prev, parsed.fullName],
+          );
 
           setLoading(true);
           setLoadingMessage('Initializing repository environment...');
@@ -1283,16 +1398,80 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const switchRepository = (newRepo: RepositorySearchResult) => {
-    const repoData = {
+  const switchRepository = async (newRepo: RepositorySearchResult) => {
+    const repoData: Repository = {
       owner: newRepo.owner.login,
       name: newRepo.name,
       fullName: newRepo.full_name,
-      defaultBranch: newRepo.default_branch || 'main'
+      defaultBranch: newRepo.default_branch || 'main',
     };
+    const repoKey = repoData.fullName;
+    setShowRepoSwitcher(false);
+
+    // Already active — nothing to do
+    if (repoKey === repo?.fullName) return;
+
+    // Already open in a background tab — just switch to it
+    if (workspaceSnapshots.current.has(repoKey)) {
+      saveCurrentSnapshot();
+      restoreFromSnapshot(workspaceSnapshots.current.get(repoKey)!);
+      setActiveRepoKey(repoKey);
+      sessionStorage.setItem('selectedRepo', JSON.stringify(repoData));
+      return;
+    }
+
+    // New repo — snapshot current state and initialize the new workspace
+    saveCurrentSnapshot();
+    setOpenRepoKeys((prev) => (prev.includes(repoKey) ? prev : [...prev, repoKey]));
+    setActiveRepoKey(repoKey);
     sessionStorage.removeItem('teamSession');
     sessionStorage.setItem('selectedRepo', JSON.stringify(repoData));
-    window.location.reload();
+
+    // Reset active workspace state
+    setRepo(repoData);
+    buildSessionIdRef.current = null;
+    workspaceInitPromiseRef.current = null;
+    buildInitPromiseRef.current = null;
+    rebuildInFlightRef.current = false;
+    queuedRebuildRef.current = null;
+    activeTabIdRef.current = null;
+    activeTabRef.current = null;
+    previewUrlRef.current = null;
+    previewEntryFileRef.current = null;
+    setBuildSessionId(null);
+    setTabs([]);
+    setActiveTabId(null);
+    setFileTree([]);
+    setFolderContents({});
+    setBuildResult(null);
+    setBuildErrors([]);
+    setPreviewUrl(null);
+    setPreviewEntryFile(null);
+    setExpandedFolders(new Set());
+    setRecentFiles([]);
+    setSrcDocContent(null);
+    setWorkspaceNotice(null);
+    setStreamingBuildSessionId(null);
+    setCompiling(false);
+    setSaving(false);
+
+    setLoading(true);
+    setLoadingMessage('Initializing workspace...');
+    try {
+      const workspace = await initializeWorkspaceSession(repoData, { hydrateTree: true });
+      if (!workspace?.sessionId) throw new Error('Failed to prepare workspace');
+      if (!Array.isArray(workspace.tree) || workspace.tree.length === 0) {
+        await fetchFileTree(repoData);
+      } else {
+        setLoading(false);
+      }
+      if (autoCompile) {
+        setTimeout(() => void compileRepository(repoData), 100);
+      }
+    } catch (error) {
+      setLoading(false);
+      showNoticeFromError(error, 'Failed to open repository');
+    }
   };
 
   const fetchFileTree = async (repoData: Repository, path: string = ''): Promise<FileNode[] | undefined> => {
@@ -2186,6 +2365,35 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         onAction={handleWorkspaceNoticeAction}
         onDismiss={() => setWorkspaceNotice(null)}
       />
+
+      {openRepoKeys.length > 1 && (
+        <EditorRepoTabBar
+          repos={openRepoKeys.map((key): RepoTabEntry => ({
+            repoKey: key,
+            fullName: key,
+            hasUnsaved:
+              key === activeRepoKey
+                ? unsavedTabs.length > 0
+                : (workspaceSnapshots.current.get(key)?.tabs.some((t) => t.hasUnsavedChanges) ?? false),
+          }))}
+          activeRepoKey={activeRepoKey}
+          onSwitch={(key) => {
+            if (key === repo?.fullName) return;
+            const snap = workspaceSnapshots.current.get(key);
+            if (snap) {
+              saveCurrentSnapshot();
+              restoreFromSnapshot(snap);
+              setActiveRepoKey(key);
+              sessionStorage.setItem('selectedRepo', JSON.stringify(snap.repo));
+            }
+          }}
+          onClose={closeRepo}
+          onOpenNew={() => {
+            fetchUserRepos();
+            setShowRepoSwitcher(true);
+          }}
+        />
+      )}
 
       <main className="relative flex-1 flex overflow-hidden">
         {/* Activity Rail */}
