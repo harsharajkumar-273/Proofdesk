@@ -130,8 +130,9 @@ jobs:
 
             tar -xzf proofdesk-release.tgz
 
-            # Build with output visible, then start detached
+            # Build with output visible, stop old containers, then start fresh
             docker compose -f docker-compose.prod.yml build
+            docker compose -f docker-compose.prod.yml down --remove-orphans
             docker compose -f docker-compose.prod.yml up -d
             docker compose -f docker-compose.prod.yml ps
 
