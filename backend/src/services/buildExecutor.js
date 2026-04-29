@@ -338,10 +338,12 @@ class BuildExecutor {
         flushLines('err', 'stderr', text);
       });
 
+      const buildTimeoutMs = parseInt(process.env.PROOFDESK_BUILD_TIMEOUT_MS ?? '14400000', 10);
+      const buildTimeoutMin = Math.round(buildTimeoutMs / 60000);
       const killTimer = setTimeout(() => {
         proc.kill('SIGKILL');
-        reject(Object.assign(new Error('Docker build timed out after 120 minutes'), { stdout, stderr }));
-      }, 7200000);
+        reject(Object.assign(new Error(`Docker build timed out after ${buildTimeoutMin} minutes`), { stdout, stderr }));
+      }, buildTimeoutMs);
 
       proc.on('close', (code) => {
         clearTimeout(killTimer);

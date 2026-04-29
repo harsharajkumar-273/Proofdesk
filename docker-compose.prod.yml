@@ -44,6 +44,7 @@ services:
       PREWARM_REPOS: ${PREWARM_REPOS:-}
       PROOFDESK_SMOKE_REPO: ${PROOFDESK_SMOKE_REPO:-QBobWatson/ila}
       PROOFDESK_SECURE_COOKIES: "true"
+      PROOFDESK_BUILD_TIMEOUT_MS: "14400000"
     depends_on:
       redis:
         condition: service_healthy
