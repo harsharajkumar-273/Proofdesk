@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Runtime needs git for workspace operations and docker-cli for build containers
 # mounted through /var/run/docker.sock.
-RUN apk add --no-cache bash docker-cli docker-buildx git openssh-client python3 make g++
+RUN apk add --no-cache bash docker-cli docker-cli-buildx git openssh-client python3 make g++
 
 ENV DOCKER_BUILDKIT=1
 
