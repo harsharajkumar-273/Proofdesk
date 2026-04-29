@@ -1,0 +1,188 @@
+name: Deploy To Oracle Cloud (OCI)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      APP_DIR: /opt/proofdesk
+      OCI_HOST: ${{ secrets.OCI_HOST }}
+      OCI_SSH_USER: ${{ secrets.OCI_SSH_USER || 'ubuntu' }}
+      OCI_SSH_KEY: ${{ secrets.OCI_SSH_KEY }}
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+      DOMAIN: ${{ secrets.DOMAIN }}
+      GITHUB_CLIENT_ID: ${{ secrets.PROOFDESK_GITHUB_CLIENT_ID }}
+      GITHUB_CLIENT_SECRET: ${{ secrets.PROOFDESK_GITHUB_CLIENT_SECRET }}
+      GITHUB_REDIRECT_URI: ${{ secrets.PROOFDESK_GITHUB_REDIRECT_URI }}
+      PROOFDESK_SESSION_SECRET: ${{ secrets.PROOFDESK_SESSION_SECRET }}
+      GITHUB_PERSONAL_TOKEN: ${{ secrets.PROOFDESK_GITHUB_PERSONAL_TOKEN }}
+      PREWARM_REPOS: ${{ secrets.PREWARM_REPOS || 'QBobWatson/ila' }}
+      PROOFDESK_MONITORING_WEBHOOK_URL: ${{ secrets.PROOFDESK_MONITORING_WEBHOOK_URL }}
+    steps:
+      - name: Free disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift || true
+          sudo apt-get clean -y || true
+          df -h /tmp
+
+      - name: Check deployment secrets
+        id: deployment_secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in OCI_HOST OCI_SSH_KEY FRONTEND_URL GITHUB_CLIENT_ID GITHUB_CLIENT_SECRET GITHUB_REDIRECT_URI PROOFDESK_SESSION_SECRET; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required secret: ${name}" >&2
+              missing=1
+            fi
+          done
+
+          if [[ "$missing" == "0" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            exit 1
+          fi
+
+          echo "::notice::Skipping OCI deploy because required deployment secrets are not configured."
+
+      - uses: actions/checkout@v4
+        if: steps.deployment_secrets.outputs.ready == 'true'
+
+      - name: Write production env file
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ACTUAL_DOMAIN="${DOMAIN}"
+          if [[ -z "${ACTUAL_DOMAIN}" ]]; then
+            ACTUAL_DOMAIN=$(echo "${FRONTEND_URL}" | sed -E 's/https?:\/\/([^/]+).*/\1/')
+          fi
+
+          cat > .env.production.generated <<EOF
+          FRONTEND_URL=${FRONTEND_URL}
+          DOMAIN=${ACTUAL_DOMAIN}
+          GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID}
+          GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET}
+          GITHUB_REDIRECT_URI=${GITHUB_REDIRECT_URI}
+          PROOFDESK_SESSION_SECRET=${PROOFDESK_SESSION_SECRET}
+          GITHUB_PERSONAL_TOKEN=${GITHUB_PERSONAL_TOKEN}
+          PREWARM_REPOS=${PREWARM_REPOS}
+          PROOFDESK_SMOKE_REPO=QBobWatson/ila
+          PROOFDESK_MONITORING_ENABLED=true
+          PROOFDESK_MONITORING_WEBHOOK_URL=${PROOFDESK_MONITORING_WEBHOOK_URL}
+          EOF
+
+      - name: Prepare SSH
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "${OCI_SSH_KEY}" > ~/.ssh/proofdesk_deploy_key
+          chmod 600 ~/.ssh/proofdesk_deploy_key
+          ssh-keyscan -H "${OCI_HOST}" >> ~/.ssh/known_hosts
+
+      - name: Upload release bundle
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='frontend/node_modules' \
+            --exclude='backend/node_modules' \
+            --exclude='frontend/dist' \
+            --exclude='.tmp' \
+            --exclude='backend/.proofdesk-data' \
+            --exclude='builds/output' \
+            --exclude='builds/test-output' \
+            --exclude='builds/ila-repo/html' \
+            -czf /tmp/proofdesk-release.tgz .
+          ssh -i ~/.ssh/proofdesk_deploy_key "${OCI_SSH_USER}@${OCI_HOST}" "mkdir -p ${APP_DIR}"
+          scp -i ~/.ssh/proofdesk_deploy_key /tmp/proofdesk-release.tgz "${OCI_SSH_USER}@${OCI_HOST}:${APP_DIR}/proofdesk-release.tgz"
+          scp -i ~/.ssh/proofdesk_deploy_key .env.production.generated "${OCI_SSH_USER}@${OCI_HOST}:${APP_DIR}/.env"
+
+      - name: Restart Docker Compose stack
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/proofdesk_deploy_key "${OCI_SSH_USER}@${OCI_HOST}" "
+            set -euo pipefail
+            docker system prune -af --volumes || true
+            sudo rm -rf /var/lib/proofdesk/* || true
+            sudo find /var/log -type f -mtime +3 -delete || true
+            sudo du -sh /var/lib/docker /var/lib/proofdesk /var/log /tmp 2>/dev/null | sort -h || true
+            df -h /
+            cd ${APP_DIR}
+
+            tar -xzf proofdesk-release.tgz
+            docker compose -f docker-compose.prod.yml up --build -d
+            docker compose -f docker-compose.prod.yml ps
+            docker image prune -f
+          "
+
+      - name: Smoke test deployment
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          SMOKE_URL="${FRONTEND_URL}/health/ready"
+          echo "Smoke testing ${SMOKE_URL} (up to 5 attempts, 10 s apart)"
+          for attempt in 1 2 3 4 5; do
+            sleep 10
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${SMOKE_URL}" --max-time 15 || echo "000")
+            if [[ "${HTTP_STATUS}" == "200" ]]; then
+              echo "Smoke test PASSED (attempt ${attempt}): ${SMOKE_URL} returned 200"
+              exit 0
+            fi
+            echo "  Attempt ${attempt}: got HTTP ${HTTP_STATUS}"
+          done
+          echo "Smoke test FAILED: ${SMOKE_URL} did not return 200 after 5 attempts" >&2
+          exit 1
+
+      - name: Issue Let's Encrypt certificate (first deploy only)
+        if: steps.deployment_secrets.outputs.ready == 'true'
+        shell: bash
+        run: |
+          ssh -i ~/.ssh/proofdesk_deploy_key "${OCI_SSH_USER}@${OCI_HOST}" "
+            DOMAIN=${{ secrets.DOMAIN || 'proofdesk.duckdns.org' }}
+            EMAIL=harsharajkumar273@gmail.com
+
+            CERT=/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem
+
+            if [ -f \"\${CERT}\" ] && openssl x509 -in \"\${CERT}\" -noout -issuer 2>/dev/null | grep -qi 'let.s encrypt'; then
+              echo 'Real cert already present — skipping issuance.'
+              exit 0
+            fi
+
+            echo 'Installing certbot and getting certificate via webroot...'
+            sudo snap install --classic certbot 2>/dev/null || true
+            sudo ln -sf /snap/bin/certbot /usr/local/bin/certbot 2>/dev/null || true
+            sudo mkdir -p /var/www/certbot
+
+            sudo certbot certonly --webroot \
+              -w /var/www/certbot \
+              -d \${DOMAIN} \
+              --non-interactive --agree-tos -m \${EMAIL} --no-eff-email
+
+            sleep 5
+            docker compose -f ${APP_DIR}/docker-compose.prod.yml exec nginx nginx -s reload
+            echo 'Certificate issued and nginx reloaded.'
+
+            if ! crontab -l 2>/dev/null | grep -q certbot; then
+              (crontab -l 2>/dev/null; echo '0 3 * * * certbot renew --deploy-hook \"docker compose -f ${APP_DIR}/docker-compose.prod.yml exec nginx nginx -s reload\" --quiet') | crontab -
+              echo 'Auto-renewal cron installed.'
+            fi
+          "
