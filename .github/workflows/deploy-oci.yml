@@ -120,7 +120,6 @@ jobs:
           set -euo pipefail
           ssh -i ~/.ssh/proofdesk_deploy_key "${OCI_SSH_USER}@${OCI_HOST}" "
             set -euo pipefail
-            docker system prune -af --volumes || true
             sudo rm -rf /var/lib/proofdesk/* || true
             sudo find /var/log -type f -mtime +3 -delete || true
             sudo du -sh /var/lib/docker /var/lib/proofdesk /var/log /tmp 2>/dev/null | sort -h || true
@@ -128,8 +127,13 @@ jobs:
             cd ${APP_DIR}
 
             tar -xzf proofdesk-release.tgz
-            docker compose -f docker-compose.prod.yml up --build -d
+
+            # Build with output visible, then start detached
+            docker compose -f docker-compose.prod.yml build
+            docker compose -f docker-compose.prod.yml up -d
             docker compose -f docker-compose.prod.yml ps
+
+            # Prune dangling images AFTER the new stack is running
             docker image prune -f
           "
 
