@@ -919,7 +919,7 @@ if [ -f "SConstruct" ]; then
     echo "Setting up build directories..."
     # NOTE: Do NOT delete .sconsign.dblite — it's SCons's incremental build database.
     # Deleting it forces a full rebuild every time. Keep it so SCons skips unchanged files.
-    mkdir -p /home/vagrant/build/js /home/vagrant/build/css /home/vagrant/build/figure-images
+    mkdir -p /home/vagrant/build/js /home/vagrant/build/css /home/vagrant/build/figure-images /home/vagrant/build/knowl /home/vagrant/build/demos
     mkdir -p /home/vagrant/cache/css /home/vagrant/cache/pretex-cache
     
     mkdir -p mathbook-assets/build mathbook/css mathbook/build static/css static/js vendor
