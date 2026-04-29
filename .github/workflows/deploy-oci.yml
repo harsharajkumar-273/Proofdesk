@@ -91,6 +91,8 @@ jobs:
           printf '%s\n' "${OCI_SSH_KEY}" > ~/.ssh/proofdesk_deploy_key
           chmod 600 ~/.ssh/proofdesk_deploy_key
           ssh-keyscan -H "${OCI_HOST}" >> ~/.ssh/known_hosts
+          printf 'Host *\n  ServerAliveInterval 60\n  ServerAliveCountMax 15\n' >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       - name: Upload release bundle
         if: steps.deployment_secrets.outputs.ready == 'true'
