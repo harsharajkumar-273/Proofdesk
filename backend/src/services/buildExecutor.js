@@ -340,8 +340,8 @@ class BuildExecutor {
 
       const killTimer = setTimeout(() => {
         proc.kill('SIGKILL');
-        reject(Object.assign(new Error('Docker build timed out after 60 minutes'), { stdout, stderr }));
-      }, 3600000);
+        reject(Object.assign(new Error('Docker build timed out after 120 minutes'), { stdout, stderr }));
+      }, 7200000);
 
       proc.on('close', (code) => {
         clearTimeout(killTimer);
