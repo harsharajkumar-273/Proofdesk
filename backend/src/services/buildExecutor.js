@@ -236,7 +236,7 @@ class BuildExecutor {
   }
 
   scheduleCleanup(sessionId) {
-    const ttlMs = Number(process.env.PROOFDESK_SESSION_TTL_MS) || 2 * 60 * 60 * 1000;
+    const ttlMs = Number(process.env.PROOFDESK_SESSION_TTL_MS) || 6 * 60 * 60 * 1000;
     const timer = setTimeout(() => this.cleanup(sessionId), ttlMs);
     if (typeof timer.unref === 'function') {
       timer.unref();
@@ -1264,6 +1264,15 @@ class BuildExecutor {
 
   async cleanup(sessionId) {
     if (!/^[0-9a-f]{16}$/.test(sessionId)) return;
+
+    // Never delete while a Docker build or PDF build is still running — the
+    // /output and /build directories are bind-mounted into the container.
+    const activeBuild = this.buildPromises.get(sessionId) || this.pdfBuilds.get(sessionId);
+    if (activeBuild) {
+      console.log(`[BuildExecutor] Deferring cleanup for ${sessionId} — build still in progress`);
+      activeBuild.finally(() => this.cleanup(sessionId));
+      return;
+    }
 
     const session = this.sessions.get(sessionId);
     const baseDir = session
