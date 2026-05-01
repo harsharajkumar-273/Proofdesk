@@ -4,7 +4,7 @@ import {
   getPreviewBaseHref,
   prepareHtmlForSrcDoc,
 } from './editorPreview';
-import { isPreTeXtFile, pretexToHtml } from './pretexPreview';
+import { isPreTeXtFile } from './pretexPreview';
 
 export interface CollaborationParticipant {
   clientId: string;
@@ -57,6 +57,7 @@ interface EnqueueRebuildOptions {
   editToken: number;
   clearDraftOnSuccess: boolean;
   queuedStatus: string;
+  sectionXmlId?: string | null;
 }
 
 interface SyncCollaborativePreviewArgs<TTab extends CollaborationTabLike> {
@@ -183,11 +184,11 @@ export const syncCollaborativePreview = async <TTab extends CollaborationTabLike
     }
 
     if (isPreTeXtFile(tab.name)) {
-      setSrcDocContent(pretexToHtml(value));
       enqueueRebuild(tab.path, value, {
         editToken: remoteEditToken,
-        clearDraftOnSuccess: true,
+        clearDraftOnSuccess: false,
         queuedStatus: 'Compiling collaborator draft…',
+        sectionXmlId: null,
       });
       return;
     }

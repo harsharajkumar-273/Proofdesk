@@ -3,6 +3,7 @@ import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import {
   ArrowUpRight,
+  BookOpen,
   Check,
   Download,
   Eye,
@@ -76,6 +77,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   apiUrl = 'http://localhost:4000',
 }) => {
   const [shareState, setShareState] = useState<'idle' | 'loading' | 'copied'>('idle');
+  const [reviewLinkCopied, setReviewLinkCopied] = useState(false);
 
   const handleDownloadZip = useCallback(() => {
     if (!sessionId) return;
@@ -85,6 +87,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
     a.download = `proofdesk-output-${sessionId.slice(0, 8)}.zip`;
     a.click();
   }, [sessionId, apiUrl]);
+
+  const handleCopyReviewLink = useCallback(async () => {
+    if (!sessionId) return;
+    const url = `${window.location.origin}/review/${sessionId}`;
+    await navigator.clipboard.writeText(url).catch(() => window.prompt('Copy review link', url));
+    setReviewLinkCopied(true);
+    setTimeout(() => setReviewLinkCopied(false), 2500);
+  }, [sessionId]);
 
   const handleSharePreview = useCallback(async () => {
     if (!sessionId || shareState === 'loading') return;
@@ -219,6 +229,17 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
               </button>
               {sessionId && (previewUrl || compiledOutput) && (
                 <>
+                  <button
+                    onClick={() => void handleCopyReviewLink()}
+                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
+                    title="Copy reviewer link — fullscreen read-only view, no login needed"
+                  >
+                    {reviewLinkCopied ? (
+                      <><Check className="h-3 w-3 text-green-400" /><span className="hidden text-green-400 sm:inline">Copied!</span></>
+                    ) : (
+                      <><BookOpen className="h-3 w-3" /><span className="hidden sm:inline">Review link</span></>
+                    )}
+                  </button>
                   <button
                     onClick={() => void handleSharePreview()}
                     disabled={shareState === 'loading'}

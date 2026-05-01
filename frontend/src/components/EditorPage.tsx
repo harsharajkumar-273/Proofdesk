@@ -66,7 +66,7 @@ import {
   type ReviewMarkerStatus,
 } from '../utils/editorWorkspace';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
-import { isPreTeXtFile, pretexToHtml } from '../utils/pretexPreview';
+import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
 import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
 import { parseBuildErrors } from '../utils/buildErrorParser';
@@ -165,6 +165,7 @@ interface QueuedRebuild {
   editToken: number;
   clearDraftOnSuccess: boolean;
   queuedStatus: string;
+  sectionXmlId: string | null;
 }
 
 interface UserData {
@@ -315,6 +316,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const activeTabIdRef = useRef<string | null>(activeTabId);
+  const activeSectionXmlIdRef = useRef<string | null>(null);
   
   const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
@@ -983,9 +985,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       const baseHref = getPreviewBaseHref(previewUrl, API_URL);
       setSrcDocContent(prepareHtmlForSrcDoc(tab.content, baseHref, tab.path));
       setCompilationModeState('repository');
-    } else if (liveEditMode && isPreTeXtFile(tab.name)) {
-      // Instantly show PreTeXt preview when switching to an XML tab in live mode
-      setSrcDocContent(pretexToHtml(tab.content));
     } else {
       setSrcDocContent(null);
     }
@@ -1540,8 +1539,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
 
     setCompilationModeState('file');
-    setLoading(true);
-    
+
     try {
       const workspaceSessionId = buildSessionIdRef.current || (await initializeWorkspaceSession(repo))?.sessionId;
       if (!workspaceSessionId) {
@@ -1557,7 +1555,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         `Failed to open ${path}`
       );
       const content = data.decoded_content || '';
-      
+
       const lang = getLanguageFromFilename(path);
       const newTab: Tab = {
         id: Date.now().toString(),
@@ -1592,8 +1590,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     } catch (error) {
       console.error('Error fetching file:', error);
       showNoticeFromError(error, `Failed to open ${path}`);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1912,6 +1908,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab?.id, activeTab?.content]);
 
+  // Keep ref in sync so runQueuedRebuild (a closure) can read the latest value
+  useEffect(() => {
+    activeSectionXmlIdRef.current = activeSectionXmlId;
+  }, [activeSectionXmlId]);
+
   const compileRepository = async (repoData: Repository | null = repo) => {
     setLiveEditStatus('');
     setSrcDocContent(null);
@@ -2132,7 +2133,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
       const data = await apiRequest<BuildResponse>('/build/update', {
         method: 'POST',
-        body: JSON.stringify({ sessionId, filePath: next.filePath, content: next.value })
+        body: JSON.stringify({
+          sessionId,
+          filePath: next.filePath,
+          content: next.value,
+          sectionXmlId: next.sectionXmlId,
+        })
       }, 'Rebuild failed');
       const isLatestEdit = next.editToken === latestEditTokenRef.current;
       const applied = applyBuildResponse(data, { quiet: !isLatestEdit && next.clearDraftOnSuccess });
@@ -2174,14 +2180,15 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const enqueueRebuild = (
     filePath: string,
     value: string,
-    options: { editToken: number; clearDraftOnSuccess: boolean; queuedStatus?: string }
+    options: { editToken: number; clearDraftOnSuccess: boolean; queuedStatus?: string; sectionXmlId?: string | null }
   ) => {
     queuedRebuildRef.current = {
       filePath,
       value,
       editToken: options.editToken,
       clearDraftOnSuccess: options.clearDraftOnSuccess,
-      queuedStatus: options.queuedStatus || 'Changes queued…'
+      queuedStatus: options.queuedStatus || 'Changes queued…',
+      sectionXmlId: options.sectionXmlId ?? null,
     };
 
     if (rebuildInFlightRef.current) {
@@ -2238,26 +2245,28 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         return;
       }
 
-      // PreTeXt / XML files: instant client-side transform — no backend, no Docker
+      // PreTeXt / XML files: keep the last good Docker output visible while the
+      // section build runs — avoids showing a broken client-side approximation.
       if (isPreTeXtFile(currentTab.name)) {
-        setSrcDocContent(pretexToHtml(value));
-        setLiveEditStatus('Draft updated');
+        setLiveEditStatus('Compiling…');
         rebuildTimer.current = window.setTimeout(() => {
           enqueueRebuild(currentTab.path, value, {
             editToken,
-            clearDraftOnSuccess: true,
-            queuedStatus: 'Compiling latest draft…'
+            clearDraftOnSuccess: false,
+            queuedStatus: 'Compiling latest draft…',
+            sectionXmlId: activeSectionXmlIdRef.current,
           });
         }, 1100);
         return;
       }
 
-      // All other file types: full rebuild as before (1.5 s debounce)
+      // All other file types: full rebuild (no section scoping) (1.5 s debounce)
       rebuildTimer.current = window.setTimeout(() => {
         enqueueRebuild(currentTab.path, value, {
           editToken,
           clearDraftOnSuccess: false,
-          queuedStatus: 'Compiling latest change…'
+          queuedStatus: 'Compiling latest change…',
+          sectionXmlId: null,
         });
       }, 1500);
     } else {
@@ -2270,7 +2279,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         enqueueRebuild(currentTab.path, value, {
           editToken,
           clearDraftOnSuccess: false,
-          queuedStatus: 'Compiling latest change…'
+          queuedStatus: 'Compiling latest change…',
+          sectionXmlId: null,
         });
       }, 2000);
     }
@@ -2366,7 +2376,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         onDismiss={() => setWorkspaceNotice(null)}
       />
 
-      {openRepoKeys.length > 1 && (
+      {openRepoKeys.length >= 1 && (
         <EditorRepoTabBar
           repos={openRepoKeys.map((key): RepoTabEntry => ({
             repoKey: key,

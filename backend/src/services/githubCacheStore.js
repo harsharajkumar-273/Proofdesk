@@ -42,19 +42,31 @@ class GitHubCacheStore {
   async checkAndRestore(owner, repo, sha) {
     if (!this.enabled || !sha) return false;
 
-    // Skip if the volume already has cached equations
+    const tag = this._tag(owner, repo, sha);
+
+    // Check whether the volume already contains exactly this commit's cache by
+    // reading the sentinel file written after every successful restore. If it
+    // matches, skip the download. If it's a different tag (stale cache from a
+    // previous build/repo), wipe the volume and load the correct one.
     try {
       const { stdout } = await execAsync(
-        `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "ls /cache 2>/dev/null | wc -l"`,
+        `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "cat /cache/.cache-tag 2>/dev/null || echo ''"`,
         { timeout: 15000 }
       );
-      if (parseInt(stdout.trim(), 10) > 0) {
-        console.log('[GitHubCache] Volume already populated — skipping restore');
+      const loadedTag = stdout.trim();
+      if (loadedTag === tag) {
+        console.log(`[GitHubCache] Volume already has correct cache (${tag}) — skipping restore`);
         return true;
+      }
+      if (loadedTag) {
+        console.log(`[GitHubCache] Volume has stale cache (${loadedTag}), need ${tag} — clearing`);
+        await execAsync(
+          `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "rm -rf /cache/* /cache/.[!.]* 2>/dev/null || true"`,
+          { timeout: 30000 }
+        ).catch(() => {});
       }
     } catch { /* docker unavailable */ }
 
-    const tag = this._tag(owner, repo, sha);
     console.log(`[GitHubCache] Looking for release ${tag} ...`);
 
     try {
@@ -72,9 +84,9 @@ class GitHubCacheStore {
 
       await this._downloadAsset(asset.url, tmpFile);
 
-      // Inject into the Docker volume by extracting inside an alpine container
+      // Inject into the Docker volume, then write the sentinel tag file
       await execAsync(
-        `docker run --rm -v ${DOCKER_VOLUME}:/cache -v "${tmpFile}:/tmp/cache.tar.gz:ro" alpine sh -c "tar xzf /tmp/cache.tar.gz -C / 2>/dev/null || true"`,
+        `docker run --rm -v ${DOCKER_VOLUME}:/cache -v "${tmpFile}:/tmp/cache.tar.gz:ro" alpine sh -c "tar xzf /tmp/cache.tar.gz -C / 2>/dev/null; echo '${tag}' > /cache/.cache-tag"`,
         { timeout: 300000 }
       );
       await fs.unlink(tmpFile).catch(() => {});
@@ -120,6 +132,12 @@ class GitHubCacheStore {
       );
       await this._uploadAsset(release.upload_url, tmpFile, 'pretex-cache.tar.gz', stat.size);
       console.log(`[GitHubCache] Cache uploaded as release ${tag}`);
+
+      // Keep the sentinel current so the next build on this machine skips restore
+      await execAsync(
+        `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "echo '${tag}' > /cache/.cache-tag"`,
+        { timeout: 15000 }
+      ).catch(() => {});
     } catch (err) {
       console.warn('[GitHubCache] Upload failed (non-fatal):', err.message);
     } finally {

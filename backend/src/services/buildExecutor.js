@@ -117,6 +117,10 @@ class BuildExecutor {
     // Active sessions: sessionId → { owner, repo, repoPath, outputPath, fromCache }
     this.sessions = new Map();
 
+    // Persistent Docker containers for live rebuild (sessionId → containerName).
+    // Reusing a running container eliminates 10-30s of container startup per rebuild.
+    this.persistentContainers = new Map();
+
     // Build cache: "owner/repo" → { commitHash, cacheVersion, repoPath, outputPath, sessionId, builtAt }
     // When a user requests a repo whose HEAD commit matches a cached build,
     // we skip clone + Docker entirely and return in ~100ms.
@@ -366,6 +370,57 @@ class BuildExecutor {
         reject(err);
       });
     });
+  }
+
+  /* ─── Persistent build container management ─────────────────────────────── */
+
+  async _startPersistentContainer(sessionId) {
+    const session = this.sessions.get(sessionId);
+    if (!session) throw new Error(`No session for ${sessionId}`);
+
+    const containerName = `proofdesk-build-${sessionId}`;
+
+    // Remove any stale stopped container with this name before starting a fresh one
+    await execAsync(`docker rm -f ${containerName}`, { timeout: 10000 }).catch(() => {});
+
+    const cmd = [
+      'docker run -d',
+      `--name ${containerName}`,
+      `-v "${session.repoPath}:/repo"`,
+      `-v "${session.outputPath}:/output"`,
+      `-v "${session.buildPath}:/home/vagrant/build"`,
+      SHARED_DOCKER_VOLUMES,
+      this.image,
+      'sleep infinity',
+    ].filter(Boolean).join(' ');
+
+    console.log(`[PersistentContainer] Starting ${containerName}`);
+    await execAsync(cmd, { timeout: 30000 });
+    this.persistentContainers.set(sessionId, containerName);
+    return containerName;
+  }
+
+  async _ensureContainerRunning(sessionId) {
+    let containerName = this.persistentContainers.get(sessionId);
+    if (containerName) {
+      try {
+        const { stdout } = await execAsync(
+          `docker inspect -f '{{.State.Running}}' ${containerName}`,
+          { timeout: 5000 }
+        );
+        if (stdout.trim() === 'true') return containerName;
+      } catch { /* container gone */ }
+      this.persistentContainers.delete(sessionId);
+    }
+    return this._startPersistentContainer(sessionId);
+  }
+
+  async _stopPersistentContainer(sessionId) {
+    const containerName = this.persistentContainers.get(sessionId);
+    if (!containerName) return;
+    this.persistentContainers.delete(sessionId);
+    await execAsync(`docker rm -f ${containerName}`, { timeout: 15000 }).catch(() => {});
+    console.log(`[PersistentContainer] Stopped ${containerName}`);
   }
 
   async _ensureImageAvailableNow() {
@@ -878,19 +933,7 @@ class BuildExecutor {
     } catch {}
     await githubCacheStore.checkAndRestore(session.owner, session.repo, commitHash);
 
-    // Mount session build dir to /home/vagrant/build inside container
     const xmlId = options.xmlId && /^[a-zA-Z0-9_-]+$/.test(options.xmlId) ? options.xmlId : null;
-    const cmd = [
-      'docker run --rm',
-      xmlId ? `-e SECTION_XMLID="${xmlId}"` : '',
-      `-v "${session.repoPath}:/repo"`,
-      `-v "${session.outputPath}:/output"`,
-      `-v "${session.buildPath}:/home/vagrant/build"`,
-      SHARED_DOCKER_VOLUMES,
-      this.image,
-    ].filter(Boolean).join(' ');
-
-    console.log(`Running build: ${cmd}`);
 
     try {
       await this.ensureImageAvailable();
@@ -909,6 +952,33 @@ class BuildExecutor {
         sessionId,
       };
     }
+
+    // Ensure the persistent container for this session is running, starting it if needed.
+    // Subsequent builds exec into the already-running container, saving 10-30s of startup overhead.
+    let containerName;
+    try {
+      containerName = await this._ensureContainerRunning(sessionId);
+    } catch (err) {
+      console.error('[PersistentContainer] Failed to start container:', err.message);
+      return {
+        success: false,
+        buildType: 'scons-html',
+        artifacts: [],
+        entryFile: null,
+        stdout: '',
+        stderr: `Failed to start build container: ${err.message}`,
+        sessionId,
+      };
+    }
+
+    const cmd = [
+      'docker exec',
+      xmlId ? `-e SECTION_XMLID="${xmlId}"` : '',
+      containerName,
+      '/usr/local/bin/docker-entrypoint.sh build',
+    ].filter(Boolean).join(' ');
+
+    console.log(`Running build: ${cmd}`);
 
     this.dockerBuildsInProgress.add(repoKey);
     try {
@@ -1098,12 +1168,12 @@ class BuildExecutor {
 
   /* ─── updateFile + rebuild ───────────────────────────────────────────────── */
 
-  async updateFile(sessionId, filePath, content) {
+  async updateFile(sessionId, filePath, content, xmlId = null) {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('Invalid session');
 
     await fs.writeFile(path.join(session.repoPath, filePath), content, 'utf-8');
-    console.log(`Updated file: ${filePath}`);
+    console.log(`Updated file: ${filePath}${xmlId ? ` (section: ${xmlId})` : ''}`);
 
     if (session.localTestMode) {
       return this.build(sessionId);
@@ -1117,7 +1187,7 @@ class BuildExecutor {
     // Mark this session as a fresh build (not cached)
     session.fromCache = false;
 
-    return this.build(sessionId);
+    return this.build(sessionId, { xmlId });
   }
 
   /* ─── serveArtifact ──────────────────────────────────────────────────────── */
@@ -1294,6 +1364,9 @@ class BuildExecutor {
       this.sessions.delete(sessionId);
       return;
     }
+
+    // Stop persistent container before removing bind-mounted directories
+    await this._stopPersistentContainer(sessionId);
 
     try {
       await fs.rm(baseDir, { recursive: true, force: true });

@@ -340,6 +340,13 @@ app.post('/workspace/init', requireAccessToken, async (req, res) => {
   }
 });
 
+app.get('/workspace/:sessionId/meta', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = buildExecutor.sessions.get(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  res.json({ repo: `${session.owner}/${session.repo}`, owner: session.owner });
+});
+
 app.get('/workspace/:sessionId/tree', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
   try {
     const tree = await getWorkspaceTree(req.params.sessionId, String(req.query.path || ''));
@@ -753,7 +760,7 @@ app.post('/build/init', requireAccessToken, async (req, res) => {
 
 // Update file and rebuild
 app.post('/build/update', requireAccessToken, async (req, res) => {
-  const { sessionId, filePath, content } = req.body;
+  const { sessionId, filePath, content, sectionXmlId } = req.body;
   const updateLogin = req.authSession?.user?.login;
   const updateSession = buildExecutor.sessions.get(sessionId);
   if (updateLogin && updateSession?.creatorLogin && updateSession.creatorLogin !== updateLogin) {
@@ -761,8 +768,9 @@ app.post('/build/update', requireAccessToken, async (req, res) => {
   }
 
   try {
-    console.log(`Updating file ${filePath} and rebuilding`);
-    const result = await buildExecutor.updateFile(sessionId, filePath, content);
+    const xmlId = sectionXmlId && /^[a-zA-Z0-9_-]+$/.test(sectionXmlId) ? sectionXmlId : null;
+    console.log(`Updating file ${filePath} and rebuilding${xmlId ? ` (section: ${xmlId})` : ''}`);
+    const result = await buildExecutor.updateFile(sessionId, filePath, content, xmlId);
     res.json(result);
   } catch (error) {
     console.error('Build update error:', error);

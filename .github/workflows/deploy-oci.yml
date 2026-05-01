@@ -134,6 +134,11 @@ jobs:
 
             tar -xzf proofdesk-release.tgz
 
+            # Rebuild the pretext-builder image on every deploy so changes to
+            # docker/build.sh or docker/Dockerfile take effect immediately.
+            # Docker layer cache makes this a no-op when those files are unchanged.
+            docker build -t mra-pretext-builder ./docker
+
             # Build with output visible, stop old containers, then start fresh
             docker compose -f docker-compose.prod.yml build
             docker compose -f docker-compose.prod.yml down --remove-orphans

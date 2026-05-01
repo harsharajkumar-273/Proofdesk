@@ -998,17 +998,49 @@ open('/home/vagrant/cache/pretex-cache/placeholder.png', 'wb').write(png)
 
     if [ "${BUILD_PDF:-}" = "1" ]; then
         echo "Step 5b: Building PDF via scons print ($(nproc) parallel jobs)..."
-        scons print -j$(nproc) 2>&1 || true
 
-        # Locate the generated PDF
-        PDF_FILE=$(find /home/vagrant /repo -name "*.pdf" -type f 2>/dev/null | head -1)
+        # Wipe SCons's cached state for the print target so it doesn't reuse
+        # stale signatures from the HTML build that ran in a different container.
+        scons --clean print 2>&1 || true
+
+        PDF_LOG=/tmp/scons-print.log
+        scons print -j$(nproc) 2>&1 | tee "$PDF_LOG" || true
+
+        # Show last 40 lines of build log so failures are visible
+        echo "--- PDF build log tail ---"
+        tail -40 "$PDF_LOG" 2>/dev/null || true
+        echo "--- end log ---"
+
+        # Locate the generated PDF — prefer known ILA output path, then scan broadly
+        PDF_FILE=""
+        for candidate in \
+            "/home/vagrant/build/ila.pdf" \
+            "/home/vagrant/build/print.pdf" \
+            "/home/vagrant/output-print/ila.pdf" \
+            "/home/vagrant/output-print/print.pdf" \
+            "/repo/print.pdf" \
+            "/repo/ila.pdf"; do
+            if [ -f "$candidate" ] && [ "$(stat -c%s "$candidate" 2>/dev/null || stat -f%z "$candidate" 2>/dev/null || echo 0)" -gt 10000 ]; then
+                PDF_FILE="$candidate"
+                break
+            fi
+        done
+        # Fallback: any PDF larger than 10 KB (skip tiny/blank outputs)
+        if [ -z "$PDF_FILE" ]; then
+            PDF_FILE=$(find /home/vagrant /repo -name "*.pdf" -type f 2>/dev/null \
+                | while read -r f; do
+                    size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
+                    [ "$size" -gt 10000 ] && echo "$f"
+                done | head -1)
+        fi
+
         if [ -n "$PDF_FILE" ]; then
-            echo "✓ PDF found: $PDF_FILE"
+            echo "✓ PDF found: $PDF_FILE ($(stat -c%s "$PDF_FILE" 2>/dev/null || stat -f%z "$PDF_FILE") bytes)"
             mkdir -p /output
             cp "$PDF_FILE" /output/textbook.pdf
             BUILD_SUCCESS=true
         else
-            echo "⚠️  scons print produced no PDF — aborting PDF build"
+            echo "⚠️  scons print produced no usable PDF (all PDFs were blank/tiny or missing)"
         fi
     else
         echo "Step 5b: Building HTML ($(nproc) parallel jobs)..."
