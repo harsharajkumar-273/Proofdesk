@@ -28,6 +28,27 @@ describe('pretexPreview', () => {
     expect(html).not.toContain(String.raw`\syseq`);
   });
 
+  it('expands \\def/\\edef macros before syseq processing', () => {
+    const html = pretexToHtml(String.raw`<book><p><men>
+\def\eqline#1#2{(#1)^2 + B(#2)^2 + C(#1)(#2) + D(#1) + E(#2) + F = 0}
+\edef\eqs{\eqline02;
+  \eqline21;
+  \eqline1{-1};
+  \eqline{-1}{-2};
+  \eqline{-3}1;
+  \eqline{-1}{-1}
+}
+\spalignsysdelims..
+\expandafter\syseq\expandafter{\eqs\rlap.}
+    </men></p></book>`);
+
+    expect(html).toContain(String.raw`\begin{aligned}`);
+    expect(html).toContain('(0)^2 + B(2)^2');
+    expect(html).toContain('(-3)^2 + B(1)^2');
+    expect(html).not.toContain(String.raw`\edef`);
+    expect(html).not.toContain(String.raw`\eqs`);
+  });
+
   it('detects PreTeXt-like source files by extension', () => {
     expect(isPreTeXtFile('chapter.xml')).toBe(true);
     expect(isPreTeXtFile('chapter.ptx')).toBe(true);

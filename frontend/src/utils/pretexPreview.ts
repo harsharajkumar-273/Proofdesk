@@ -156,6 +156,131 @@ function replaceDelimitedCommands(
   return result;
 }
 
+function extractNextTexArg(text: string, pos: number): { arg: string; end: number } {
+  while (pos < text.length && text[pos] === ' ') pos++;
+  if (pos >= text.length) return { arg: '', end: pos };
+  if (text[pos] === '{') {
+    const close = findMatchingBrace(text, pos);
+    if (close < 0) return { arg: text.slice(pos + 1), end: text.length };
+    return { arg: text.slice(pos + 1, close), end: close + 1 };
+  }
+  return { arg: text[pos], end: pos + 1 };
+}
+
+function expandMacroInText(
+  text: string,
+  cmdName: string,
+  template: string,
+  numArgs: number,
+): string {
+  const cmd = `\\${cmdName}`;
+  let result = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith(cmd, i)) {
+      const after = i + cmd.length;
+      const nextCh = after < text.length ? text[after] : '';
+      if (!/[a-zA-Z]/.test(nextCh)) {
+        const args: string[] = [];
+        let pos = after;
+        for (let a = 0; a < numArgs; a++) {
+          const r = extractNextTexArg(text, pos);
+          args.push(r.arg);
+          pos = r.end;
+        }
+        result += template.replace(/#([1-9])/g, (_, n) => args[parseInt(n, 10) - 1] ?? '');
+        i = pos;
+        continue;
+      }
+    }
+    if (text[i] === '\\') {
+      result += text[i++];
+      if (i < text.length) {
+        if (/[a-zA-Z]/.test(text[i])) {
+          while (i < text.length && /[a-zA-Z]/.test(text[i])) result += text[i++];
+        } else {
+          result += text[i++];
+        }
+      }
+    } else {
+      result += text[i++];
+    }
+  }
+  return result;
+}
+
+function expandDefMacros(tex: string): string {
+  if (!tex.includes('\\def') && !tex.includes('\\edef')) return tex;
+
+  const defs = new Map<string, { numArgs: number; template: string }>();
+
+  // Pass 1: extract and remove \def\name#1#2{body} definitions
+  let i = 0;
+  let afterDefs = '';
+  while (i < tex.length) {
+    if (tex.startsWith('\\def\\', i)) {
+      let pos = i + 5; // past \def\
+      const nameStart = pos;
+      while (pos < tex.length && /[a-zA-Z]/.test(tex[pos])) pos++;
+      const name = tex.slice(nameStart, pos);
+      let numArgs = 0;
+      while (pos + 1 < tex.length && tex[pos] === '#' && /\d/.test(tex[pos + 1])) {
+        numArgs++;
+        pos += 2;
+      }
+      while (pos < tex.length && tex[pos] !== '{') pos++;
+      if (pos < tex.length) {
+        const bodyEnd = findMatchingBrace(tex, pos);
+        if (bodyEnd >= 0) {
+          defs.set(name, { numArgs, template: tex.slice(pos + 1, bodyEnd) });
+          i = bodyEnd + 1;
+          continue;
+        }
+      }
+    }
+    afterDefs += tex[i++];
+  }
+
+  if (defs.size === 0) return afterDefs;
+
+  // Pass 2: expand \edef\name{body} using stored defs, remove the \edef block
+  const edefs = new Map<string, string>();
+  i = 0;
+  let afterEdefs = '';
+  while (i < afterDefs.length) {
+    if (afterDefs.startsWith('\\edef\\', i)) {
+      let pos = i + 6; // past \edef\
+      const nameStart = pos;
+      while (pos < afterDefs.length && /[a-zA-Z]/.test(afterDefs[pos])) pos++;
+      const name = afterDefs.slice(nameStart, pos);
+      while (pos < afterDefs.length && afterDefs[pos] !== '{') pos++;
+      if (pos < afterDefs.length) {
+        const bodyEnd = findMatchingBrace(afterDefs, pos);
+        if (bodyEnd >= 0) {
+          let body = afterDefs.slice(pos + 1, bodyEnd);
+          for (const [defName, def] of defs) {
+            body = expandMacroInText(body, defName, def.template, def.numArgs);
+          }
+          edefs.set(name, body);
+          i = bodyEnd + 1;
+          continue;
+        }
+      }
+    }
+    afterEdefs += afterDefs[i++];
+  }
+
+  if (edefs.size === 0) return afterEdefs;
+
+  // Pass 3: replace uses of \edefName in remaining text
+  let result = afterEdefs;
+  for (const [name, value] of edefs) {
+    result = expandMacroInText(result, name, value, 0);
+  }
+
+  return result;
+}
+
 function preprocessLatexForPreview(tex: string): string {
   let next = tex
     .replace(/\$([^$]*)\$/g, '$1')
@@ -165,6 +290,7 @@ function preprocessLatexForPreview(tex: string): string {
     .replace(/\\hfil[lr]?\b/g, '')
     .replace(/\}%\s*$/gm, '}');
 
+  next = expandDefMacros(next);
   next = replaceDelimitedCommands(next, ['syseq', 'spalignsys'], convertSyseq);
   next = next.replace(/\\\./g, '{}').replace(/\\\+/g, '+');
 
