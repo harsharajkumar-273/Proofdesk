@@ -18,7 +18,7 @@ jobs:
       PROOFDESK_SESSION_SECRET: ci-session-secret
       PROOFDESK_DATA_DIR: ./.tmp/proofdesk-ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
