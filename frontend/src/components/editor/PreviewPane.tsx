@@ -11,7 +11,9 @@ import {
   Link,
   Package,
   RefreshCw,
+  SplitSquareHorizontal,
 } from 'lucide-react';
+import { formatPreviewSnapshotLabel, type PreviewSnapshotEntry } from '../../utils/previewDiff';
 
 interface CollaborationParticipant {
   clientId: string;
@@ -46,6 +48,12 @@ interface PreviewPaneProps {
   compiledOutput: string;
   sessionId?: string | null;
   apiUrl?: string;
+  previewHistory: PreviewSnapshotEntry[];
+  previewDiffEnabled: boolean;
+  previewBaseSnapshotId: string | null;
+  previewDiffSummary?: PreviewSnapshotEntry['changeSummary'] | null;
+  onTogglePreviewDiff: () => void;
+  onSelectPreviewBaseSnapshot: (snapshotId: string) => void;
 }
 
 const PreviewPane: React.FC<PreviewPaneProps> = ({
@@ -75,6 +83,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   compiledOutput,
   sessionId,
   apiUrl = 'http://localhost:4000',
+  previewHistory,
+  previewDiffEnabled,
+  previewBaseSnapshotId,
+  previewDiffSummary,
+  onTogglePreviewDiff,
+  onSelectPreviewBaseSnapshot,
 }) => {
   const [shareState, setShareState] = useState<'idle' | 'loading' | 'copied'>('idle');
   const [reviewLinkCopied, setReviewLinkCopied] = useState(false);
@@ -132,6 +146,11 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
     />
   );
 
+  const baseSnapshot = previewHistory.find((snapshot) => snapshot.snapshotId === previewBaseSnapshotId) || null;
+  const baseSnapshotUrl = sessionId && baseSnapshot
+    ? `${apiUrl}/build/preview-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(baseSnapshot.snapshotId)}?entryFile=${encodeURIComponent(baseSnapshot.entryFile)}`
+    : null;
+
   if (compilationMode === 'file') {
     return (
       <div className="flex-1">
@@ -144,48 +163,42 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
 
   return (
     <>
-      <div
-        className="editor-source-pane overflow-hidden"
-        style={{ width: `${editorWidth}%` }}
-      >
+      <div className="editor-source-pane overflow-hidden" style={{ width: `${editorWidth}%` }}>
         <React.Suspense fallback={<div className="flex h-full items-center justify-center bg-gray-900 text-sm text-gray-400">Loading editor…</div>}>
           {renderEditor()}
         </React.Suspense>
       </div>
 
       <div
-        className="editor-split-resizer w-1 cursor-col-resize hover:bg-blue-500 active:bg-blue-500 transition-colors flex-shrink-0"
+        className="editor-split-resizer w-1 flex-shrink-0 cursor-col-resize transition-colors hover:bg-blue-500 active:bg-blue-500"
         onMouseDown={onEditorResizeStart}
         style={{ cursor: 'col-resize' }}
       >
-        <div className="w-full h-full flex items-center justify-center">
-          <LayoutGrid className="w-3 h-3 text-gray-600 rotate-90" />
+        <div className="flex h-full w-full items-center justify-center">
+          <LayoutGrid className="h-3 w-3 rotate-90 text-gray-600" />
         </div>
       </div>
 
-      <div
-        className="editor-preview-surface overflow-hidden bg-gray-900"
-        style={{ width: `${100 - editorWidth}%` }}
-      >
-        <div className="h-full flex flex-col">
-          <div className="editor-preview-toolbar h-8 bg-gray-800 border-b border-gray-700 flex items-center justify-between px-3 flex-shrink-0">
+      <div className="editor-preview-surface overflow-hidden bg-gray-900" style={{ width: `${100 - editorWidth}%` }}>
+        <div className="flex h-full flex-col">
+          <div className="editor-preview-toolbar flex h-8 flex-shrink-0 items-center justify-between border-b border-gray-700 bg-gray-800 px-3">
             <div className="flex items-center space-x-2">
-              <Eye className="w-4 h-4 text-gray-400" />
+              <Eye className="h-4 w-4 text-gray-400" />
               <span className="text-sm font-medium text-gray-300">Preview</span>
               {srcDocContent && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-green-900 text-green-300 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse inline-block" />
+                <span className="flex items-center gap-1 rounded-full bg-green-900 px-2 py-0.5 text-xs text-green-300">
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
                   Draft
                 </span>
               )}
               {compiling && (
                 <div className="flex items-center text-xs text-blue-400">
-                  <RefreshCw className="w-3 h-3 mr-1 animate-spin" />
+                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
                   {srcDocContent ? 'Syncing compiled preview…' : 'Building...'}
                 </div>
               )}
               {liveEditStatus && (
-                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                <span className={`rounded-full px-2 py-0.5 text-xs ${
                   liveEditStatus.includes('updated') ? 'bg-green-900 text-green-300' :
                   liveEditStatus.includes('fail') || liveEditStatus.includes('error') ? 'bg-red-900 text-red-300' :
                   'bg-yellow-900 text-yellow-300'
@@ -194,16 +207,14 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 </span>
               )}
               {liveEditMode && lastSavedAt && !liveEditStatus && (
-                <span className="text-xs text-gray-500">
-                  Updated {lastSavedAt.toLocaleTimeString()}
-                </span>
+                <span className="text-xs text-gray-500">Updated {lastSavedAt.toLocaleTimeString()}</span>
               )}
               {collaborationEnabled && collaborators.length > 0 && (
-                <div className="flex items-center space-x-1 ml-1">
+                <div className="ml-1 flex items-center space-x-1">
                   {collaborators.slice(0, 4).map((participant) => (
                     <div
                       key={participant.clientId}
-                      className="w-6 h-6 rounded-full text-[10px] font-semibold text-white flex items-center justify-center border border-gray-800"
+                      className="flex h-6 w-6 items-center justify-center rounded-full border border-gray-800 text-[10px] font-semibold text-white"
                       style={{ backgroundColor: participant.color }}
                       title={`${getParticipantName(participant)}${participant.isSelf ? ' (You)' : ''}`}
                     >
@@ -213,7 +224,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 </div>
               )}
               {collaborationEnabled && collaborationStatus && (
-                <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-900 text-cyan-300">
+                <span className="rounded-full bg-cyan-900 px-2 py-0.5 text-xs text-cyan-300">
                   {collaborationStatus}
                 </span>
               )}
@@ -227,6 +238,18 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 <ArrowUpRight className="h-3 w-3" />
                 <span className="hidden sm:inline">Related Page</span>
               </button>
+              {previewHistory.length > 1 && previewUrl && (
+                <button
+                  onClick={onTogglePreviewDiff}
+                  className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs ${
+                    previewDiffEnabled ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                  }`}
+                  title="Compare the current preview with an earlier compiled snapshot"
+                >
+                  <SplitSquareHorizontal className="h-3 w-3" />
+                  <span className="hidden sm:inline">Diff</span>
+                </button>
+              )}
               {sessionId && (previewUrl || compiledOutput) && (
                 <>
                   <button
@@ -264,25 +287,50 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
               )}
               <button
                 onClick={compileRepository}
-                className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+                className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
                 title="Rebuild"
               >
-                <RefreshCw className={`w-4 h-4 ${compiling ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${compiling ? 'animate-spin' : ''}`} />
               </button>
               <button
                 onClick={() => setEditorWidth(50)}
-                className="p-1 hover:bg-gray-700 rounded text-gray-400 hover:text-white"
+                className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
                 title="Reset split"
               >
-                <LayoutGrid className="w-4 h-4" />
+                <LayoutGrid className="h-4 w-4" />
               </button>
             </div>
           </div>
-          <div className="flex-1 overflow-hidden relative">
+
+          {previewDiffEnabled && previewHistory.length > 1 && (
+            <div className="border-b border-gray-700 bg-gray-900 px-3 py-2">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-300">
+                <span className="font-medium text-gray-400">Compare current preview against</span>
+                <select
+                  value={previewBaseSnapshotId ?? ''}
+                  onChange={(event) => onSelectPreviewBaseSnapshot(event.target.value)}
+                  className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-100"
+                >
+                  {previewHistory.slice(1).map((snapshot) => (
+                    <option key={snapshot.snapshotId} value={snapshot.snapshotId}>
+                      {formatPreviewSnapshotLabel(snapshot)}
+                    </option>
+                  ))}
+                </select>
+                {baseSnapshot?.excerpt && (
+                  <span className="truncate text-gray-500" title={baseSnapshot.excerpt}>
+                    {baseSnapshot.excerpt.slice(0, 80)}{baseSnapshot.excerpt.length > 80 ? '…' : ''}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="relative flex-1 overflow-hidden">
             {isRebuilding && !srcDocContent && (
-              <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center z-10 pointer-events-none">
-                <div className="bg-gray-800 rounded-lg px-4 py-2 flex items-center space-x-2">
-                  <RefreshCw className="w-4 h-4 text-purple-400 animate-spin" />
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black bg-opacity-40">
+                <div className="flex items-center space-x-2 rounded-lg bg-gray-800 px-4 py-2">
+                  <RefreshCw className="h-4 w-4 animate-spin text-purple-400" />
                   <span className="text-sm text-purple-300">Rebuilding preview…</span>
                 </div>
               </div>
@@ -291,34 +339,60 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
               <iframe
                 srcDoc={srcDocContent}
                 key={`srcdoc-${previewFrameKey}`}
-                className="w-full h-full"
+                className="h-full w-full"
                 style={{ border: 'none', background: 'white' }}
                 title="Live Preview"
                 data-testid="preview-frame"
                 sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-downloads"
               />
+            ) : previewDiffEnabled && previewUrl && baseSnapshotUrl ? (
+              <div className="grid h-full grid-cols-1 divide-y divide-gray-700 md:grid-cols-2 md:divide-x md:divide-y-0">
+                <div className="flex min-h-0 flex-col">
+                  <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900 px-3 py-2 text-xs text-gray-300">
+                    <span>Earlier compiled snapshot</span>
+                    {baseSnapshot && <span className="text-gray-500">{formatPreviewSnapshotLabel(baseSnapshot)}</span>}
+                  </div>
+                  <iframe
+                    src={baseSnapshotUrl}
+                    className="h-full w-full"
+                    style={{ border: 'none', background: 'white' }}
+                    title="Previous Build Preview"
+                  />
+                </div>
+                <div className="flex min-h-0 flex-col">
+                  <div className="flex items-center justify-between border-b border-gray-700 bg-gray-900 px-3 py-2 text-xs text-gray-300">
+                    <span>Current compiled preview</span>
+                    <span className="text-gray-500">Live</span>
+                  </div>
+                  <iframe
+                    src={previewUrl}
+                    key={`preview-diff-${previewFrameKey}-${previewUrl}`}
+                    className="h-full w-full"
+                    style={{ border: 'none' }}
+                    title="Build Preview Diff Current"
+                    data-testid="preview-frame"
+                  />
+                </div>
+              </div>
             ) : previewUrl ? (
               <iframe
                 src={previewUrl}
                 key={`preview-${previewFrameKey}-${previewUrl}`}
-                className="w-full h-full"
+                className="h-full w-full"
                 style={{ border: 'none' }}
                 title="Build Preview"
                 data-testid="preview-frame"
               />
             ) : compiledOutput ? (
-              <div
-                className="h-full w-full overflow-auto"
-                dangerouslySetInnerHTML={{ __html: compiledOutput }}
-              />
+              <div className="h-full w-full overflow-auto" dangerouslySetInnerHTML={{ __html: compiledOutput }} />
             ) : (
-              <div className="h-full flex items-center justify-center text-gray-500">
+              <div className="flex h-full items-center justify-center text-gray-500">
                 <div className="text-center">
-                  <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <Package className="mx-auto mb-3 h-12 w-12 opacity-50" />
                   <p className="text-sm">Open an HTML file or build the repository to see preview</p>
                   <button
                     onClick={compileRepository}
-                    className="mt-3 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm"
+                    className="mt-3 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                   >
                     Build Repository
                   </button>

@@ -37,6 +37,10 @@ import createPreviewRouter from './routes/preview.routes.js';
 import createSystemRouter from './routes/system.routes.js';
 import { createShareToken, getShareToken } from './services/shareTokenStore.js';
 import {
+  listPreviewSnapshots,
+  readPreviewSnapshotHtml,
+} from './services/previewHistoryService.js';
+import {
   getWorkspaceFileContent,
   getWorkspaceSession,
   getWorkspaceTree,
@@ -991,6 +995,53 @@ app.get('/build/pdf-download/:sessionId', requireAccessToken, checkWorkspaceOwne
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="proofdesk-${sessionId.slice(0, 8)}.pdf"`);
   import('fs').then(({ createReadStream }) => createReadStream(pdfPath).pipe(res));
+});
+
+app.get('/build/preview-history/:sessionId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
+  const { sessionId } = req.params;
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+
+  try {
+    const snapshots = await listPreviewSnapshots(sessionId);
+    res.json({ snapshots });
+  } catch (error) {
+    console.error('Preview history error:', error.message);
+    res.status(500).json({ error: 'Failed to load preview history' });
+  }
+});
+
+app.get('/build/preview-history/:sessionId/:snapshotId', requireAccessToken, checkWorkspaceOwner, async (req, res) => {
+  const { sessionId, snapshotId } = req.params;
+  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
+    return res.status(400).json({ error: 'Invalid session ID' });
+  }
+  if (!/^[0-9a-f]{12}$/.test(snapshotId)) {
+    return res.status(400).json({ error: 'Invalid snapshot ID' });
+  }
+
+  try {
+    const session = buildExecutor.sessions.get(sessionId);
+    const entryFile = String(req.query.entryFile || 'overview.html');
+    const baseHref = `/preview/${sessionId}/${path.dirname(entryFile) === '.' ? '' : `${path.dirname(entryFile)}/`}`;
+    let html = await readPreviewSnapshotHtml(sessionId, snapshotId);
+
+    if (!/<base\s/i.test(html)) {
+      html = html.replace(/<head([^>]*)>/i, `<head$1><base href="${baseHref}">`);
+    }
+
+    if (session?.previewPath) {
+      html = injectLatestPreTeXtLayoutFix(html);
+    }
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    res.send(html);
+  } catch (error) {
+    console.error('Preview snapshot error:', error.message);
+    res.status(404).json({ error: 'Snapshot not found' });
+  }
 });
 
 // Create a shareable public link for the current built output

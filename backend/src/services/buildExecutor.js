@@ -11,6 +11,7 @@ import { syncPreviewBundle } from './previewBundleService.js';
 import { getProofdeskDataRoot, getProofdeskDataPath } from '../utils/dataPaths.js';
 import githubCacheStore from './githubCacheStore.js';
 import { sendBuildCompleteNotification, isEmailConfigured } from './emailService.js';
+import { recordPreviewSnapshot } from './previewHistoryService.js';
 
 const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
@@ -873,6 +874,12 @@ class BuildExecutor {
         outputPath: session.outputPath,
         repoPath: session.repoPath,
       });
+      await recordPreviewSnapshot({
+        sessionId,
+        previewPath: session.previewPath,
+        entryFile: localBuild.entryFile,
+        label: 'Local build',
+      }).catch(() => null);
       const artifacts = await this.findArtifacts(session.outputPath);
       return {
         success: artifacts.length > 0,
@@ -895,6 +902,12 @@ class BuildExecutor {
       });
       const artifacts = await this.findArtifacts(session.outputPath);
       const entryFile = await this.findEntry(session.outputPath);
+      await recordPreviewSnapshot({
+        sessionId,
+        previewPath: session.previewPath,
+        entryFile,
+        label: session.seededFromLocal ? 'Seeded preview' : 'Cached preview',
+      }).catch(() => null);
       console.log(`[BuildCache] Serving cached output for ${session.owner}/${session.repo}`);
       return {
         success: artifacts.length > 0 || !!entryFile,
@@ -1041,6 +1054,12 @@ class BuildExecutor {
           outputPath: session.outputPath,
           repoPath: session.repoPath,
         });
+        await recordPreviewSnapshot({
+          sessionId,
+          previewPath: session.previewPath,
+          entryFile,
+          label: xmlId ? `Section ${xmlId}` : 'Full build',
+        }).catch(() => null);
       }
 
       return { success, buildType: 'scons-html', artifacts, entryFile, stdout, stderr, command: cmd, sessionId };

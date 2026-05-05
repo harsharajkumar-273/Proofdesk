@@ -62,14 +62,17 @@ import {
   resolvePreviewTarget,
   upsertReviewMarker,
   type RecentFileEntry,
+  type ReviewCommentEntry,
   type ReviewMarkerEntry,
   type ReviewMarkerStatus,
+  type ReviewThreadEntry,
 } from '../utils/editorWorkspace';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
 import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
 import { parseBuildErrors } from '../utils/buildErrorParser';
+import { type PreviewSnapshotEntry } from '../utils/previewDiff';
 import { MonacoYjsCollaborationSession } from '../utils/yjsCollaboration';
 
 const monacoGlobal = self as Window & typeof globalThis & {
@@ -214,6 +217,9 @@ interface WorkspaceSnapshot {
   compilationMode: 'repository' | 'file';
   liveEditMode: boolean;
   recentFiles: RecentFileEntry[];
+  previewHistory: PreviewSnapshotEntry[];
+  previewBaseSnapshotId: string | null;
+  previewDiffEnabled: boolean;
 }
 
 type EditorTimer = ReturnType<typeof window.setTimeout> | null;
@@ -290,8 +296,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [reviewMarkers, setReviewMarkers] = useState<Record<string, ReviewMarkerEntry>>({});
   const [reviewStatus, setReviewStatus] = useState<ReviewMarkerStatus>('needs-review');
   const [reviewNote, setReviewNote] = useState<string>('');
+  const [reviewCommentDraft, setReviewCommentDraft] = useState<string>('');
+  const [selectedReviewLine, setSelectedReviewLine] = useState<number | null>(1);
   const [saveReviewOpen, setSaveReviewOpen] = useState<boolean>(false);
   const [pendingSaveChanges, setPendingSaveChanges] = useState<TabChangeSummary[]>([]);
+  const [previewHistory, setPreviewHistory] = useState<PreviewSnapshotEntry[]>([]);
+  const [previewDiffEnabled, setPreviewDiffEnabled] = useState<boolean>(false);
+  const [previewBaseSnapshotId, setPreviewBaseSnapshotId] = useState<string | null>(null);
 
   // GoLive: instant HTML preview via srcDoc
   const [srcDocContent, setSrcDocContent] = useState<string | null>(null);
@@ -364,6 +375,31 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     () => Object.values(reviewMarkers).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [reviewMarkers]
   );
+  const activeReviewThreads = useMemo<ReviewThreadEntry[]>(
+    () => (activeTab ? [...(reviewMarkers[activeTab.path]?.threads || [])].sort((left, right) => left.lineNumber - right.lineNumber) : []),
+    [activeTab, reviewMarkers]
+  );
+  const reviewSummary = useMemo(() => {
+    let approvedFiles = 0;
+    let requestedFiles = 0;
+    let verifyPreviewFiles = 0;
+    let openThreads = 0;
+
+    for (const entry of Object.values(reviewMarkers)) {
+      if (entry.status === 'approved' || entry.status === 'ready') approvedFiles += 1;
+      if (entry.status === 'changes-requested') requestedFiles += 1;
+      if (entry.status === 'verify-preview') verifyPreviewFiles += 1;
+      openThreads += (entry.threads || []).filter((thread) => thread.status === 'open').length;
+    }
+
+    return {
+      filesTracked: Object.keys(reviewMarkers).length,
+      approvedFiles,
+      requestedFiles,
+      verifyPreviewFiles,
+      openThreads,
+    };
+  }, [reviewMarkers]);
 
   const allDiagnostics = useMemo<Diagnostic[]>(() => {
     const result: Diagnostic[] = [];
@@ -390,6 +426,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   }, [tabs, buildErrors]);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
+  const reviewDecorationIdsRef = useRef<string[]>([]);
   const mathValidationTimerRef = useRef<number | null>(null);
   const ptxValidationTimerRef = useRef<number | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
@@ -441,6 +478,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       compilationMode,
       liveEditMode,
       recentFiles,
+      previewHistory,
+      previewBaseSnapshotId,
+      previewDiffEnabled,
     });
   };
 
@@ -464,6 +504,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     setCompilationModeState(snapshot.compilationMode);
     setLiveEditModeState(snapshot.liveEditMode);
     setRecentFiles(snapshot.recentFiles);
+    setPreviewHistory(snapshot.previewHistory);
+    setPreviewBaseSnapshotId(snapshot.previewBaseSnapshotId);
+    setPreviewDiffEnabled(snapshot.previewDiffEnabled);
     setSrcDocContent(null);
     setWorkspaceNotice(null);
     workspaceInitPromiseRef.current = null;
@@ -530,6 +573,29 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       credentials: 'include',
       headers: jsonHeaders(init.headers, typeof init.body === 'string'),
     }, fallbackMessage);
+
+  const loadPreviewHistory = async (sessionId: string, preserveSelection = false) => {
+    try {
+      const data = await apiRequest<{ snapshots: PreviewSnapshotEntry[] }>(
+        `/build/preview-history/${sessionId}`,
+        {},
+        'Failed to load preview history'
+      );
+      const snapshots = Array.isArray(data.snapshots) ? data.snapshots : [];
+      setPreviewHistory(snapshots);
+      setPreviewBaseSnapshotId((current) => {
+        if (preserveSelection && current && snapshots.some((snapshot) => snapshot.snapshotId === current)) {
+          return current;
+        }
+        return snapshots[1]?.snapshotId || null;
+      });
+      return snapshots;
+    } catch {
+      setPreviewHistory([]);
+      setPreviewBaseSnapshotId(null);
+      return [];
+    }
+  };
 
   const [loadingMessage, setLoadingMessage] = useState<string>('Initializing workspace...');
 
@@ -772,6 +838,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     setEditorReady(true);
+    setSelectedReviewLine(editor.getPosition()?.lineNumber ?? 1);
 
     applyHandshakeTheme(monaco);
     
@@ -815,6 +882,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         indentation: true,
         highlightActiveIndentation: true
       }
+    });
+
+    editor.onDidChangeCursorPosition((event) => {
+      setSelectedReviewLine(event.position.lineNumber);
     });
   };
 
@@ -1122,6 +1193,26 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   }, [activeTabId, buildErrors, editorReady]);
 
   useEffect(() => {
+    const editorInstance = editorRef.current;
+    const monaco = monacoRef.current;
+    const model = editorInstance?.getModel?.();
+    if (!editorInstance || !monaco || !model) return;
+
+    reviewDecorationIdsRef.current = editorInstance.deltaDecorations(
+      reviewDecorationIdsRef.current,
+      activeReviewThreads.map((thread) => ({
+        range: new monaco.Range(thread.lineNumber, 1, thread.lineNumber, 1),
+        options: {
+          isWholeLine: true,
+          glyphMarginClassName: thread.status === 'open' ? 'proofdesk-review-glyph-open' : 'proofdesk-review-glyph-resolved',
+          glyphMarginHoverMessage: [{ value: `Review thread on line ${thread.lineNumber} (${thread.status})` }],
+          linesDecorationsClassName: thread.status === 'open' ? 'proofdesk-review-line-open' : 'proofdesk-review-line-resolved',
+        },
+      }))
+    );
+  }, [activeReviewThreads, activeTabId, editorReady]);
+
+  useEffect(() => {
     setRecentFiles(readRecentFiles(repo?.fullName || null));
     setReviewMarkers(readReviewMarkers(repo?.fullName || null));
   }, [repo?.fullName]);
@@ -1145,21 +1236,46 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   }, [buildSessionId]);
 
   useEffect(() => {
+    if (!buildSessionId) {
+      setPreviewHistory([]);
+      setPreviewBaseSnapshotId(null);
+      setPreviewDiffEnabled(false);
+      return;
+    }
+
+    void loadPreviewHistory(buildSessionId);
+    // Preview history is tied to the active build session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildSessionId]);
+
+  useEffect(() => {
+    if (previewHistory.length < 2) {
+      setPreviewDiffEnabled(false);
+      setPreviewBaseSnapshotId(null);
+    } else if (!previewBaseSnapshotId) {
+      setPreviewBaseSnapshotId(previewHistory[1]?.snapshotId || null);
+    }
+  }, [previewBaseSnapshotId, previewHistory]);
+
+  useEffect(() => {
     if (!activeTab || !repo?.fullName) {
       setReviewStatus('needs-review');
       setReviewNote('');
+      setReviewCommentDraft('');
       return;
     }
 
     const existingMarker = reviewMarkers[activeTab.path];
     if (existingMarker) {
-      setReviewStatus(existingMarker.status);
+      setReviewStatus(existingMarker.status === 'ready' ? 'approved' : existingMarker.status);
       setReviewNote(existingMarker.note);
+      setReviewCommentDraft('');
       return;
     }
 
     setReviewStatus('needs-review');
     setReviewNote('');
+    setReviewCommentDraft('');
   }, [activeTab, activeTabId, repo?.fullName, reviewMarkers]);
 
   useEffect(() => {
@@ -1446,6 +1562,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     setBuildErrors([]);
     setPreviewUrl(null);
     setPreviewEntryFile(null);
+    setPreviewHistory([]);
+    setPreviewBaseSnapshotId(null);
+    setPreviewDiffEnabled(false);
     setExpandedFolders(new Set());
     setRecentFiles([]);
     setSrcDocContent(null);
@@ -1644,6 +1763,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }, 'Failed to save review markers').catch(() => {});
   };
 
+  const buildReviewAuthor = () => userData?.name || userData?.login || 'Reviewer';
+
+  const saveReviewMarkersState = (nextMarkers: Record<string, ReviewMarkerEntry>) => {
+    setReviewMarkers(nextMarkers);
+    persistReviewMarkersToBackend(nextMarkers);
+  };
+
   const saveReviewMarker = () => {
     if (!repo?.fullName || !activeTab) return;
 
@@ -1651,9 +1777,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       path: activeTab.path,
       status: reviewStatus,
       note: reviewNote.trim(),
+      threads: reviewMarkers[activeTab.path]?.threads || [],
     });
-    setReviewMarkers(nextMarkers);
-    persistReviewMarkersToBackend(nextMarkers);
+    saveReviewMarkersState(nextMarkers);
     setWorkspaceNotice({
       tone: 'success',
       title: `${activeTab.name} marked as ${getReviewMarkerLabel(reviewStatus).toLowerCase()}`,
@@ -1665,12 +1791,84 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     if (!repo?.fullName || !filePath) return;
 
     const nextMarkers = removeReviewMarker(repo.fullName, filePath);
-    setReviewMarkers(nextMarkers);
-    persistReviewMarkersToBackend(nextMarkers);
+    saveReviewMarkersState(nextMarkers);
     if (activeTab?.path === filePath) {
       setReviewStatus('needs-review');
       setReviewNote('');
+      setReviewCommentDraft('');
     }
+  };
+
+  const addReviewComment = () => {
+    if (!repo?.fullName || !activeTab || !selectedReviewLine || !reviewCommentDraft.trim()) return;
+
+    const currentEntry = reviewMarkers[activeTab.path];
+    const author = buildReviewAuthor();
+    const comment: ReviewCommentEntry = {
+      id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+      author,
+      message: reviewCommentDraft.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    const existingThreads = currentEntry?.threads || [];
+    const matchingThread = existingThreads.find((thread) => thread.lineNumber === selectedReviewLine && thread.status === 'open');
+    const nextThreads = matchingThread
+      ? existingThreads.map((thread) =>
+          thread.id === matchingThread.id
+            ? {
+                ...thread,
+                comments: [...thread.comments, comment],
+                updatedAt: comment.createdAt,
+              }
+            : thread
+        )
+      : [
+          ...existingThreads,
+          {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+            lineNumber: selectedReviewLine,
+            status: 'open' as const,
+            comments: [comment],
+            updatedAt: comment.createdAt,
+          },
+        ];
+
+    const nextMarkers = upsertReviewMarker(repo.fullName, {
+      path: activeTab.path,
+      status: currentEntry?.status || reviewStatus,
+      note: currentEntry?.note || reviewNote.trim(),
+      threads: nextThreads,
+    });
+    saveReviewMarkersState(nextMarkers);
+    setReviewCommentDraft('');
+    setWorkspaceNotice({
+      tone: 'success',
+      title: `Comment added on line ${selectedReviewLine}`,
+      advice: 'The review thread is now attached to this file and will stay with the workspace.',
+    });
+  };
+
+  const updateReviewThreadState = (threadId: string, status: 'open' | 'resolved') => {
+    if (!repo?.fullName || !activeTab) return;
+    const currentEntry = reviewMarkers[activeTab.path];
+    if (!currentEntry) return;
+
+    const nextMarkers = upsertReviewMarker(repo.fullName, {
+      path: activeTab.path,
+      status: currentEntry.status,
+      note: currentEntry.note,
+      threads: (currentEntry.threads || []).map((thread) =>
+        thread.id === threadId
+          ? {
+              ...thread,
+              status,
+              updatedAt: new Date().toISOString(),
+            }
+          : thread
+      ),
+    });
+    saveReviewMarkersState(nextMarkers);
   };
 
   const jumpToRelatedPreview = async () => {
@@ -1766,6 +1964,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       });
       if (!options.quiet) {
         setPreviewUrl(null);
+        setPreviewDiffEnabled(false);
         setCompiledOutput(`
           <div style="background: #1e1e1e; color: #f44336; padding: 20px; font-family: monospace;">
             <h3>Build Failed</h3>
@@ -1781,6 +1980,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
     if (entryFile && nextSessionId) {
       setPreviewFromEntry(nextSessionId, entryFile);
+      void loadPreviewHistory(nextSessionId, true);
       setWorkspaceNotice(null);
       return true;
     }
@@ -2529,20 +2729,29 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                   reviewMarkers={reviewMarkers}
                   reviewNote={reviewNote}
                   reviewStatus={reviewStatus}
+                  reviewCommentDraft={reviewCommentDraft}
+                  selectedReviewLine={selectedReviewLine}
+                  activeReviewThreads={activeReviewThreads}
+                  reviewSummary={reviewSummary}
                   searchQuery={searchQuery}
+                  setReviewCommentDraft={setReviewCommentDraft}
                   setReviewNote={setReviewNote}
+                  setSelectedReviewLine={setSelectedReviewLine}
                   setReviewStatus={setReviewStatus}
                   setSearchQuery={setSearchQuery}
                   setAutoCompile={setAutoCompile}
                   setCompilationMode={setCompilationMode}
                   tabs={tabs}
                   onClearReviewMarker={clearReviewMarker}
+                  onAddReviewComment={addReviewComment}
                   onOpenFile={openFileInTab}
                   onRefresh={() => {
                     if (repo) {
                       return fetchFileTree(repo).then(() => {});
                     }
                   }}
+                  onReopenReviewThread={(threadId) => updateReviewThreadState(threadId, 'open')}
+                  onResolveReviewThread={(threadId) => updateReviewThreadState(threadId, 'resolved')}
                   onSaveReviewMarker={saveReviewMarker}
                   onToggleFolder={toggleFolder}
                 />
@@ -2632,6 +2841,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
               compiledOutput={compiledOutput}
               sessionId={buildSessionId}
               apiUrl={API_URL}
+              previewHistory={previewHistory}
+              previewDiffEnabled={previewDiffEnabled}
+              previewBaseSnapshotId={previewBaseSnapshotId}
+              previewDiffSummary={previewHistory.find((snapshot) => snapshot.snapshotId === previewBaseSnapshotId)?.changeSummary || null}
+              onTogglePreviewDiff={() => setPreviewDiffEnabled((current) => !current)}
+              onSelectPreviewBaseSnapshot={setPreviewBaseSnapshotId}
             />
           </div>
 

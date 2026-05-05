@@ -19,7 +19,21 @@ const summarizeBuildFailure = (message = '') => {
   if (lower.includes('xml') || lower.includes('parsererror') || lower.includes('scons') || lower.includes('traceback')) {
     return {
       code: 'course_source_invalid',
-      advice: 'Check the recent XML or PreTeXt edits. A broken tag, include, or build script is stopping the rendered output.',
+      advice: 'Check the recent XML or PreTeXt edits first. A broken tag, missing include, invalid LaTeX command, or failing build script is stopping the rendered output.',
+    };
+  }
+
+  if (lower.includes('undefined control sequence') || lower.includes('latex error')) {
+    return {
+      code: 'latex_source_invalid',
+      advice: 'A LaTeX command in the source is not supported or is misspelled. Review the math near the first reported line and retry the build.',
+    };
+  }
+
+  if (lower.includes('no such file or directory') || lower.includes('cannot open')) {
+    return {
+      code: 'missing_asset',
+      advice: 'A referenced file could not be found. Check image names, includes, and paths that were edited recently.',
     };
   }
 

@@ -2017,3 +2017,27 @@ body {
   border-radius: 18px;
   box-shadow: inset 0 0 0 1px rgba(214, 228, 251, 0.9);
 }
+
+.proofdesk-review-glyph-open {
+  background: linear-gradient(180deg, #f59e0b, #f97316);
+  border-radius: 999px;
+  margin-left: 4px;
+  width: 10px !important;
+  height: 10px !important;
+}
+
+.proofdesk-review-glyph-resolved {
+  background: linear-gradient(180deg, #10b981, #22c55e);
+  border-radius: 999px;
+  margin-left: 4px;
+  width: 10px !important;
+  height: 10px !important;
+}
+
+.proofdesk-review-line-open {
+  border-left: 2px solid rgba(245, 158, 11, 0.9);
+}
+
+.proofdesk-review-line-resolved {
+  border-left: 2px solid rgba(16, 185, 129, 0.9);
+}

@@ -271,12 +271,15 @@ These are complete on the `main` branch but bundled for a single release window 
 - `frontend/src/utils/pretextValidator.ts` — additional rule: after parsing the tag tree, find all `<image>` nodes that have no `<description>` child. Emits a `Warning` marker at the `<image>` line.
 - No new UI — warnings appear in the existing Problems panel with `source: 'accessibility'`.
 
-### Diff View Before Commit
-**What:** Before committing, a modal showing a Monaco side-by-side diff of every changed file — what was there before vs. what will be committed. The existing "Commit" button opens this diff first; a "Confirm & Commit" button inside the modal finalises it.
-**Why:** There is currently no way to review changes before committing without running `git diff` manually in the terminal. A visual diff before commit is standard in every GUI git client.
+### Diff View + File Revert
+**What:** A side-by-side diff panel (like Claude Code's edit view) showing the current file against its last committed version, available on demand at any time — not just at commit. Includes a "Revert file" button to restore the file to HEAD after reviewing what would be lost. The existing "Commit" button also routes through this panel so professors can review all changed files before confirming.
+**Why:** Professors edit XML, accidentally delete a section, and currently have no recovery path short of re-typing. A visual diff lets them see exactly what changed before deciding whether to revert — rather than blindly overwriting. Monaco's `createDiffEditor` is a first-class API so the UI cost is low; the value is high.
 **How:**
-- `GET /workspace/:sessionId/git/diff` — returns `git diff HEAD` as a structured patch (file path + hunks).
-- `frontend/src/components/editor/CommitDiffModal.tsx` — modal with a file list on the left; clicking a file shows a Monaco `createDiffEditor` read-only view on the right. "Confirm & Commit" calls the existing commit endpoint.
+- `GET /workspace/:sessionId/git/show?path=<filePath>` — returns `git show HEAD:<path>` (the committed version of a single file) as plain text.
+- `POST /workspace/:sessionId/git/revert-file` — runs `git checkout HEAD -- <path>` and returns the restored content so the Monaco model can be updated in place without a full reload.
+- On-demand trigger: a "View changes" button (diff icon) in the editor tab bar, visible whenever the active file has unsaved or uncommitted edits.
+- `frontend/src/components/editor/FileDiffPanel.tsx` — a slide-in panel hosting `monaco.editor.createDiffEditor` in read-only mode. Left side: committed version from `git show`. Right side: current Monaco model content. "Revert to last commit" button at the top with a confirmation step since the action is destructive.
+- Commit flow: the existing "Commit" button opens the same panel in multi-file mode (file list on the left, diff on the right for the selected file) before the commit is finalised.
 
 ### Inline Line Comments
 **What:** A right-click (or gutter icon) action on any line that opens a small comment input — pinned to that line, visible to all collaborators, persisted between sessions. Like GitHub PR review comments but inside the live editor.

@@ -4,13 +4,29 @@ export interface RecentFileEntry {
   openedAt: string;
 }
 
-export type ReviewMarkerStatus = 'needs-review' | 'verify-preview' | 'ready';
+export type ReviewMarkerStatus = 'needs-review' | 'changes-requested' | 'verify-preview' | 'approved' | 'ready';
+
+export interface ReviewCommentEntry {
+  id: string;
+  author: string;
+  message: string;
+  createdAt: string;
+}
+
+export interface ReviewThreadEntry {
+  id: string;
+  lineNumber: number;
+  status: 'open' | 'resolved';
+  comments: ReviewCommentEntry[];
+  updatedAt: string;
+}
 
 export interface ReviewMarkerEntry {
   path: string;
   status: ReviewMarkerStatus;
   note: string;
   updatedAt: string;
+  threads?: ReviewThreadEntry[];
 }
 
 interface PreviewArtifact {
@@ -58,7 +74,7 @@ export const readReviewMarkers = (repoFullName: string | null) =>
 
 export const upsertReviewMarker = (
   repoFullName: string | null,
-  marker: { path: string; status: ReviewMarkerStatus; note: string }
+  marker: { path: string; status: ReviewMarkerStatus; note: string; threads?: ReviewThreadEntry[] }
 ) => {
   const storageKey = getWorkspaceStorageKey(repoFullName, 'review-markers');
   const current = readReviewMarkers(repoFullName);
@@ -128,10 +144,13 @@ export const getReviewMarkerLabel = (status: ReviewMarkerStatus) => {
   switch (status) {
     case 'needs-review':
       return 'Needs review';
+    case 'changes-requested':
+      return 'Changes requested';
     case 'verify-preview':
       return 'Verify preview';
+    case 'approved':
     case 'ready':
-      return 'Ready';
+      return 'Approved';
     default:
       return 'Review';
   }

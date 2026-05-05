@@ -29,10 +29,27 @@ describe('editorWorkspace helpers', () => {
       path: 'chapters/vectors.xml',
       status: 'verify-preview',
       note: 'Check the theorem figure placement.',
+      threads: [
+        {
+          id: 'thread-1',
+          lineNumber: 18,
+          status: 'open',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          comments: [
+            {
+              id: 'comment-1',
+              author: 'Professor',
+              message: 'Verify this derivation.',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+      ],
     });
 
     const markers = readReviewMarkers('demo/course-demo');
     expect(markers['chapters/vectors.xml'].status).toBe('verify-preview');
+    expect(markers['chapters/vectors.xml'].threads?.[0].lineNumber).toBe(18);
     expect(getReviewMarkerLabel(markers['chapters/vectors.xml'].status)).toBe('Verify preview');
   });
 

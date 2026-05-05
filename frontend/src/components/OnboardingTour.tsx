@@ -44,6 +44,9 @@ const OnboardingTour: React.FC = () => {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
+    if ((window as Window & { __MRA_TEST__?: boolean }).__MRA_TEST__) {
+      return;
+    }
     if (!localStorage.getItem(TOUR_KEY)) {
       // Small delay so the editor finishes loading before the overlay appears
       const t = window.setTimeout(() => setVisible(true), 1200);

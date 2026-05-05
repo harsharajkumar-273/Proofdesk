@@ -11,6 +11,8 @@ export interface Diagnostic {
   message: string;
   severity: 'error' | 'warning';
   source: string;
+  hint?: string;
+  code?: string;
 }
 
 interface EditorProblemsPaneProps {
@@ -146,6 +148,11 @@ const EditorProblemsPane: React.FC<EditorProblemsPaneProps> = ({
                             <span className="block text-xs text-zinc-700 dark:text-zinc-300 truncate group-hover:text-zinc-900 dark:group-hover:text-zinc-100">
                               {d.message}
                             </span>
+                            {d.hint && (
+                              <span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
+                                {d.hint}
+                              </span>
+                            )}
                             <span className="text-[10px] text-zinc-400 dark:text-zinc-500">
                               {d.fileName}:{d.startLineNumber}:{d.startColumn}
                               <span className="ml-1.5 text-zinc-300 dark:text-zinc-600">{d.source}</span>

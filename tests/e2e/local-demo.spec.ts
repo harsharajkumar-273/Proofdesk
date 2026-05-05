@@ -11,7 +11,9 @@ const demoRepo = {
 
 const enableEditorTestMode = async (page: import('@playwright/test').Page) => {
   await page.addInitScript(() => {
-    (window as Window & { __MRA_TEST__?: boolean }).__MRA_TEST__ = true;
+    const testWindow = window as Window & { __MRA_TEST__?: boolean };
+    testWindow.__MRA_TEST__ = true;
+    window.localStorage.setItem('proofdesk_tour_v1', '1');
   });
 };
 
@@ -88,7 +90,9 @@ const waitForWorkspaceFiles = async (
 const openLocalDemoWorkspace = async (page: import('@playwright/test').Page) => {
   await page.goto('/');
   await page.getByTestId('local-demo-login').click();
-  await expect(page.getByRole('link', { name: /open workspace/i })).toBeVisible({ timeout: 30_000 });
+  await expect(
+    page.getByRole('navigation').getByRole('link', { name: /open workspace/i })
+  ).toBeVisible({ timeout: 30_000 });
   await page.goto('/workspace');
   await expect(page.getByTestId('open-demo-workspace')).toBeVisible();
   await Promise.all([
@@ -106,7 +110,7 @@ const openSeededEditorWorkspace = async (page: import('@playwright/test').Page, 
   await seedEditorSession(page, extraSession);
   await page.goto('/editor');
   await expect.poll(() => page.url()).toContain('/editor');
-  await expect(page.getByTestId('build-repository-button')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole('button', { name: /build preview|building/i }).first()).toBeVisible({ timeout: 30_000 });
   await waitForWorkspaceFiles(page);
   await expect(page.locator('[data-file-path="course.xml"]')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-file-path="interactive.js"]')).toBeVisible({ timeout: 30_000 });
@@ -131,8 +135,8 @@ test('opens the local demo workspace through the UI and builds a preview', async
   await openLocalDemoWorkspace(page);
 
   await page.locator('[data-file-path="course.xml"]').click();
-  await expect(page.getByTestId('build-repository-button')).toBeVisible();
-  await page.getByTestId('build-repository-button').click();
+  await expect(page.getByRole('button', { name: /build preview|building/i }).first()).toBeVisible();
+  await page.getByRole('button', { name: /build preview|building/i }).first().click();
 
   await expect(page.locator('iframe[title="Build Preview"]')).toBeVisible();
   const previewFrame = page.frameLocator('iframe[title="Build Preview"]');
@@ -147,7 +151,7 @@ test('updates the preview in live-edit mode for JavaScript changes', async ({ pa
 
   await page.locator('[data-file-path="interactive.js"]').click();
   await waitForEditorTestHook(page);
-  await page.getByTestId('build-repository-button').click();
+  await page.getByRole('button', { name: /build preview|building/i }).first().click();
   await page.getByTestId('live-edit-toggle').click();
 
   await page.evaluate(() => {
@@ -187,6 +191,7 @@ test('shows team-session presence for the same local demo file in two pages', as
     const testWindow = window as Window & { __MRA_TEST__?: boolean };
     testWindow.__MRA_TEST__ = true;
     window.localStorage.setItem('mra_collab_client_id', 'local-teammate-client');
+    window.localStorage.setItem('proofdesk_tour_v1', '1');
   });
   await seedEditorSession(teammatePage, {
     code: teamCode,
