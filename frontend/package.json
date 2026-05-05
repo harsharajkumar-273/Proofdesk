@@ -36,7 +36,7 @@
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
-    "baseline-browser-mapping": "^2.10.16",
+    "baseline-browser-mapping": "^2.10.27",
     "browserslist": "^4.28.2",
     "caniuse-lite": "^1.0.30001787",
     "eslint": "^9.36.0",
