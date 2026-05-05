@@ -41,7 +41,7 @@
     "caniuse-lite": "^1.0.30001787",
     "eslint": "^9.36.0",
     "eslint-plugin-react-hooks": "^5.2.0",
-    "eslint-plugin-react-refresh": "^0.4.22",
+    "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^16.4.0",
     "jsdom": "^29.0.2",
     "postcss": "^8.5.6",
