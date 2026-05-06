@@ -2844,7 +2844,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
               previewHistory={previewHistory}
               previewDiffEnabled={previewDiffEnabled}
               previewBaseSnapshotId={previewBaseSnapshotId}
-              previewDiffSummary={previewHistory.find((snapshot) => snapshot.snapshotId === previewBaseSnapshotId)?.changeSummary || null}
               onTogglePreviewDiff={() => setPreviewDiffEnabled((current) => !current)}
               onSelectPreviewBaseSnapshot={setPreviewBaseSnapshotId}
             />

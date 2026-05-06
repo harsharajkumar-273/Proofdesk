@@ -51,7 +51,6 @@ interface PreviewPaneProps {
   previewHistory: PreviewSnapshotEntry[];
   previewDiffEnabled: boolean;
   previewBaseSnapshotId: string | null;
-  previewDiffSummary?: PreviewSnapshotEntry['changeSummary'] | null;
   onTogglePreviewDiff: () => void;
   onSelectPreviewBaseSnapshot: (snapshotId: string) => void;
 }
@@ -86,7 +85,6 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   previewHistory,
   previewDiffEnabled,
   previewBaseSnapshotId,
-  previewDiffSummary,
   onTogglePreviewDiff,
   onSelectPreviewBaseSnapshot,
 }) => {
