@@ -135,7 +135,7 @@ export const recordPreviewSnapshot = async ({
   const nextSnapshots = [nextEntry, ...snapshots].slice(0, MAX_PREVIEW_SNAPSHOTS);
   await writeManifest(sessionId, nextSnapshots);
 
-  const staleSnapshots = snapshots.slice(MAX_PREVIEW_SNAPSHOTS - 1);
+  const staleSnapshots = snapshots.slice(MAX_PREVIEW_SNAPSHOTS);
   await Promise.all(
     staleSnapshots.map(async (snapshot) => {
       if (!snapshot?.snapshotId) return;
