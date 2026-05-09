@@ -246,26 +246,6 @@ const EditorExplorerPane: React.FC<EditorExplorerPaneProps> = ({
         </div>
 
         <div className="space-y-3">
-          <ReviewWorkflowPanel
-            activeFilePath={activeTab?.path}
-            reviewSummary={reviewSummary}
-            reviewEntries={reviewEntries}
-            reviewStatus={reviewStatus}
-            reviewNote={reviewNote}
-            selectedReviewLine={selectedReviewLine}
-            reviewCommentDraft={reviewCommentDraft}
-            activeThreads={activeReviewThreads}
-            setReviewStatus={setReviewStatus}
-            setReviewNote={setReviewNote}
-            setSelectedReviewLine={setSelectedReviewLine}
-            setReviewCommentDraft={setReviewCommentDraft}
-            onSaveReviewMarker={onSaveReviewMarker}
-            onAddReviewComment={onAddReviewComment}
-            onResolveThread={onResolveReviewThread}
-            onReopenThread={onReopenReviewThread}
-            onOpenFile={onOpenFile}
-          />
-
           <div className="flex rounded-lg border border-zinc-200 bg-zinc-100 p-0.5 dark:border-zinc-700 dark:bg-zinc-800">
             <button
               onClick={() => setCompilationMode('repository')}
@@ -304,6 +284,25 @@ const EditorExplorerPane: React.FC<EditorExplorerPaneProps> = ({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3">
+        <ReviewWorkflowPanel
+          activeFilePath={activeTab?.path}
+          reviewSummary={reviewSummary}
+          reviewEntries={reviewEntries}
+          reviewStatus={reviewStatus}
+          reviewNote={reviewNote}
+          selectedReviewLine={selectedReviewLine}
+          reviewCommentDraft={reviewCommentDraft}
+          activeThreads={activeReviewThreads}
+          setReviewStatus={setReviewStatus}
+          setReviewNote={setReviewNote}
+          setSelectedReviewLine={setSelectedReviewLine}
+          setReviewCommentDraft={setReviewCommentDraft}
+          onSaveReviewMarker={onSaveReviewMarker}
+          onAddReviewComment={onAddReviewComment}
+          onResolveThread={onResolveReviewThread}
+          onReopenThread={onReopenReviewThread}
+          onOpenFile={onOpenFile}
+        />
         {loading ? (
           <div className="py-20 text-center">
             <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-indigo-600" />
