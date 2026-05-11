@@ -137,6 +137,7 @@ export const createPreviewRouter = () => {
       responseContent = content;
     }
 
+    res.removeHeader('X-Frame-Options');
     res.setHeader('Content-Type', getPreviewMimeType(ext));
     res.setHeader('Cache-Control', getPreviewCacheHeader(ext));
     res.setHeader('Pragma', 'no-cache');

@@ -1190,7 +1190,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         source: 'Build',
       })),
     );
-  }, [activeTabId, buildErrors, editorReady]);
+  }, [activeTab, buildErrors, editorReady]);
 
   useEffect(() => {
     const editorInstance = editorRef.current;
