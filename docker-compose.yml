@@ -18,6 +18,14 @@ services:
       - vagrant-build:/home/vagrant/build
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: proofdesk-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+
 volumes:
   # Named volumes persist across container restarts (unlike anonymous bind mounts).
   pretex-cache:

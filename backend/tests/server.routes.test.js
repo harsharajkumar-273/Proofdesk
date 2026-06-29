@@ -511,4 +511,11 @@ describe('active backend routes', () => {
     assert.equal(response.status, 400);
     assert.equal(response.body.error, 'Invalid session ID');
   });
+
+  it('serves the Prometheus metrics data', async () => {
+    const response = await request(app).get('/metrics');
+    assert.equal(response.status, 200);
+    assert.match(response.text, /http_request_duration_seconds/);
+    assert.match(response.text, /websocket_active_connections/);
+  });
 });

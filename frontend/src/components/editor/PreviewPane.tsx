@@ -53,6 +53,9 @@ interface PreviewPaneProps {
   previewBaseSnapshotId: string | null;
   onTogglePreviewDiff: () => void;
   onSelectPreviewBaseSnapshot: (snapshotId: string) => void;
+  splitView: boolean;
+  compilerRuntime?: 'docker' | 'wasm';
+  onChangeCompilerRuntime?: (runtime: 'docker' | 'wasm') => void;
 }
 
 const PreviewPane: React.FC<PreviewPaneProps> = ({
@@ -87,6 +90,9 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   previewBaseSnapshotId,
   onTogglePreviewDiff,
   onSelectPreviewBaseSnapshot,
+  splitView,
+  compilerRuntime = 'wasm',
+  onChangeCompilerRuntime,
 }) => {
   const [shareState, setShareState] = useState<'idle' | 'loading' | 'copied'>('idle');
   const [reviewLinkCopied, setReviewLinkCopied] = useState(false);
@@ -149,7 +155,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
     ? `${apiUrl}/build/preview-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(baseSnapshot.snapshotId)}?entryFile=${encodeURIComponent(baseSnapshot.entryFile)}`
     : null;
 
-  if (compilationMode === 'file') {
+  if (compilationMode === 'file' || !splitView) {
     return (
       <div className="flex-1">
         <React.Suspense fallback={<div className="flex h-full items-center justify-center bg-gray-900 text-sm text-gray-400">Loading editor…</div>}>
@@ -183,6 +189,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
             <div className="flex items-center space-x-2">
               <Eye className="h-4 w-4 text-gray-400" />
               <span className="text-sm font-medium text-gray-300">Preview</span>
+              {compilerRuntime === 'wasm' && (
+                <span className="flex items-center gap-1 rounded-full bg-indigo-950/60 border border-indigo-700 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
+                  WASM Active
+                </span>
+              )}
               {srcDocContent && (
                 <span className="flex items-center gap-1 rounded-full bg-green-900 px-2 py-0.5 text-xs text-green-300">
                   <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
@@ -283,6 +295,18 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                   </button>
                 </>
               )}
+              <div className="flex items-center space-x-1 border border-gray-700 rounded-md bg-gray-900 px-1.5 py-0.5 mr-1">
+                <span className="text-[10px] text-gray-400 font-semibold px-0.5">Engine:</span>
+                <select
+                  value={compilerRuntime}
+                  onChange={(e) => onChangeCompilerRuntime?.(e.target.value as 'docker' | 'wasm')}
+                  className="bg-transparent text-[11px] text-gray-300 font-bold focus:outline-none cursor-pointer"
+                  title="WASM Sandbox compiles locally in browser; Docker compiles remotely via server sandbox containers"
+                >
+                  <option value="wasm" className="bg-gray-800 text-gray-200">WASM Sandbox</option>
+                  <option value="docker" className="bg-gray-800 text-gray-200">Cloud Docker</option>
+                </select>
+              </div>
               <button
                 onClick={compileRepository}
                 className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"

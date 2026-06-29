@@ -62,6 +62,14 @@ describe('resolveTerminalWorkspace', () => {
 
   it('defaults the terminal runtime to the host process in local development', () => {
     assert.equal(getTerminalRuntime(), 'process');
+
+    const oldNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      assert.equal(getTerminalRuntime(), 'container');
+    } finally {
+      process.env.NODE_ENV = oldNodeEnv;
+    }
   });
 
   it('builds a minimal terminal environment without leaking backend secrets', () => {
@@ -102,6 +110,15 @@ describe('resolveTerminalWorkspace', () => {
     assert.ok(invocation.args.includes('--cap-drop'));
     assert.ok(invocation.args.includes('ALL'));
     assert.ok(invocation.args.includes('mra-pretext-builder'));
+
+    // Assert secure micro-container resource limits
+    const pidsIndex = invocation.args.indexOf('--pids-limit');
+    assert.ok(pidsIndex !== -1);
+    assert.equal(invocation.args[pidsIndex + 1], '64');
+
+    const memIndex = invocation.args.indexOf('--memory');
+    assert.ok(memIndex !== -1);
+    assert.equal(invocation.args[memIndex + 1], '512m');
   });
 
   it('requires a repository workspace before opening a real shell', async () => {

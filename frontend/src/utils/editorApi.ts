@@ -25,8 +25,53 @@ const readJsonSafely = async (response: Response) => {
   }
 };
 
+const generateRandomHex = (length: number): string => {
+  let result = '';
+  const characters = '0123456789abcdef';
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
+};
+
+const generateTraceParent = (): string => {
+  const traceId = generateRandomHex(32);
+  const spanId = generateRandomHex(16);
+  return `00-${traceId}-${spanId}-01`;
+};
+
 export const requestJson = async <T>(input: RequestInfo | URL, init: RequestInit = {}, fallbackMessage = 'Request failed') => {
-  const response = await fetch(input, init);
+  const headersInit = init.headers || {};
+  let traceparentExists = false;
+
+  if (headersInit instanceof Headers) {
+    traceparentExists = headersInit.has('traceparent');
+  } else if (Array.isArray(headersInit)) {
+    traceparentExists = headersInit.some(([k]) => k.toLowerCase() === 'traceparent');
+  } else {
+    traceparentExists = Object.keys(headersInit).some(k => k.toLowerCase() === 'traceparent');
+  }
+
+  let finalHeaders: HeadersInit = headersInit;
+  if (!traceparentExists) {
+    const traceparent = generateTraceParent();
+    if (headersInit instanceof Headers) {
+      finalHeaders = new Headers(headersInit);
+      (finalHeaders as Headers).set('traceparent', traceparent);
+    } else if (Array.isArray(headersInit)) {
+      finalHeaders = [...headersInit, ['traceparent', traceparent]];
+    } else {
+      finalHeaders = {
+        ...headersInit,
+        'traceparent': traceparent,
+      };
+    }
+  }
+
+  const response = await fetch(input, {
+    ...init,
+    headers: finalHeaders,
+  });
   const data = await readJsonSafely(response);
 
   if (!response.ok) {

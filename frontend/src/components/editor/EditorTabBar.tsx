@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileCode, X, MoreHorizontal, MousePointer2 } from 'lucide-react';
+import { FileCode, X, MoreHorizontal, MousePointer2, Network } from 'lucide-react';
 
 interface TabLike {
   id: string;
@@ -39,7 +39,11 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
               }`}
               onClick={() => setActiveTabId(tab.id)}
             >
-              <FileCode className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-500' : 'text-zinc-400 opacity-60'}`} />
+              {tab.id === '__dependency_graph__' ? (
+                <Network className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-500' : 'text-zinc-400 opacity-60'}`} />
+              ) : (
+                <FileCode className={`w-3.5 h-3.5 ${isActive ? 'text-indigo-500' : 'text-zinc-400 opacity-60'}`} />
+              )}
               <span className="truncate flex-1">{tab.name}</span>
               
               <div className="flex items-center gap-1">

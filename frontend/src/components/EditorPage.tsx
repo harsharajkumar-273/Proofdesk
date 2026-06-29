@@ -14,6 +14,9 @@ import {
   Terminal as TerminalIcon,
   RefreshCw,
   AlertCircle,
+  UploadCloud,
+  Network,
+  History,
 } from 'lucide-react';
 import { applyHandshakeTheme } from '../themes/handshakeTheme';
 import '../themes/handshakeeditor.css';
@@ -28,6 +31,9 @@ import EditorExplorerPane from './editor/EditorExplorerPane';
 import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
+import EditorImportPane from './editor/EditorImportPane';
+import { EditorGraphPane } from './editor/EditorGraphPane';
+import { EditorHistoryPane } from './editor/EditorHistoryPane';
 import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
 import {
   buildPreviewHref,
@@ -323,6 +329,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const buildSessionIdRef = useRef<string | null>(buildSessionId);
   const previewUrlRef = useRef<string | null>(previewUrl);
   const previewEntryFileRef = useRef<string | null>(previewEntryFile);
+  const compilerRuntimeRef = useRef<'docker' | 'wasm'>('wasm');
 
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -332,7 +339,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
   const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
-  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'debug' | 'extensions'>('explorer');
+  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history'>('explorer');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
@@ -345,6 +352,37 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [editorWidth, setEditorWidth] = useState<number>(60);
   const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(300);
   
+  const [splitView, setSplitView] = useState<boolean>(() => {
+    const stored = localStorage.getItem('proofdesk_split_view');
+    return stored !== null ? stored === 'true' : true;
+  });
+
+  const [compilerRuntime, setCompilerRuntime] = useState<'docker' | 'wasm'>('wasm');
+
+  const toggleSplitView = () => {
+    setSplitView((prev) => {
+      const next = !prev;
+      localStorage.setItem('proofdesk_split_view', String(next));
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const isMac = navigator.userAgent.indexOf('Mac OS X') !== -1;
+      const modifierPressed = isMac ? e.metaKey : e.ctrlKey;
+      if (modifierPressed && e.key === '\\') {
+        e.preventDefault();
+        toggleSplitView();
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, []);
+
   const [compilationMode, setCompilationMode] = useState<'repository' | 'file'>('repository');
   const [autoCompile, setAutoCompile] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -1048,6 +1086,20 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [unsavedTabs.length]);
 
+  // Asynchronously pre-warm the Pyodide WebAssembly runtime in the background on mount
+  useEffect(() => {
+    const prewarmWasm = async () => {
+      try {
+        const { loadPyodideRuntime } = await import('../utils/pyodideLoader');
+        await loadPyodideRuntime();
+        console.log('[WASM] Pyodide compiler runtime pre-warmed successfully.');
+      } catch (err) {
+        console.warn('[WASM] Pyodide runtime pre-warming failed:', err);
+      }
+    };
+    void prewarmWasm();
+  }, []);
+
   // GoLive: keep srcDocContent in sync when the user switches tabs
   useEffect(() => {
     const tab = tabs.find(t => t.id === activeTabId);
@@ -1056,10 +1108,21 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       const baseHref = getPreviewBaseHref(previewUrl, API_URL);
       setSrcDocContent(prepareHtmlForSrcDoc(tab.content, baseHref, tab.path));
       setCompilationModeState('repository');
+    } else if (compilerRuntime === 'wasm' && (tab.path.endsWith('.xml') || tab.path.endsWith('.ptx'))) {
+      const runWasmCompile = async () => {
+        try {
+          const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
+          const html = await compilePretextXmlWasm(tab.content);
+          setSrcDocContent(html);
+        } catch (err) {
+          console.error('[WASM] Auto-compile failed:', err);
+        }
+      };
+      void runWasmCompile();
     } else {
       setSrcDocContent(null);
     }
-  }, [API_URL, activeTabId, liveEditMode, previewUrl, tabs]);
+  }, [API_URL, activeTabId, liveEditMode, previewUrl, tabs, compilerRuntime]);
 
   useEffect(() => {
     activeTabRef.current = activeTab || null;
@@ -1299,6 +1362,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   }, [previewEntryFile]);
 
   useEffect(() => {
+    compilerRuntimeRef.current = compilerRuntime;
+  }, [compilerRuntime]);
+
+  useEffect(() => {
     const testWindow = window as EditorTestWindow;
     if (!testWindow.__MRA_TEST__) return undefined;
 
@@ -1400,7 +1467,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   }, [liveEditMode, compilationMode, repo, buildSessionId]);
 
   useEffect(() => {
-    if (!collaborationEnabled || !teamSession?.code || !repo || !activeTab || !userData || !editorReady || !editorRef.current) {
+    if (!collaborationEnabled || !teamSession?.code || !repo || !activeTab || activeTab.id === '__dependency_graph__' || !userData || !editorReady || !editorRef.current) {
       void leaveCollaborationRoom();
       if (!collaborationEnabled) {
         setCollaborationStatus('');
@@ -1710,6 +1777,60 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       console.error('Error fetching file:', error);
       showNoticeFromError(error, `Failed to open ${path}`);
     }
+  };
+
+  const handleInsertImportedText = (text: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const selection = editor.getSelection();
+    if (!selection) return;
+
+    // Use monaco runtime's Range class to construct the insertion target
+    const range = new monacoRuntime.Range(
+      selection.startLineNumber,
+      selection.startColumn,
+      selection.endLineNumber,
+      selection.endColumn
+    );
+
+    const id = { major: 1, minor: 1 };
+    const op = { identifier: id, range, text, forceMoveMarkers: true };
+    editor.executeEdits('importer', [op]);
+    editor.focus();
+  };
+
+  const handleCreateImportedFile = async (filePath: string, content: string) => {
+    if (!repo) return;
+
+    const workspaceSessionId = buildSessionIdRef.current || (await initializeWorkspaceSession(repo))?.sessionId;
+    if (!workspaceSessionId) {
+      throw new Error('Workspace session is not ready.');
+    }
+
+    await apiRequest(
+      `/workspace/${workspaceSessionId}/contents/${filePath}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      },
+      `Failed to create file: ${filePath}`
+    );
+
+    // Refresh file tree
+    await fetchFileTree(repo);
+
+    // Open file in active tab
+    await openFileInTab(filePath);
+
+    // Switch sidebar pane focus to explorer tab
+    setActivityBarTab('explorer');
+    setSidebarOpen(true);
+
+    setWorkspaceNotice({
+      tone: 'success',
+      title: `File ${filePath.split('/').pop()} created`,
+      advice: 'You can now edit the imported PreTeXt XML content.',
+    });
   };
 
   const closeTab = (tabId: string) => {
@@ -2113,9 +2234,59 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     activeSectionXmlIdRef.current = activeSectionXmlId;
   }, [activeSectionXmlId]);
 
+  const handleCompilerRuntimeChange = async (runtime: 'docker' | 'wasm') => {
+    setCompilerRuntime(runtime);
+    if (runtime === 'docker') {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && (activeTab.path.endsWith('.xml') || activeTab.path.endsWith('.ptx'))) {
+        setSrcDocContent(null);
+        void compileRepository();
+      }
+    } else {
+      // Switch to WASM
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && (activeTab.path.endsWith('.xml') || activeTab.path.endsWith('.ptx'))) {
+        try {
+          const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
+          const html = await compilePretextXmlWasm(activeTab.content);
+          setSrcDocContent(html);
+        } catch (err) {
+          console.error('[WASM] Switch compile failed:', err);
+        }
+      }
+    }
+  };
+
   const compileRepository = async (repoData: Repository | null = repo) => {
     setLiveEditStatus('');
     setSrcDocContent(null);
+
+    const isPretextXmlFile = (filePath: string) => filePath.endsWith('.xml') || filePath.endsWith('.ptx');
+    if (compilerRuntime === 'wasm') {
+      const activeTab = tabs.find(t => t.id === activeTabId);
+      if (activeTab && isPretextXmlFile(activeTab.path)) {
+        setCompiling(true);
+        try {
+          const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
+          const html = await compilePretextXmlWasm(activeTab.content);
+          setSrcDocContent(html);
+          setLiveEditStatus('Compiled successfully');
+        } catch (err) {
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          console.error('[WASM] Compilation failed:', err);
+          setLiveEditStatus('WASM Compilation error');
+          setWorkspaceNotice({
+            tone: 'error',
+            title: 'WASM Compiler Error',
+            advice: errorMsg || 'WASM Compilation failed',
+          });
+        } finally {
+          setCompiling(false);
+        }
+        return;
+      }
+    }
+
     await initializeBuildSession(repoData);
   };
 
@@ -2325,6 +2496,21 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     setLiveEditStatus(next.clearDraftOnSuccess ? 'Compiling draft…' : 'Updating preview…');
 
     try {
+      if (compilerRuntime === 'wasm' && (next.filePath.endsWith('.xml') || next.filePath.endsWith('.ptx'))) {
+        const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
+        const html = await compilePretextXmlWasm(next.value);
+        setSrcDocContent(html);
+        setLiveEditStatus('Compiled successfully');
+        setLastSavedAt(new Date());
+        rebuildInFlightRef.current = false;
+        setIsRebuilding(false);
+        setCompiling(false);
+        if (queuedRebuildRef.current) {
+          void runQueuedRebuild();
+        }
+        return;
+      }
+
       const sessionId = buildSessionIdRef.current || await ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
       if (!sessionId) {
         setLiveEditStatus('Live preview unavailable');
@@ -2434,8 +2620,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       window.clearTimeout(rebuildTimer.current);
     }
 
+    const currentCompilerRuntime = compilerRuntimeRef.current;
+
     if (currentLiveEditMode) {
-      void ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
+      if (currentCompilerRuntime !== 'wasm') {
+        void ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
+      }
 
       if (currentExt === '.css' || currentExt === '.js') {
         rebuildTimer.current = window.setTimeout(() => {
@@ -2445,18 +2635,18 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         return;
       }
 
-      // PreTeXt / XML files: keep the last good Docker output visible while the
-      // section build runs — avoids showing a broken client-side approximation.
+      // PreTeXt / XML files
       if (isPreTeXtFile(currentTab.name)) {
         setLiveEditStatus('Compiling…');
+        const debounceMs = currentCompilerRuntime === 'wasm' ? 300 : 1100;
         rebuildTimer.current = window.setTimeout(() => {
           enqueueRebuild(currentTab.path, value, {
             editToken,
             clearDraftOnSuccess: false,
-            queuedStatus: 'Compiling latest draft…',
-            sectionXmlId: activeSectionXmlIdRef.current,
+            queuedStatus: currentCompilerRuntime === 'wasm' ? 'Compiling…' : 'Compiling latest draft…',
+            sectionXmlId: currentCompilerRuntime === 'wasm' ? null : activeSectionXmlIdRef.current,
           });
-        }, 1100);
+        }, debounceMs);
         return;
       }
 
@@ -2471,7 +2661,19 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       }, 1500);
     } else {
       // Normal mode: debounce 2 s then rebuild silently
-      if (!buildSessionId) {
+      if (currentCompilerRuntime === 'wasm' && isPreTeXtFile(currentTab.name)) {
+        rebuildTimer.current = window.setTimeout(() => {
+          enqueueRebuild(currentTab.path, value, {
+            editToken,
+            clearDraftOnSuccess: false,
+            queuedStatus: 'Compiling…',
+            sectionXmlId: null,
+          });
+        }, 300);
+        return;
+      }
+
+      if (!buildSessionId && currentCompilerRuntime !== 'wasm') {
         return;
       }
 
@@ -2568,6 +2770,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         setProfileDropdownOpen={setProfileDropdownOpen}
         onLogout={onLogout}
         navigateToRepoInput={() => navigate('/repo-input')}
+        splitView={splitView}
+        toggleSplitView={toggleSplitView}
       />
 
       <WorkspaceNoticeBanner
@@ -2578,7 +2782,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
       {openRepoKeys.length >= 1 && (
         <EditorRepoTabBar
-          repos={openRepoKeys.map((key): RepoTabEntry => ({
+          repos={openRepoKeys.map((key: string): RepoTabEntry => ({
             repoKey: key,
             fullName: key,
             hasUnsaved:
@@ -2587,7 +2791,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                 : (workspaceSnapshots.current.get(key)?.tabs.some((t) => t.hasUnsavedChanges) ?? false),
           }))}
           activeRepoKey={activeRepoKey}
-          onSwitch={(key) => {
+          onSwitch={(key: string) => {
             if (key === repo?.fullName) return;
             const snap = workspaceSnapshots.current.get(key);
             if (snap) {
@@ -2687,6 +2891,70 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                 {allDiagnostics.filter((d) => d.severity === 'error').length}
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => {
+              if (activityBarTab === 'import' && sidebarOpen) setSidebarOpen(false);
+              else {
+                setActivityBarTab('import');
+                setSidebarOpen(true);
+              }
+            }}
+            className={`p-2.5 rounded-xl transition-all active:scale-90 ${
+              activityBarTab === 'import' && sidebarOpen
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="Import PDF / LaTeX"
+          >
+            <UploadCloud className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={() => {
+              const graphTabId = '__dependency_graph__';
+              setTabs(prev => {
+                if (prev.some(t => t.id === graphTabId)) return prev;
+                return [...prev, {
+                  id: graphTabId,
+                  path: graphTabId,
+                  name: 'Graph Explorer',
+                  content: '',
+                  originalContent: '',
+                  sha: '',
+                  hasUnsavedChanges: false,
+                  language: 'json'
+                }];
+              });
+              setActiveTabId(graphTabId);
+            }}
+            className={`p-2.5 rounded-xl transition-all active:scale-90 ${
+              activeTabId === '__dependency_graph__'
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="Dependency Graph Explorer"
+          >
+            <Network className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={() => {
+              if (activityBarTab === 'history' && sidebarOpen) setSidebarOpen(false);
+              else {
+                setActivityBarTab('history');
+                setSidebarOpen(true);
+              }
+            }}
+            className={`p-2.5 rounded-xl transition-all active:scale-90 ${
+              activityBarTab === 'history' && sidebarOpen
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="Revision History (Time Travel)"
+          >
+            <History className="w-5 h-5" />
           </button>
 
           <div className="mt-auto flex flex-col gap-4">
@@ -2792,6 +3060,31 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                   onNavigate={openFileInTab}
                 />
               )}
+
+              {activityBarTab === 'import' && (
+                <EditorImportPane
+                  sessionId={buildSessionId}
+                  apiUrl={API_URL}
+                  onInsertAtCursor={handleInsertImportedText}
+                  onCreateNewFile={handleCreateImportedFile}
+                  activeTabOpen={!!activeTab}
+                />
+              )}
+
+              {activityBarTab === 'history' && (
+                <EditorHistoryPane
+                  sessionId={buildSessionId}
+                  apiUrl={API_URL}
+                  onRollbackSuccess={async (filePath) => {
+                    const openTab = tabs.find((t) => t.path === filePath);
+                    if (openTab) {
+                      setTabs((prev) => prev.filter((t) => t.path !== openTab.path));
+                    }
+                    await openFileInTab(filePath);
+                    showTeamNotice(`Restored ${filePath.split('/').pop()} successfully!`);
+                  }}
+                />
+              )}
             </div>
 
             {/* Resize Handle */}
@@ -2814,39 +3107,51 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           />
 
           <div className="editor-workspace-split flex-1 flex overflow-hidden">
-            <PreviewPane
-              compilationMode={compilationMode}
-              activeTab={activeTab ? { language: activeTab.language, content: activeTab.content } : null}
-              editorWidth={editorWidth}
-              onEditorResizeStart={handleEditorResizeStart}
-              onEditorDidMount={handleEditorDidMount}
-              onEditorChange={handleEditorChange}
-              MonacoEditor={MonacoEditor}
-              srcDocContent={srcDocContent}
-              compiling={compiling}
-              liveEditStatus={liveEditStatus}
-              liveEditMode={liveEditMode}
-              lastSavedAt={lastSavedAt}
-              collaborationEnabled={collaborationEnabled}
-              collaborators={collaborators}
-              collaborationStatus={collaborationStatus}
-              getParticipantName={getParticipantName}
-              getParticipantInitials={getParticipantInitials}
-              compileRepository={() => compileRepository()}
-              jumpToRelatedPreview={jumpToRelatedPreview}
-              setEditorWidth={setEditorWidth}
-              isRebuilding={isRebuilding}
-              previewUrl={previewUrl}
-              previewFrameKey={previewFrameKey}
-              compiledOutput={compiledOutput}
-              sessionId={buildSessionId}
-              apiUrl={API_URL}
-              previewHistory={previewHistory}
-              previewDiffEnabled={previewDiffEnabled}
-              previewBaseSnapshotId={previewBaseSnapshotId}
-              onTogglePreviewDiff={() => setPreviewDiffEnabled((current) => !current)}
-              onSelectPreviewBaseSnapshot={setPreviewBaseSnapshotId}
-            />
+            {activeTabId === '__dependency_graph__' ? (
+              <EditorGraphPane
+                sessionId={buildSessionId}
+                onNodeClick={async (path) => {
+                  await openFileInTab(path);
+                }}
+              />
+            ) : (
+              <PreviewPane
+                compilationMode={compilationMode}
+                activeTab={activeTab ? { language: activeTab.language, content: activeTab.content } : null}
+                editorWidth={editorWidth}
+                onEditorResizeStart={handleEditorResizeStart}
+                onEditorDidMount={handleEditorDidMount}
+                onEditorChange={handleEditorChange}
+                MonacoEditor={MonacoEditor}
+                srcDocContent={srcDocContent}
+                compiling={compiling}
+                liveEditStatus={liveEditStatus}
+                liveEditMode={liveEditMode}
+                lastSavedAt={lastSavedAt}
+                collaborationEnabled={collaborationEnabled}
+                collaborators={collaborators}
+                collaborationStatus={collaborationStatus}
+                getParticipantName={getParticipantName}
+                getParticipantInitials={getParticipantInitials}
+                compileRepository={() => compileRepository()}
+                jumpToRelatedPreview={jumpToRelatedPreview}
+                setEditorWidth={setEditorWidth}
+                isRebuilding={isRebuilding}
+                previewUrl={previewUrl}
+                previewFrameKey={previewFrameKey}
+                compiledOutput={compiledOutput}
+                sessionId={buildSessionId}
+                apiUrl={API_URL}
+                previewHistory={previewHistory}
+                previewDiffEnabled={previewDiffEnabled}
+                previewBaseSnapshotId={previewBaseSnapshotId}
+                onTogglePreviewDiff={() => setPreviewDiffEnabled((current) => !current)}
+                onSelectPreviewBaseSnapshot={setPreviewBaseSnapshotId}
+                splitView={splitView}
+                compilerRuntime={compilerRuntime}
+                onChangeCompilerRuntime={handleCompilerRuntimeChange}
+              />
+            )}
           </div>
 
           {/* Bottom Terminal Panel */}

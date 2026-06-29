@@ -15,6 +15,7 @@ import {
   Zap,
   Users,
   Search,
+  SplitSquareHorizontal,
 } from 'lucide-react';
 
 interface RepositoryLike {
@@ -79,6 +80,8 @@ interface EditorTopBarProps {
   setProfileDropdownOpen: (value: boolean) => void;
   onLogout: () => void;
   navigateToRepoInput: () => void;
+  splitView: boolean;
+  toggleSplitView: () => void;
 }
 
 const EditorTopBar: React.FC<EditorTopBarProps> = ({
@@ -117,6 +120,8 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
   setProfileDropdownOpen,
   onLogout,
   navigateToRepoInput,
+  splitView,
+  toggleSplitView,
 }) => (
   <header className="glass-header z-40 flex min-h-14 flex-wrap items-center justify-between gap-2 px-2 py-2 sm:h-14 sm:flex-nowrap sm:px-4 sm:py-0">
     <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
@@ -294,6 +299,19 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       >
         <Zap className={`w-3.5 h-3.5 ${liveEditMode ? 'fill-indigo-500 text-indigo-500' : ''} ${liveEditMode && isRebuilding ? 'animate-pulse' : ''}`} />
         <span className="hidden md:inline">{liveEditMode ? 'Live Sync' : 'Static'}</span>
+      </button>
+
+      <button
+        onClick={toggleSplitView}
+        className={`h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
+          splitView
+            ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm'
+            : 'bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300'
+        }`}
+        title="Toggle Split Editor + Preview (Cmd+\)"
+      >
+        <SplitSquareHorizontal className="w-3.5 h-3.5" />
+        <span className="hidden md:inline">Split View</span>
       </button>
 
       <div className="h-6 w-px flex-shrink-0 bg-zinc-200 mx-1" />
