@@ -16,6 +16,7 @@ import {
 import { getLocalTestRepository, isLocalTestModeEnabled } from '../utils/localTestMode';
 import { extractRepoFromLink, normalizeTeamCode } from '../utils/repositoryInput';
 import { PRODUCT_NAME } from '../utils/brand';
+import { setSelectedRepo as setSelectedRepoInStorage, setTeamSession } from '../utils/workspaceStorage';
 
 interface Repository {
   id: number;
@@ -172,7 +173,7 @@ const RepoInputPage: React.FC = () => {
     try {
       const repoData = normalizeRepositorySelection(targetRepo);
 
-      sessionStorage.setItem('selectedRepo', JSON.stringify(repoData));
+      setSelectedRepoInStorage(repoData);
       navigate(`/editor?repo=${encodeURIComponent(repoData.fullName)}`);
     } catch (err) {
       console.error("Workspace init error:", err);
@@ -183,7 +184,7 @@ const RepoInputPage: React.FC = () => {
 
   const openLocalDemoWorkspace = () => {
     if (!localDemoRepo) return;
-    sessionStorage.setItem('selectedRepo', JSON.stringify(localDemoRepo));
+    setSelectedRepoInStorage(localDemoRepo);
     navigate('/editor');
   };
 
@@ -216,8 +217,8 @@ const RepoInputPage: React.FC = () => {
         throw new Error(data.message || data.error || "Failed to join team session.");
       }
 
-      sessionStorage.setItem('teamSession', JSON.stringify(data.session));
-      sessionStorage.setItem('selectedRepo', JSON.stringify(data.session.repo));
+      setTeamSession(data.session);
+      setSelectedRepoInStorage(data.session.repo);
       navigate(`/editor?repo=${encodeURIComponent(data.session.repo.fullName)}&team=${normalized}`);
     } catch (err) {
       console.error("Join team error:", err);

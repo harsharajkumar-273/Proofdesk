@@ -40,11 +40,10 @@ export const checkWorkspaceOwner = (req: Request, res: Response, next: NextFunct
   const { sessionId } = req.params;
   const login = req.authSession?.user?.login;
   if (!login || !sessionId) return next();
-  const session = buildExecutor.sessions.get(sessionId as string);
+  const session = buildExecutor.getSession(sessionId as string);
   if (!session) return next();
   if (session.creatorLogin && session.creatorLogin !== login) {
     return res.status(403).json({ error: 'Access denied' });
   }
   next();
 };
-

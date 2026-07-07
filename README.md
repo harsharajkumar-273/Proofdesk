@@ -6,9 +6,9 @@
 [![WebAssembly](https://img.shields.io/badge/WebAssembly-654FF0?style=for-the-badge&logo=webassembly&logoColor=white)](https://webassembly.org/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
 
-**Proofdesk** is a professional collaborative Web IDE and compilation sandbox designed for authoring, reviewing, and publishing interactive mathematical textbooks. 
+**Proofdesk** is a collaborative Web IDE and compilation sandbox for authoring, reviewing, and publishing interactive mathematical textbooks.
 
-Originally built to support the compilation pipeline of the **Introduction to Linear Algebra (ILA)** textbook (Georgia Tech), Proofdesk wraps complex build tools in a responsive browser workspace. Authors can write markup, manage version control, run live previews, and execute commands without leaving their browser.
+It combines a browser editor, Git workflows, preview rendering, and build orchestration around the tooling used for the **Introduction to Linear Algebra (ILA)** textbook. The current implementation is optimized for a single backend instance, with optional Redis-backed sharing for queueing and collaboration.
 
 ---
 
@@ -16,23 +16,13 @@ Originally built to support the compilation pipeline of the **Introduction to Li
 
 ### ⚡ Client-Side WebAssembly Compiler
 * **The Challenge:** PreTeXt textbook builds originally required a full server-side Docker container run, taking several minutes.
-* **The Solution:** Ported the compiler's rendering engine to the browser using **WebAssembly (Pyodide)**.
-* **The Result:** Reduced compilation latency by **72%** (from 1,100ms to **300ms** debounced compilation), enabling immediate, low-latency previews offline.
-
-### 🔌 Real-Time WebSocket PTY Terminal
-* **The Challenge:** Giving authors a raw CLI experience without compromising host security.
-* **The Solution:** Engineered a full pseudo-terminal (PTY) emulation using WebSocket streams and `node-pty`.
-* **The Result:** Users interact with terminal sessions sandboxed inside isolated Docker containers, featuring strict resource limits (512MB RAM, 64 PIDs) and restricted shell access.
+* **The Solution:** Ported part of the rendering and validation flow to the browser using **WebAssembly (Pyodide)**.
+* **The Result:** Provides fast local feedback for supported files while the full build pipeline remains available on the backend.
 
 ### 🛡️ Resilient Distributed Task Queue
 * **The Challenge:** Slow builds colliding under heavy multi-user server loads.
-* **The Solution:** Built a distributed background execution worker pool using **BullMQ and Redis**.
-* **The Result:** Implemented an automated fallback handler that gracefully switches tasks to an in-process local execution loop if Redis or the worker nodes go offline, ensuring 100% service uptime.
-
-### 📊 Interactive Dependency Graph
-* **The Challenge:** Navigating complex relationships across large multi-file math documents.
-* **The Solution:** Implemented a real-time **D3.js force-directed graph explorer** that parses textbook chapter dependencies.
-* **The Result:** Authors can visualize structural cross-references and click nodes to instantly jump the Monaco editor to the referenced file.
+* **The Solution:** Uses **BullMQ** with Redis when shared state is enabled, and falls back to an in-process queue when it is not.
+* **The Result:** The build path stays usable in local development and degraded environments, with one code path for background compilation either way.
 
 ---
 
@@ -40,8 +30,8 @@ Originally built to support the compilation pipeline of the **Introduction to Li
 
 ```
 proofdesk/
-├── frontend/             # React + TS IDE (Monaco, D3.js, xterm.js, Pyodide WASM)
-├── backend/              # Node.js + Express API (node-pty, BullMQ, Prisma ORM)
+├── frontend/             # React + TS IDE (Monaco, Pyodide WASM)
+├── backend/              # Node.js + Express API (BullMQ, Prisma ORM)
 ├── docker/               # TeX Live compilation container & build orchestration scripts
 ├── docker-compose.yml    # Orchestration configuration for local development
 └── README.md             # Project documentation
@@ -109,6 +99,6 @@ npm run lint --prefix frontend
 
 ## 📈 Tech Stack Details
 
-* **Frontend:** React, TypeScript, Tailwind CSS, Monaco Editor, D3.js (Visual Graph), xterm.js (Terminal Emulator), Pyodide (WASM Python).
-* **Backend:** Express, WebSocket (WS), `node-pty`, Redis & BullMQ (Job Queueing), Prisma (ORM), SQLite & PostgreSQL.
+* **Frontend:** React, TypeScript, Tailwind CSS, Monaco Editor, Pyodide (WASM Python).
+* **Backend:** Express, WebSocket (WS), Redis & BullMQ (Job Queueing), Prisma (ORM), SQLite & PostgreSQL.
 * **Infrastructure:** Docker, Docker Compose, AWS EC2, Oracle Cloud (OCI) CI/CD.

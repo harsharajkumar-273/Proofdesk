@@ -92,10 +92,10 @@ class InProcessBuildQueue {
 const localQueue = new InProcessBuildQueue();
 
 const ensureSessionHydrated = async (sessionId: string) => {
-  if (!buildExecutor.sessions.has(sessionId)) {
+  if (!buildExecutor.hasSession(sessionId)) {
     const dbSession = await workspaceRepository.getSession(sessionId);
     if (dbSession) {
-      buildExecutor.sessions.set(sessionId, {
+      buildExecutor.setSession(sessionId, {
         id: dbSession.id,
         owner: dbSession.owner,
         repo: dbSession.repo,
@@ -104,7 +104,6 @@ const ensureSessionHydrated = async (sessionId: string) => {
         outputPath: dbSession.outputPath,
         previewPath: dbSession.previewPath,
         creatorLogin: dbSession.creatorLogin,
-        notifyEmail: dbSession.notifyEmail,
         commitHash: dbSession.commitHash,
         localTestMode: false,
       });

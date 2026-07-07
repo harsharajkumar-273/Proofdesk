@@ -84,7 +84,7 @@ export const createPreviewRouter = (): Router => {
       return res.status(400).send('Invalid session ID');
     }
 
-    const activeSession = buildExecutor.sessions.get(sessionId);
+    const activeSession = buildExecutor.getSession(sessionId);
     const outputPath = activeSession
       ? path.resolve(activeSession.outputPath)
       : path.resolve(getProofdeskDataPath(sessionId, 'output'));

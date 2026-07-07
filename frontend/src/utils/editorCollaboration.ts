@@ -4,7 +4,7 @@ import {
   getPreviewBaseHref,
   prepareHtmlForSrcDoc,
 } from './editorPreview';
-import { isPreTeXtFile } from './pretexPreview';
+import { getTeamSession } from './workspaceStorage';
 
 export interface CollaborationParticipant {
   clientId: string;
@@ -56,7 +56,6 @@ interface ApplyRemoteEditorUpdateArgs<TTab extends CollaborationTabLike> {
 interface EnqueueRebuildOptions {
   editToken: number;
   clearDraftOnSuccess: boolean;
-  queuedStatus: string;
   sectionXmlId?: string | null;
 }
 
@@ -64,14 +63,11 @@ interface SyncCollaborativePreviewArgs<TTab extends CollaborationTabLike> {
   apiUrl: string;
   buildSessionId: string | null;
   compilationMode: 'repository' | 'file';
-  ensureBuildSession: (options: { quiet: boolean; statusMessage: string }) => Promise<string | null>;
   enqueueRebuild: (filePath: string, value: string, options: EnqueueRebuildOptions) => void;
-  liveEditMode: boolean;
   latestEditTokenRef: MutableRefObject<number>;
   previewUrl: string | null;
   setSrcDocContent: (value: string | null) => void;
   tab: TTab;
-  triggerQuickUpdate: (filePath: string, value: string, statusMessage: string) => Promise<boolean>;
   value: string;
 }
 
@@ -150,14 +146,11 @@ export const syncCollaborativePreview = async <TTab extends CollaborationTabLike
   apiUrl,
   buildSessionId,
   compilationMode,
-  ensureBuildSession,
   enqueueRebuild,
-  liveEditMode,
   latestEditTokenRef,
   previewUrl,
   setSrcDocContent,
   tab,
-  triggerQuickUpdate,
   value,
 }: SyncCollaborativePreviewArgs<TTab>) => {
   const remoteEditToken = Date.now();
@@ -169,73 +162,19 @@ export const syncCollaborativePreview = async <TTab extends CollaborationTabLike
     setSrcDocContent(
       prepareHtmlForSrcDoc(value, getPreviewBaseHref(previewUrl, apiUrl), tab.path)
     );
-    await triggerQuickUpdate(tab.path, value, 'Remote HTML synced');
     return;
   }
 
   if (compilationMode !== 'repository') return;
 
-  if (liveEditMode) {
-    await ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
-
-    if (currentExt === '.css' || currentExt === '.js') {
-      await triggerQuickUpdate(tab.path, value, 'Remote asset synced');
-      return;
-    }
-
-    if (isPreTeXtFile(tab.name)) {
-      enqueueRebuild(tab.path, value, {
-        editToken: remoteEditToken,
-        clearDraftOnSuccess: false,
-        queuedStatus: 'Compiling collaborator draft…',
-        sectionXmlId: null,
-      });
-      return;
-    }
-
-    enqueueRebuild(tab.path, value, {
-      editToken: remoteEditToken,
-      clearDraftOnSuccess: false,
-      queuedStatus: 'Compiling collaborator change…',
-    });
-    return;
-  }
-
   if (buildSessionId) {
     enqueueRebuild(tab.path, value, {
       editToken: remoteEditToken,
       clearDraftOnSuccess: false,
-      queuedStatus: 'Compiling collaborator change…',
     });
   }
 };
 
 export const readStoredTeamSession = (): TeamSessionData | null => {
-  if (typeof window === 'undefined') return null;
-
-  try {
-    const raw = window.sessionStorage.getItem('teamSession');
-    if (!raw) return null;
-
-    const parsed = JSON.parse(raw);
-    if (!parsed?.code || !parsed?.repo?.fullName) return null;
-
-    // Return only the fields we need — no auth tokens are stored here,
-    // but limiting the surface reduces what an XSS attack could harvest.
-    return {
-      code: parsed.code,
-      repo: {
-        owner: parsed.repo.owner,
-        name: parsed.repo.name,
-        fullName: parsed.repo.fullName,
-        defaultBranch: parsed.repo.defaultBranch,
-      },
-      hostName: parsed.hostName,
-      hostLogin: parsed.hostLogin,
-      createdAt: parsed.createdAt,
-    };
-  } catch (error) {
-    console.error('Failed to parse stored team session:', error);
-    return null;
-  }
+  return getTeamSession() as TeamSessionData | null;
 };

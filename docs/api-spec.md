@@ -506,52 +506,6 @@ Request:
 Failure responses use the same `error`, `code`, `advice`, and `details`
 shape as `POST /build/init`.
 
-### `POST /build/quick-update`
-
-Fast-path update for preview assets.
-
-Supported file types:
-
-- `.html`
-- `.htm`
-- `.css`
-- `.js`
-
-Auth required: yes
-
-Request:
-
-```json
-{
-  "sessionId": "16hexsessionid",
-  "filePath": "styles.css",
-  "content": "body { color: red; }"
-}
-```
-
-Errors:
-
-- `400` for missing fields
-- `400` for invalid session id
-- `403` for path traversal attempts
-
-Possible response:
-
-```json
-{
-  "success": true
-}
-```
-
-Or:
-
-```json
-{
-  "success": false,
-  "reason": "File type requires full rebuild"
-}
-```
-
 ### `GET /preview/:sessionId/*`
 
 Serves generated preview output from the build session.
@@ -633,45 +587,5 @@ Response:
   "success": true,
   "output": "body { color: red; }",
   "preview": "<!DOCTYPE html>..."
-}
-```
-
-## Terminal transport
-
-### `WS /terminal/ws?owner=<owner>&repo=<repo>&buildSessionId=<id>`
-
-Provides the integrated terminal used in the editor.
-
-Auth:
-
-- uses the active cookie-backed browser session
-
-Query parameters:
-
-- `owner` optional repository owner
-- `repo` optional repository name
-- `buildSessionId` optional active build session to reuse
-- `cols` optional terminal width
-- `rows` optional terminal height
-
-Server messages:
-
-```json
-{
-  "type": "ready",
-  "cwd": "/tmp/mra-builds/...",
-  "shell": "zsh",
-  "buildSessionId": "16hexsessionid",
-  "repoFullName": "owner/repo",
-  "mode": "pty"
-}
-```
-
-```json
-{
-  "type": "error",
-  "message": "An authenticated Proofdesk session is required.",
-  "code": "terminal_auth_required",
-  "advice": "Reconnect the workspace after signing in again so the shell can attach to the repository."
 }
 ```

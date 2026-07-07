@@ -59,7 +59,7 @@ export const prepareWorkspace = async (
   repoFullName: string;
 }> => {
   const prepared = await buildExecutor.prepareRepository(owner, repo, token, options);
-  const session = buildExecutor.sessions.get(prepared.sessionId);
+  const session = buildExecutor.getSession(prepared.sessionId);
 
   if (!session) {
     throw new Error('Workspace session could not be created');
@@ -76,7 +76,7 @@ export const prepareWorkspace = async (
 
 export const getWorkspaceSession = (sessionId: string): any => {
   assertValidSessionId(sessionId);
-  const session = buildExecutor.sessions.get(sessionId);
+  const session = buildExecutor.getSession(sessionId);
   if (!session?.repoPath) {
     throw new Error('Workspace session not found');
   }

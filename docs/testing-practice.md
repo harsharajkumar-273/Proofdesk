@@ -98,12 +98,11 @@ What this covers now:
 
 - `/health`
 - auth guard behavior
-- build and terminal diagnostic helpers
+- build diagnostic helpers
 - local demo user/repo routes
 - local demo file tree and file content routes
 - local demo file update route
 - local demo build initialization
-- invalid quick-update validation
 
 Note:
 
@@ -179,7 +178,7 @@ Notes:
 - it does not write back to GitHub
 - it is intended as a live smoke test for repo load and preview build
 
-### Manual OAuth smoke test
+### Manual GitHub smoke test
 
 Use this once before deployment with your real GitHub OAuth app:
 
@@ -189,7 +188,7 @@ Use this once before deployment with your real GitHub OAuth app:
 4. Open a real repository
 5. Edit a visible file and save it
 6. Run a preview build and verify the updated page renders
-7. Check `GET /monitoring/events` for any build, OAuth, or terminal errors
+7. Check `GET /monitoring/events` for any build or OAuth errors
 
 ## Manual full-product testing
 
@@ -241,42 +240,37 @@ Expected result:
 - preview URL is populated
 - generated HTML is visible in the iframe
 
-### D. Live editing test for XML
+### D. Edit and rebuild test for XML
 
 1. Open `course.xml`
-2. Turn on `Live`
-3. Change a visible paragraph or the course title
-4. Watch the draft preview update
-5. Wait for the queued rebuild to finish
+2. Change a visible paragraph or the course title
+3. Click `Build`
+4. Wait for the preview to refresh
 
 Expected result:
 
-- live edit status appears
-- preview updates without manually clicking build
+- preview updates after rebuild
 - final rebuilt preview matches the new XML content
 
-### E. Live editing test for CSS
+### E. Edit and rebuild test for CSS
 
 1. Open `styles.css`
-2. Turn on `Live`
-3. Change a visible color or spacing rule
-4. Watch the preview refresh
+2. Change a visible color or spacing rule
+3. Save and rebuild the preview
 
 Expected result:
 
-- no full Docker-style rebuild is required for simple asset changes
-- preview changes show up quickly through quick-update
+- the updated styles appear in the preview after rebuild
 
-### F. Live editing test for JS
+### F. Edit and rebuild test for JS
 
 1. Open `interactive.js`
-2. Turn on `Live`
-3. Change a visible badge or text behavior
-4. Refresh or observe the preview update
+2. Change a visible badge or text behavior
+3. Rebuild the preview
 
 Expected result:
 
-- JS asset changes propagate into the preview output
+- JS asset changes propagate into the preview output after rebuild
 
 ### G. Collaboration test
 
@@ -316,12 +310,12 @@ Try each case on purpose:
 - invalid repository link
 - malformed XML
 - missing auth token
-- bad `sessionId` for `/build/quick-update`
+  - bad `sessionId` for `/build/update`
 
 Expected result:
 
 - user-facing errors appear
-- notices include recovery advice for auth, build, preview, and terminal issues
+- notices include recovery advice for auth, build, and preview issues
 - the app should fail clearly, not silently
 
 ## Suggested learning order if you are practicing software testing

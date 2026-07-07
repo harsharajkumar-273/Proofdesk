@@ -1,6 +1,12 @@
 import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { loader } from '@monaco-editor/react';
+import {
+  getSelectedRepo,
+  setSelectedRepo,
+  getTeamSession,
+  setTeamSession as saveTeamSessionToStorage,
+} from '../utils/workspaceStorage';
 import * as monacoRuntime from 'monaco-editor/esm/vs/editor/editor.api';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import CssWorker from 'monaco-editor/esm/vs/language/css/css.worker?worker';
@@ -11,11 +17,9 @@ import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import {
   GitBranch, Search, FolderTree,
-  Terminal as TerminalIcon,
   RefreshCw,
   AlertCircle,
   UploadCloud,
-  Network,
   History,
 } from 'lucide-react';
 import { applyHandshakeTheme } from '../themes/handshakeTheme';
@@ -32,7 +36,6 @@ import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
 import EditorImportPane from './editor/EditorImportPane';
-import { EditorGraphPane } from './editor/EditorGraphPane';
 import { EditorHistoryPane } from './editor/EditorHistoryPane';
 import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
 import {
@@ -112,7 +115,6 @@ monacoGlobal.MonacoEnvironment = {
 loader.config({ monaco: monacoRuntime });
 
 const MonacoEditor = lazy(() => import('@monaco-editor/react'));
-const TerminalPanel = lazy(() => import('./Terminal'));
 const GitPanel = lazy(() => import('./GitPanel'));
 
 interface Repository {
@@ -173,7 +175,6 @@ interface QueuedRebuild {
   value: string;
   editToken: number;
   clearDraftOnSuccess: boolean;
-  queuedStatus: string;
   sectionXmlId: string | null;
 }
 
@@ -221,7 +222,6 @@ interface WorkspaceSnapshot {
   previewEntryFile: string | null;
   expandedFolders: Set<string>;
   compilationMode: 'repository' | 'file';
-  liveEditMode: boolean;
   recentFiles: RecentFileEntry[];
   previewHistory: PreviewSnapshotEntry[];
   previewBaseSnapshotId: string | null;
@@ -284,10 +284,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
 
-  // Live editing state
-  const [liveEditMode, setLiveEditMode] = useState<boolean>(false);
-  const [liveEditStatus, setLiveEditStatus] = useState<string>('');
-  const [isRebuilding, setIsRebuilding] = useState<boolean>(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [collaborationEnabled, setCollaborationEnabled] = useState<boolean>(Boolean(initialStoredTeamSessionRef.current));
   const [collaborationStatus, setCollaborationStatus] = useState<string>('');
@@ -323,7 +319,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const suppressEditorChangeRef = useRef<boolean>(false);
   const collabSessionRef = useRef<MonacoYjsCollaborationSession | null>(null);
   const activeTabRef = useRef<Tab | null>(null);
-  const liveEditModeRef = useRef<boolean>(liveEditMode);
   const handleEditorChangeRef = useRef<(value: string | undefined) => void>(() => {});
   const compilationModeRef = useRef<'repository' | 'file'>('repository');
   const buildSessionIdRef = useRef<string | null>(buildSessionId);
@@ -345,12 +340,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
   const [showRepoSwitcher, setShowRepoSwitcher] = useState<boolean>(false);
   
-  const [terminalOpen, setTerminalOpen] = useState<boolean>(false);
-  const [terminalMaximized, setTerminalMaximized] = useState<boolean>(false);
-  
   const [sidebarWidth, setSidebarWidth] = useState<number>(280);
   const [editorWidth, setEditorWidth] = useState<number>(60);
-  const [bottomPanelHeight, setBottomPanelHeight] = useState<number>(300);
   
   const [splitView, setSplitView] = useState<boolean>(() => {
     const stored = localStorage.getItem('proofdesk_split_view');
@@ -390,16 +381,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const setCompilationModeState = (nextMode: 'repository' | 'file') => {
     compilationModeRef.current = nextMode;
     setCompilationMode(nextMode);
-  };
-
-  const setLiveEditModeState: React.Dispatch<React.SetStateAction<boolean>> = (nextValue) => {
-    setLiveEditMode((currentValue) => {
-      const resolvedValue = typeof nextValue === 'function'
-        ? (nextValue as (value: boolean) => boolean)(currentValue)
-        : nextValue;
-      liveEditModeRef.current = resolvedValue;
-      return resolvedValue;
-    });
   };
 
   // ── Multi-repo workspace management ──────────────────────────────────────────
@@ -481,22 +462,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     startWidth: 60
   });
   
-  const terminalResizeRef = useRef<{ isResizing: boolean; startY: number; startHeight: number }>({
-    isResizing: false,
-    startY: 0,
-    startHeight: 300
-  });
-
   const persistTeamSession = (nextSession: TeamSessionData | null) => {
     setTeamSession(nextSession);
     if (typeof window === 'undefined') return;
 
-    if (nextSession) {
-      window.sessionStorage.setItem('teamSession', JSON.stringify(nextSession));
-      return;
-    }
-
-    window.sessionStorage.removeItem('teamSession');
+    saveTeamSessionToStorage(nextSession);
   };
 
   const saveCurrentSnapshot = () => {
@@ -514,7 +484,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       previewEntryFile: previewEntryFileRef.current,
       expandedFolders,
       compilationMode,
-      liveEditMode,
       recentFiles,
       previewHistory,
       previewBaseSnapshotId,
@@ -540,7 +509,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     setPreviewEntryFile(snapshot.previewEntryFile);
     setExpandedFolders(snapshot.expandedFolders);
     setCompilationModeState(snapshot.compilationMode);
-    setLiveEditModeState(snapshot.liveEditMode);
     setRecentFiles(snapshot.recentFiles);
     setPreviewHistory(snapshot.previewHistory);
     setPreviewBaseSnapshotId(snapshot.previewBaseSnapshotId);
@@ -583,7 +551,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         if (snap) {
           restoreFromSnapshot(snap);
           setActiveRepoKey(nextKey);
-          sessionStorage.setItem('selectedRepo', JSON.stringify(snap.repo));
+          setSelectedRepo(snap.repo);
         }
       } else {
         navigate('/repo-input');
@@ -846,32 +814,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     document.removeEventListener('mouseup', handleEditorResizeStop);
   };
 
-  const handleTerminalResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    terminalResizeRef.current = {
-      isResizing: true,
-      startY: e.clientY,
-      startHeight: bottomPanelHeight
-    };
-    
-    document.addEventListener('mousemove', handleTerminalResize);
-    document.addEventListener('mouseup', handleTerminalResizeStop);
-  };
-
-  const handleTerminalResize = (e: MouseEvent) => {
-    if (!terminalResizeRef.current.isResizing) return;
-    
-    const delta = terminalResizeRef.current.startY - e.clientY;
-    const newHeight = Math.max(150, Math.min(600, terminalResizeRef.current.startHeight + delta));
-    setBottomPanelHeight(newHeight);
-  };
-
-  const handleTerminalResizeStop = () => {
-    terminalResizeRef.current.isResizing = false;
-    document.removeEventListener('mousemove', handleTerminalResize);
-    document.removeEventListener('mouseup', handleTerminalResizeStop);
-  };
-
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
@@ -972,9 +914,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   useEffect(() => {
     const initializeRepo = async () => {
-      let repoData = sessionStorage.getItem('selectedRepo');
+      let parsed = getSelectedRepo();
       
-      if (!repoData) {
+      if (!parsed) {
         const repoParam = searchParams.get('repo');
         if (repoParam) {
           const [owner, name] = repoParam.split('/');
@@ -985,15 +927,14 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
               fullName: `${owner}/${name}`,
               defaultBranch: 'main'
             };
-            sessionStorage.setItem('selectedRepo', JSON.stringify(newRepoData));
-            repoData = JSON.stringify(newRepoData);
+            setSelectedRepo(newRepoData);
+            parsed = newRepoData;
           }
         }
       }
 
-      if (repoData) {
+      if (parsed) {
         try {
-          const parsed = JSON.parse(repoData);
           
           if (!parsed.owner || !parsed.name) {
             navigate('/repo-input');
@@ -1102,27 +1043,35 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   // GoLive: keep srcDocContent in sync when the user switches tabs
   useEffect(() => {
-    const tab = tabs.find(t => t.id === activeTabId);
-    if (!tab) { setSrcDocContent(null); return; }
+    const tab = tabs.find((currentTab) => currentTab.id === activeTabId);
+    if (!tab) {
+      setSrcDocContent(null);
+      return;
+    }
+
     if (tab.language === 'html') {
       const baseHref = getPreviewBaseHref(previewUrl, API_URL);
       setSrcDocContent(prepareHtmlForSrcDoc(tab.content, baseHref, tab.path));
-      setCompilationModeState('repository');
-    } else if (compilerRuntime === 'wasm' && (tab.path.endsWith('.xml') || tab.path.endsWith('.ptx'))) {
+      return;
+    }
+
+    if (compilerRuntime === 'wasm' && (tab.path.endsWith('.xml') || tab.path.endsWith('.ptx'))) {
       const runWasmCompile = async () => {
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
           const html = await compilePretextXmlWasm(tab.content);
           setSrcDocContent(html);
-        } catch (err) {
-          console.error('[WASM] Auto-compile failed:', err);
+        } catch (error) {
+          console.error('[WASM] Auto-compile failed:', error);
         }
       };
+
       void runWasmCompile();
-    } else {
-      setSrcDocContent(null);
+      return;
     }
-  }, [API_URL, activeTabId, liveEditMode, previewUrl, tabs, compilerRuntime]);
+
+    setSrcDocContent(null);
+  }, [API_URL, activeTabId, previewUrl, tabs, compilerRuntime]);
 
   useEffect(() => {
     activeTabRef.current = activeTab || null;
@@ -1342,10 +1291,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   }, [activeTab, activeTabId, repo?.fullName, reviewMarkers]);
 
   useEffect(() => {
-    liveEditModeRef.current = liveEditMode;
-  }, [liveEditMode]);
-
-  useEffect(() => {
     compilationModeRef.current = compilationMode;
   }, [compilationMode]);
 
@@ -1456,18 +1401,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   };
 
   useEffect(() => {
-    if (!liveEditMode || compilationMode !== 'repository' || !repo || buildSessionId || buildInitPromiseRef.current) {
-      return;
-    }
-
-    setLiveEditStatus('Preparing live preview…');
-    void ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
-    // This preparation guard is driven by visible live-edit state only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveEditMode, compilationMode, repo, buildSessionId]);
-
-  useEffect(() => {
-    if (!collaborationEnabled || !teamSession?.code || !repo || !activeTab || activeTab.id === '__dependency_graph__' || !userData || !editorReady || !editorRef.current) {
+    if (!collaborationEnabled || !teamSession?.code || !repo || !activeTab || !userData || !editorReady || !editorRef.current) {
       void leaveCollaborationRoom();
       if (!collaborationEnabled) {
         setCollaborationStatus('');
@@ -1537,14 +1471,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           apiUrl: API_URL,
           buildSessionId: buildSessionIdRef.current,
           compilationMode: compilationModeRef.current,
-          ensureBuildSession,
           enqueueRebuild,
-          liveEditMode: liveEditModeRef.current,
           latestEditTokenRef,
           previewUrl: previewUrlRef.current,
           setSrcDocContent,
           tab: latestTab,
-          triggerQuickUpdate,
           value: content,
         });
       },
@@ -1598,7 +1529,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       saveCurrentSnapshot();
       restoreFromSnapshot(workspaceSnapshots.current.get(repoKey)!);
       setActiveRepoKey(repoKey);
-      sessionStorage.setItem('selectedRepo', JSON.stringify(repoData));
+      setSelectedRepo(repoData);
       return;
     }
 
@@ -1606,8 +1537,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     saveCurrentSnapshot();
     setOpenRepoKeys((prev) => (prev.includes(repoKey) ? prev : [...prev, repoKey]));
     setActiveRepoKey(repoKey);
-    sessionStorage.removeItem('teamSession');
-    sessionStorage.setItem('selectedRepo', JSON.stringify(repoData));
+    saveTeamSessionToStorage(null);
+    setSelectedRepo(repoData);
 
     // Reset active workspace state
     setRepo(repoData);
@@ -2128,9 +2059,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
     setCompiling(true);
     setCompilationModeState('repository');
-    if (options.quiet && options.statusMessage) {
-      setLiveEditStatus(options.statusMessage);
-    }
 
     try {
       const workspaceSessionId = buildSessionIdRef.current || (await initializeWorkspaceSession(repoData))?.sessionId;
@@ -2170,16 +2098,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         return sid || null;
       }
 
-      const applied = applyBuildResponse(data, { quiet: options.quiet });
-      if (!applied && options.quiet) {
-        setLiveEditStatus('Live preview unavailable');
-      }
+      applyBuildResponse(data, { quiet: options.quiet });
       return data.sessionId || null;
     } catch (error) {
       console.error('Repository compilation error:', error);
-      if (options.quiet) {
-        setLiveEditStatus('Live preview unavailable');
-      } else {
+      if (!options.quiet) {
         const formatted = formatEditorError(error, 'Build failed');
         setWorkspaceNotice({
           tone: 'error',
@@ -2258,7 +2181,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   };
 
   const compileRepository = async (repoData: Repository | null = repo) => {
-    setLiveEditStatus('');
     setSrcDocContent(null);
 
     const isPretextXmlFile = (filePath: string) => filePath.endsWith('.xml') || filePath.endsWith('.ptx');
@@ -2270,11 +2192,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
           const html = await compilePretextXmlWasm(activeTab.content);
           setSrcDocContent(html);
-          setLiveEditStatus('Compiled successfully');
+          setCompilationModeState('repository');
         } catch (err) {
           const errorMsg = err instanceof Error ? err.message : String(err);
           console.error('[WASM] Compilation failed:', err);
-          setLiveEditStatus('WASM Compilation error');
           setWorkspaceNotice({
             tone: 'error',
             title: 'WASM Compiler Error',
@@ -2292,7 +2213,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   const compileSectionById = async () => {
     if (!activeSectionXmlId) return;
-    setLiveEditStatus('');
     setSrcDocContent(null);
     await initializeBuildSession(repo, { xmlId: activeSectionXmlId });
   };
@@ -2452,37 +2372,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
   };
 
-  // GoLive quick update — writes HTML/CSS/JS to output dir without Docker rebuild
-  const triggerQuickUpdate = async (filePath: string, value: string, successMessage: string = 'Preview updated') => {
-    const sessionId = buildSessionIdRef.current || await ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
-    if (!sessionId) return false;
-    try {
-      const data = await apiRequest<{ success: boolean; reason?: string }>('/build/quick-update', {
-        method: 'POST',
-        body: JSON.stringify({ sessionId, filePath, content: value })
-      }, 'Quick preview update failed');
-      if (data.success) {
-        setPreviewFromEntry(sessionId);
-        setLastSavedAt(new Date());
-        setLiveEditStatus(successMessage);
-        setWorkspaceNotice(null);
-        setTimeout(() => setLiveEditStatus(''), 2000);
-        return true;
-      }
-      setWorkspaceNotice({
-        tone: 'info',
-        title: data.reason || 'This file needs a full rebuild before the preview updates.',
-        advice: 'Use Build to refresh the rendered page for files that cannot be hot-swapped.',
-        actionLabel: 'Build again',
-        actionType: 'retry-build',
-      });
-    } catch (err) {
-      console.error('Quick update error:', err);
-      showNoticeFromError(err, 'Quick preview update failed');
-    }
-    return false;
-  };
-
   const runQueuedRebuild = async () => {
     if (rebuildInFlightRef.current) return;
 
@@ -2491,29 +2380,23 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
     queuedRebuildRef.current = null;
     rebuildInFlightRef.current = true;
-    setIsRebuilding(true);
     setCompiling(true);
-    setLiveEditStatus(next.clearDraftOnSuccess ? 'Compiling draft…' : 'Updating preview…');
-
-    try {
-      if (compilerRuntime === 'wasm' && (next.filePath.endsWith('.xml') || next.filePath.endsWith('.ptx'))) {
-        const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-        const html = await compilePretextXmlWasm(next.value);
-        setSrcDocContent(html);
-        setLiveEditStatus('Compiled successfully');
-        setLastSavedAt(new Date());
-        rebuildInFlightRef.current = false;
-        setIsRebuilding(false);
-        setCompiling(false);
-        if (queuedRebuildRef.current) {
-          void runQueuedRebuild();
+      try {
+        if (compilerRuntime === 'wasm' && (next.filePath.endsWith('.xml') || next.filePath.endsWith('.ptx'))) {
+          const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
+          const html = await compilePretextXmlWasm(next.value);
+          setSrcDocContent(html);
+          setLastSavedAt(new Date());
+          rebuildInFlightRef.current = false;
+          setCompiling(false);
+          if (queuedRebuildRef.current) {
+            void runQueuedRebuild();
         }
         return;
       }
 
-      const sessionId = buildSessionIdRef.current || await ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
+      const sessionId = buildSessionIdRef.current || await ensureBuildSession({ quiet: true, statusMessage: 'Preparing preview…' });
       if (!sessionId) {
-        setLiveEditStatus('Live preview unavailable');
         return;
       }
 
@@ -2530,9 +2413,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       const applied = applyBuildResponse(data, { quiet: !isLatestEdit && next.clearDraftOnSuccess });
 
       if (!applied) {
-        if (isLatestEdit) {
-          setLiveEditStatus('Rebuild failed');
-        }
         return;
       }
 
@@ -2541,23 +2421,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (next.clearDraftOnSuccess && isLatestEdit) {
         setSrcDocContent(null);
       }
-
-      if (isLatestEdit) {
-        setLiveEditStatus('Compiled preview updated');
-        setTimeout(() => setLiveEditStatus(''), 3000);
-      }
     } catch (error) {
       console.error('Live rebuild error:', error);
       showNoticeFromError(error, 'Rebuild failed');
-      setLiveEditStatus('Rebuild error');
     } finally {
       rebuildInFlightRef.current = false;
-      setIsRebuilding(false);
       setCompiling(false);
-
-      const queuedStatus = (queuedRebuildRef.current as QueuedRebuild | null)?.queuedStatus;
-      if (queuedStatus) {
-        setLiveEditStatus(queuedStatus);
+      if (queuedRebuildRef.current) {
         void runQueuedRebuild();
       }
     }
@@ -2566,19 +2436,17 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const enqueueRebuild = (
     filePath: string,
     value: string,
-    options: { editToken: number; clearDraftOnSuccess: boolean; queuedStatus?: string; sectionXmlId?: string | null }
+    options: { editToken: number; clearDraftOnSuccess: boolean; sectionXmlId?: string | null }
   ) => {
     queuedRebuildRef.current = {
       filePath,
       value,
       editToken: options.editToken,
       clearDraftOnSuccess: options.clearDraftOnSuccess,
-      queuedStatus: options.queuedStatus || 'Changes queued…',
       sectionXmlId: options.sectionXmlId ?? null,
     };
 
     if (rebuildInFlightRef.current) {
-      setLiveEditStatus(options.queuedStatus || 'Changes queued…');
       return;
     }
 
@@ -2591,7 +2459,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     const currentTab = currentTabOverride || activeTabRef.current || activeTab;
     if (!currentTab) return;
     const currentCompilationMode = compilationModeRef.current;
-    const currentLiveEditMode = liveEditModeRef.current;
 
     updateTabContent(resolvedTabId, value);
 
@@ -2600,7 +2467,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     const lastDotIndex = currentTab.path.lastIndexOf('.');
     const currentExt = lastDotIndex >= 0 ? currentTab.path.slice(lastDotIndex).toLowerCase() : '';
 
-    // GoLive path A: HTML file → instant srcDoc update (no backend needed)
+    // HTML files render instantly in the preview pane.
     if (currentExt === '.html' || currentExt === '.htm') {
       if (livePreviewTimerRef.current !== null) {
         window.clearTimeout(livePreviewTimerRef.current);
@@ -2608,10 +2475,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       livePreviewTimerRef.current = window.setTimeout(() => {
         const baseHref = getPreviewBaseHref(previewUrlRef.current, API_URL);
         setSrcDocContent(prepareHtmlForSrcDoc(value, baseHref, currentTab.path));
-        setLiveEditStatus(currentLiveEditMode ? 'Draft updated' : '');
-        void triggerQuickUpdate(currentTab.path, value, 'Compiled HTML updated');
       }, 300);
-      return; // skip full rebuild for HTML
+      return;
     }
 
     if (currentCompilationMode !== 'repository') return;
@@ -2621,71 +2486,14 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
 
     const currentCompilerRuntime = compilerRuntimeRef.current;
-
-    if (currentLiveEditMode) {
-      if (currentCompilerRuntime !== 'wasm') {
-        void ensureBuildSession({ quiet: true, statusMessage: 'Preparing live preview…' });
-      }
-
-      if (currentExt === '.css' || currentExt === '.js') {
-        rebuildTimer.current = window.setTimeout(() => {
-          setLiveEditStatus('Updating preview…');
-          void triggerQuickUpdate(currentTab.path, value, 'Asset preview updated');
-        }, 450);
-        return;
-      }
-
-      // PreTeXt / XML files
-      if (isPreTeXtFile(currentTab.name)) {
-        setLiveEditStatus('Compiling…');
-        const debounceMs = currentCompilerRuntime === 'wasm' ? 300 : 1100;
-        rebuildTimer.current = window.setTimeout(() => {
-          enqueueRebuild(currentTab.path, value, {
-            editToken,
-            clearDraftOnSuccess: false,
-            queuedStatus: currentCompilerRuntime === 'wasm' ? 'Compiling…' : 'Compiling latest draft…',
-            sectionXmlId: currentCompilerRuntime === 'wasm' ? null : activeSectionXmlIdRef.current,
-          });
-        }, debounceMs);
-        return;
-      }
-
-      // All other file types: full rebuild (no section scoping) (1.5 s debounce)
-      rebuildTimer.current = window.setTimeout(() => {
-        enqueueRebuild(currentTab.path, value, {
-          editToken,
-          clearDraftOnSuccess: false,
-          queuedStatus: 'Compiling latest change…',
-          sectionXmlId: null,
-        });
-      }, 1500);
-    } else {
-      // Normal mode: debounce 2 s then rebuild silently
-      if (currentCompilerRuntime === 'wasm' && isPreTeXtFile(currentTab.name)) {
-        rebuildTimer.current = window.setTimeout(() => {
-          enqueueRebuild(currentTab.path, value, {
-            editToken,
-            clearDraftOnSuccess: false,
-            queuedStatus: 'Compiling…',
-            sectionXmlId: null,
-          });
-        }, 300);
-        return;
-      }
-
-      if (!buildSessionId && currentCompilerRuntime !== 'wasm') {
-        return;
-      }
-
-      rebuildTimer.current = window.setTimeout(() => {
-        enqueueRebuild(currentTab.path, value, {
-          editToken,
-          clearDraftOnSuccess: false,
-          queuedStatus: 'Compiling latest change…',
-          sectionXmlId: null,
-        });
-      }, 2000);
-    }
+    const shouldUseShortDebounce = currentCompilerRuntime === 'wasm' && isPreTeXtFile(currentTab.name);
+    rebuildTimer.current = window.setTimeout(() => {
+      enqueueRebuild(currentTab.path, value, {
+        editToken,
+        clearDraftOnSuccess: false,
+        sectionXmlId: isPreTeXtFile(currentTab.name) ? activeSectionXmlIdRef.current : null,
+      });
+    }, shouldUseShortDebounce ? 300 : 2000);
   };
 
   const handleEditorChange = (value: string | undefined) => {
@@ -2747,10 +2555,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         compileSectionById={activeSectionXmlId ? compileSectionById : undefined}
         activeSectionXmlId={activeSectionXmlId}
         compiling={compiling}
-        liveEditMode={liveEditMode}
-        setLiveEditMode={setLiveEditModeState}
-        setLiveEditStatus={setLiveEditStatus}
-        isRebuilding={isRebuilding}
         collaborationEnabled={collaborationEnabled}
         switchToSoloMode={switchToSoloMode}
         switchToTeamMode={switchToTeamMode}
@@ -2764,8 +2568,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         onExportPdf={handleExportPdf}
         pdfBuilding={pdfBuilding}
         canExportPdf={!!buildSessionId}
-        terminalOpen={terminalOpen}
-        setTerminalOpen={setTerminalOpen}
         profileDropdownOpen={profileDropdownOpen}
         setProfileDropdownOpen={setProfileDropdownOpen}
         onLogout={onLogout}
@@ -2798,7 +2600,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
               saveCurrentSnapshot();
               restoreFromSnapshot(snap);
               setActiveRepoKey(key);
-              sessionStorage.setItem('selectedRepo', JSON.stringify(snap.repo));
+              setSelectedRepo(snap.repo);
             }
           }}
           onClose={closeRepo}
@@ -2913,34 +2715,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
           <button
             onClick={() => {
-              const graphTabId = '__dependency_graph__';
-              setTabs(prev => {
-                if (prev.some(t => t.id === graphTabId)) return prev;
-                return [...prev, {
-                  id: graphTabId,
-                  path: graphTabId,
-                  name: 'Graph Explorer',
-                  content: '',
-                  originalContent: '',
-                  sha: '',
-                  hasUnsavedChanges: false,
-                  language: 'json'
-                }];
-              });
-              setActiveTabId(graphTabId);
-            }}
-            className={`p-2.5 rounded-xl transition-all active:scale-90 ${
-              activeTabId === '__dependency_graph__'
-                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
-                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
-            }`}
-            title="Dependency Graph Explorer"
-          >
-            <Network className="w-5 h-5" />
-          </button>
-
-          <button
-            onClick={() => {
               if (activityBarTab === 'history' && sidebarOpen) setSidebarOpen(false);
               else {
                 setActivityBarTab('history');
@@ -2957,19 +2731,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             <History className="w-5 h-5" />
           </button>
 
-          <div className="mt-auto flex flex-col gap-4">
-            <button
-              onClick={() => setTerminalOpen(!terminalOpen)}
-              className={`p-2.5 rounded-xl transition-all ${
-                terminalOpen 
-                ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/30' 
-                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
-              }`}
-              title="Toggle Terminal"
-            >
-              <TerminalIcon className="w-5 h-5" />
-            </button>
-          </div>
         </nav>
 
         {/* Sidebar Container */}
@@ -3107,92 +2868,39 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           />
 
           <div className="editor-workspace-split flex-1 flex overflow-hidden">
-            {activeTabId === '__dependency_graph__' ? (
-              <EditorGraphPane
-                sessionId={buildSessionId}
-                onNodeClick={async (path) => {
-                  await openFileInTab(path);
-                }}
-              />
-            ) : (
-              <PreviewPane
-                compilationMode={compilationMode}
-                activeTab={activeTab ? { language: activeTab.language, content: activeTab.content } : null}
-                editorWidth={editorWidth}
-                onEditorResizeStart={handleEditorResizeStart}
-                onEditorDidMount={handleEditorDidMount}
-                onEditorChange={handleEditorChange}
-                MonacoEditor={MonacoEditor}
-                srcDocContent={srcDocContent}
-                compiling={compiling}
-                liveEditStatus={liveEditStatus}
-                liveEditMode={liveEditMode}
-                lastSavedAt={lastSavedAt}
-                collaborationEnabled={collaborationEnabled}
-                collaborators={collaborators}
-                collaborationStatus={collaborationStatus}
-                getParticipantName={getParticipantName}
-                getParticipantInitials={getParticipantInitials}
-                compileRepository={() => compileRepository()}
-                jumpToRelatedPreview={jumpToRelatedPreview}
-                setEditorWidth={setEditorWidth}
-                isRebuilding={isRebuilding}
-                previewUrl={previewUrl}
-                previewFrameKey={previewFrameKey}
-                compiledOutput={compiledOutput}
-                sessionId={buildSessionId}
-                apiUrl={API_URL}
-                previewHistory={previewHistory}
-                previewDiffEnabled={previewDiffEnabled}
-                previewBaseSnapshotId={previewBaseSnapshotId}
-                onTogglePreviewDiff={() => setPreviewDiffEnabled((current) => !current)}
-                onSelectPreviewBaseSnapshot={setPreviewBaseSnapshotId}
-                splitView={splitView}
-                compilerRuntime={compilerRuntime}
-                onChangeCompilerRuntime={handleCompilerRuntimeChange}
-              />
-            )}
+            <PreviewPane
+              compilationMode={compilationMode}
+              activeTab={activeTab ? { language: activeTab.language, content: activeTab.content } : null}
+              editorWidth={editorWidth}
+              onEditorResizeStart={handleEditorResizeStart}
+              onEditorDidMount={handleEditorDidMount}
+              onEditorChange={handleEditorChange}
+              MonacoEditor={MonacoEditor}
+              srcDocContent={srcDocContent}
+              compiling={compiling}
+              collaborationEnabled={collaborationEnabled}
+              collaborators={collaborators}
+              collaborationStatus={collaborationStatus}
+              getParticipantName={getParticipantName}
+              getParticipantInitials={getParticipantInitials}
+              compileRepository={() => compileRepository()}
+              jumpToRelatedPreview={jumpToRelatedPreview}
+              setEditorWidth={setEditorWidth}
+              previewUrl={previewUrl}
+              previewFrameKey={previewFrameKey}
+              compiledOutput={compiledOutput}
+              sessionId={buildSessionId}
+              apiUrl={API_URL}
+              previewHistory={previewHistory}
+              previewDiffEnabled={previewDiffEnabled}
+              previewBaseSnapshotId={previewBaseSnapshotId}
+              onTogglePreviewDiff={() => setPreviewDiffEnabled((current) => !current)}
+              onSelectPreviewBaseSnapshot={setPreviewBaseSnapshotId}
+              splitView={splitView}
+              compilerRuntime={compilerRuntime}
+              onChangeCompilerRuntime={handleCompilerRuntimeChange}
+            />
           </div>
-
-          {/* Bottom Terminal Panel */}
-          {terminalOpen && (
-            <div 
-              className="flex flex-col bg-zinc-950 border-t border-zinc-800 animate-in slide-in-from-bottom duration-300 z-40"
-              style={{ height: terminalMaximized ? '100%' : `${bottomPanelHeight}px` }}
-            >
-              {/* Terminal Resize Handle */}
-              <div
-                className="h-1 cursor-row-resize hover:bg-indigo-500 transition-colors"
-                onMouseDown={handleTerminalResizeStart}
-              />
-              
-              <div className="flex-1 overflow-hidden relative">
-                <Suspense fallback={
-                  <div className="flex h-full items-center justify-center bg-zinc-950">
-                    <div className="flex flex-col items-center gap-3">
-                      <RefreshCw className="w-6 h-6 text-zinc-700 animate-spin" />
-                      <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">Initializing Terminal...</p>
-                    </div>
-                  </div>
-                }>
-                  <TerminalPanel
-                    apiUrl={API_URL}
-                    repo={repo}
-                    buildSessionId={buildSessionId}
-                    isOpen={terminalOpen}
-                    onBuildSessionReady={(nextSessionId) => {
-                      if (!buildSessionIdRef.current) {
-                        setBuildSessionId(nextSessionId);
-                      }
-                    }}
-                    onClose={() => setTerminalOpen(false)}
-                    onToggleMaximize={() => setTerminalMaximized(!terminalMaximized)}
-                    isMaximized={terminalMaximized}
-                  />
-                </Suspense>
-              </div>
-            </div>
-          )}
         </div>
       </main>
 

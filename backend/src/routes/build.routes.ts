@@ -6,7 +6,6 @@ import {
   streamBuildLogs,
   initBuild,
   updateBuildFile,
-  quickUpdateBuildFile,
   serveArtifact,
   exportZip,
   startPdfBuild,
@@ -31,10 +30,9 @@ export default function createBuildRouter(): Router {
   // Build logs streaming
   router.get('/build/logs/:sessionId', requireAccessToken, checkWorkspaceOwner, streamBuildLogs);
 
-  // Build initialization, updates, quick updates
+  // Build initialization and updates
   router.post('/build/init', requireAccessToken, initBuild);
   router.post('/build/update', requireAccessToken, updateBuildFile);
-  router.post('/build/quick-update', requireAccessToken, quickUpdateBuildFile);
 
   // Artifact serving, exporting zip, PDF building
   router.get('/build/artifact/:sessionId/*', requireAccessToken, checkWorkspaceOwner, serveArtifact);

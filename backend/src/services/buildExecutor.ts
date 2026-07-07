@@ -11,7 +11,6 @@ import localTestRepoService from './localTestRepoService.js';
 import { syncPreviewBundle } from './previewBundleService.js';
 import { getProofdeskDataRoot, getProofdeskDataPath } from '../utils/dataPaths.js';
 import githubCacheStore from './githubCacheStore.js';
-import { sendBuildCompleteNotification, isEmailConfigured } from './emailService.js';
 import { recordPreviewSnapshot } from './previewHistoryService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import logger from '../utils/logger.js';
@@ -144,7 +143,6 @@ export interface BuildSession {
   defaultBranch?: string;
   branch?: string;
   creatorLogin?: string | null;
-  notifyEmail?: string | null;
   pdfReady?: boolean;
 }
 
@@ -248,6 +246,54 @@ class BuildExecutor {
     this.pdfBuilds = new Map();
   }
 
+  getSession(sessionId: string): BuildSession | undefined {
+    return this.sessions.get(sessionId);
+  }
+
+  hasSession(sessionId: string): boolean {
+    return this.sessions.has(sessionId);
+  }
+
+  setSession(sessionId: string, session: BuildSession): void {
+    this.sessions.set(sessionId, session);
+  }
+
+  deleteSession(sessionId: string): boolean {
+    return this.sessions.delete(sessionId);
+  }
+
+  getBuildCacheEntry(repoKey: string): BuildCacheEntry | undefined {
+    return this.buildCache.get(repoKey);
+  }
+
+  setBuildCacheEntry(repoKey: string, entry: BuildCacheEntry): void {
+    this.buildCache.set(repoKey, entry);
+  }
+
+  deleteBuildCacheEntry(repoKey: string): boolean {
+    return this.buildCache.delete(repoKey);
+  }
+
+  getBuildCacheEntries(): Array<[string, BuildCacheEntry]> {
+    return [...this.buildCache.entries()];
+  }
+
+  hasPdfBuild(sessionId: string): boolean {
+    return this.pdfBuilds.has(sessionId);
+  }
+
+  getPdfBuild(sessionId: string): Promise<string | null> | undefined {
+    return this.pdfBuilds.get(sessionId);
+  }
+
+  setPdfBuild(sessionId: string, build: Promise<string | null>): void {
+    this.pdfBuilds.set(sessionId, build);
+  }
+
+  deletePdfBuild(sessionId: string): boolean {
+    return this.pdfBuilds.delete(sessionId);
+  }
+
   async _saveSessionToDb(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -259,11 +305,10 @@ class BuildExecutor {
         branch: session.branch || session.defaultBranch || 'main',
         repoPath: session.repoPath,
         outputPath: session.outputPath,
-        previewPath: session.previewPath || undefined,
-        creatorLogin: session.creatorLogin || undefined,
-        notifyEmail: session.notifyEmail || undefined,
-        commitHash: session.commitHash || undefined,
-      });
+      previewPath: session.previewPath || undefined,
+      creatorLogin: session.creatorLogin || undefined,
+      commitHash: session.commitHash || undefined,
+    });
     } catch (err: any) {
       console.error(`[DB] Failed to save session ${sessionId} to DB:`, err.message);
     }
@@ -429,22 +474,6 @@ class BuildExecutor {
       stderr,
       durationMs: result?.durationMs || undefined,
     }).catch((err) => logger.error(`[DB] Failed to create build log: ${err.message}`, err));
-
-    // Send email notification for real Docker builds (not cache hits or local test)
-    const session = this.sessions.get(sessionId);
-    if (
-      session?.notifyEmail &&
-      !session.fromCache &&
-      !session.localTestMode &&
-      isEmailConfigured()
-    ) {
-      sendBuildCompleteNotification({
-        to: session.notifyEmail,
-        repoOwner: session.owner,
-        repoName: session.repo,
-        success: result?.success === true,
-      });
-    }
 
     if (isRedisSharedStateEnabled()) {
       (async () => {
@@ -964,7 +993,6 @@ class BuildExecutor {
     options: {
       defaultBranch?: string;
       creatorLogin?: string | null;
-      notifyEmail?: string | null;
       preferSeed?: boolean;
     } = {}
   ): Promise<{ sessionId: string; repoPath: string; fromCache: boolean }> {
@@ -995,7 +1023,6 @@ class BuildExecutor {
         localTestMode: true,
         defaultBranch,
         creatorLogin: options.creatorLogin || null,
-        notifyEmail: options.notifyEmail || null,
       });
       this.scheduleCleanup(sessionId);
       await this._saveSessionToDb(sessionId);
@@ -1036,7 +1063,6 @@ class BuildExecutor {
           fromCache: true,
           defaultBranch,
           creatorLogin: options.creatorLogin || null,
-          notifyEmail: options.notifyEmail || null,
         });
         this.scheduleCleanup(sessionId);
         await this._saveSessionToDb(sessionId);
@@ -1068,7 +1094,6 @@ class BuildExecutor {
           fromCache: true,
           defaultBranch,
           creatorLogin: options.creatorLogin || null,
-          notifyEmail: options.notifyEmail || null,
         });
         this.scheduleCleanup(sessionId);
         await this._saveSessionToDb(sessionId);
@@ -1108,7 +1133,6 @@ class BuildExecutor {
           seededFromLocal,
           defaultBranch,
           creatorLogin: options.creatorLogin || null,
-          notifyEmail: options.notifyEmail || null,
         });
         this.scheduleCleanup(sessionId);
         await this._saveSessionToDb(sessionId);
@@ -1155,7 +1179,6 @@ class BuildExecutor {
       seededFromLocal,
       defaultBranch,
       creatorLogin: options.creatorLogin || null,
-      notifyEmail: options.notifyEmail || null,
     });
     // 2-hour TTL on uncached sessions
     this.scheduleCleanup(sessionId);

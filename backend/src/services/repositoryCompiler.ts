@@ -135,7 +135,7 @@ export default class RepositoryCompiler {
   }
 
   /**
-   * Rebuild after live edit
+   * Rebuild after file edits
    */
   async rebuild(sessionId: string): Promise<RunResult> {
     const session = this.sessions.get(sessionId);

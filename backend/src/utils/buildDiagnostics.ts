@@ -67,26 +67,3 @@ export const buildFailurePayload = (message = '', details = ''): BuildFailurePay
   details,
   ...summarizeBuildFailure(`${message}\n${details}`),
 });
-
-export const terminalFailurePayload = (message = ''): DiagnosticAdvice => {
-  const lower = String(message).toLowerCase();
-
-  if (lower.includes('authentication')) {
-    return {
-      code: 'terminal_auth_required',
-      advice: 'Reconnect the workspace after signing in again so the shell can attach to the repository.',
-    };
-  }
-
-  if (lower.includes('invalid session')) {
-    return {
-      code: 'terminal_session_missing',
-      advice: 'Build or reopen the repository once, then reconnect the terminal so it can attach to the active workspace.',
-    };
-  }
-
-  return {
-    code: 'terminal_unavailable',
-    advice: 'Retry the terminal. If it still fails, rebuild the workspace and reopen the editor.',
-  };
-};

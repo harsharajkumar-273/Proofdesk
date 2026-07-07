@@ -73,41 +73,6 @@ describe('runtime configuration validation', () => {
     assert.ok(validation.errors.some((entry) => entry.code === 'data_root_ephemeral'));
   });
 
-  it('rejects unrestricted terminals in production mode', () => {
-    const validation = validateRuntimeConfig({
-      NODE_ENV: 'production',
-      FRONTEND_URL: 'https://proofdesk.example',
-      GITHUB_CLIENT_ID: 'abc',
-      GITHUB_CLIENT_SECRET: 'def',
-      GITHUB_REDIRECT_URI: 'https://proofdesk.example/auth/github/callback',
-      PROOFDESK_SESSION_SECRET: 'session-secret',
-      PROOFDESK_DATA_DIR: '/var/lib/proofdesk',
-      PROOFDESK_TERMINAL_MODE: 'full',
-    });
-
-    assert.equal(validation.ready, false);
-    assert.ok(validation.errors.some((entry) => entry.code === 'terminal_unrestricted'));
-  });
-
-  it('rejects process-backed terminals in production mode', () => {
-    const validation = validateRuntimeConfig({
-      NODE_ENV: 'production',
-      FRONTEND_URL: 'https://proofdesk.example',
-      GITHUB_CLIENT_ID: 'abc',
-      GITHUB_CLIENT_SECRET: 'def',
-      GITHUB_REDIRECT_URI: 'https://proofdesk.example/auth/github/callback',
-      PROOFDESK_SESSION_SECRET: 'session-secret',
-      PROOFDESK_DATA_DIR: '/var/lib/proofdesk',
-      PROOFDESK_TERMINAL_MODE: 'restricted',
-      PROOFDESK_TERMINAL_RUNTIME: 'process',
-      PROOFDESK_SHARED_STATE_BACKEND: 'redis',
-      PROOFDESK_REDIS_URL: 'redis://127.0.0.1:6379',
-    });
-
-    assert.equal(validation.ready, false);
-    assert.ok(validation.errors.some((entry) => entry.code === 'terminal_runtime_unisolated'));
-  });
-
   it('rejects single-node collaboration in production mode', () => {
     const validation = validateRuntimeConfig({
       NODE_ENV: 'production',
@@ -117,8 +82,6 @@ describe('runtime configuration validation', () => {
       GITHUB_REDIRECT_URI: 'https://proofdesk.example/auth/github/callback',
       PROOFDESK_SESSION_SECRET: 'session-secret',
       PROOFDESK_DATA_DIR: '/var/lib/proofdesk',
-      PROOFDESK_TERMINAL_MODE: 'restricted',
-      PROOFDESK_TERMINAL_RUNTIME: 'container',
       PROOFDESK_SHARED_STATE_BACKEND: 'filesystem',
     });
 

@@ -7,8 +7,6 @@ import { getWorkspaceSession, prepareWorkspace } from '../services/workspaceServ
 import { createShareToken, getShareToken } from '../services/shareTokenStore.js';
 import { listPreviewSnapshots, readPreviewSnapshotHtml } from '../services/previewHistoryService.js';
 import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
-import { updatePreviewBundleFile } from '../services/previewBundleService.js';
-import { getProofdeskDataPath } from '../utils/dataPaths.js';
 import { buildFailurePayload } from '../utils/buildDiagnostics.js';
 import { getMonitoringContextFromRequest, recordMonitoringEvent } from '../services/monitoringService.js';
 
@@ -130,7 +128,7 @@ export const initBuild = async (req: Request, res: Response): Promise<any> => {
   }
 
   if (sessionId) {
-    const existingSession = buildExecutor.sessions.get(sessionId);
+    const existingSession = buildExecutor.getSession(sessionId);
     const initLogin = req.authSession?.user?.login;
     if (initLogin && existingSession?.creatorLogin && existingSession.creatorLogin !== initLogin) {
       return res.status(403).json({ error: 'Access denied' });
@@ -162,7 +160,6 @@ export const initBuild = async (req: Request, res: Response): Promise<any> => {
       preferSeed,
       defaultBranch: defaultBranch || 'main',
       creatorLogin: req.authSession?.user?.login || null,
-      notifyEmail: req.authSession?.user?.email || null,
     });
     const result = await buildExecutor.startBuild(workspace.sessionId, { xmlId: xmlId || null, traceParent: res.locals.traceParent });
     if (result === null) {
@@ -196,7 +193,7 @@ export const initBuild = async (req: Request, res: Response): Promise<any> => {
 export const updateBuildFile = async (req: Request, res: Response): Promise<any> => {
   const { sessionId, filePath, content, sectionXmlId } = req.body;
   const updateLogin = req.authSession?.user?.login;
-  const updateSession = buildExecutor.sessions.get(sessionId);
+  const updateSession = buildExecutor.getSession(sessionId);
   if (updateLogin && updateSession?.creatorLogin && updateSession.creatorLogin !== updateLogin) {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -226,77 +223,6 @@ export const updateBuildFile = async (req: Request, res: Response): Promise<any>
         process.env.NODE_ENV !== 'production' ? error.stack : ''
       )
     );
-  }
-};
-
-async function walkDir(dir: string): Promise<string[]> {
-  const result: string[] = [];
-  let entries;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch { return result; }
-  for (const e of entries) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) result.push(...await walkDir(full));
-    else result.push(full);
-  }
-  return result;
-}
-
-export const quickUpdateBuildFile = async (req: Request, res: Response): Promise<any> => {
-  const { sessionId, filePath, content } = req.body;
-
-  if (!sessionId || !filePath || content === undefined) {
-    return res.status(400).json({ error: 'sessionId, filePath and content are required' });
-  }
-
-  if (!/^[0-9a-f]{16}$/.test(sessionId)) {
-    return res.status(400).json({ error: 'Invalid session ID' });
-  }
-
-  const quickLogin = req.authSession?.user?.login;
-  const quickSession = buildExecutor.sessions.get(sessionId);
-  if (quickLogin && quickSession?.creatorLogin && quickSession.creatorLogin !== quickLogin) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  const ext = path.extname(filePath).toLowerCase();
-  const quickUpdateExts = ['.html', '.htm', '.css', '.js'];
-
-  if (!quickUpdateExts.includes(ext)) {
-    return res.json({ success: false, reason: 'File type requires full rebuild' });
-  }
-
-  const activeSession = buildExecutor.sessions.get(sessionId);
-  const outputBase = activeSession
-    ? path.resolve(activeSession.outputPath)
-    : path.resolve(getProofdeskDataPath(sessionId, 'output'));
-  const candidate  = path.resolve(outputBase, filePath);
-
-  if (!candidate.startsWith(outputBase + path.sep) && candidate !== outputBase) {
-    return res.status(403).json({ error: 'Access denied' });
-  }
-
-  try {
-    await fs.access(path.dirname(candidate));
-    await fs.writeFile(candidate, content, 'utf-8');
-    await updatePreviewBundleFile({ sessionId, filePath, content });
-    console.log(`Quick-updated output file: ${candidate}`);
-    return res.json({ success: true });
-  } catch {
-    try {
-      const files = await walkDir(outputBase);
-      const match = files.find(f => path.basename(f) === path.basename(filePath));
-      if (match) {
-        await fs.writeFile(match, content, 'utf-8');
-        const rel = path.relative(outputBase, match);
-        await updatePreviewBundleFile({ sessionId, filePath: rel, content });
-        console.log(`Quick-updated (matched by name): ${rel}`);
-        return res.json({ success: true, resolvedPath: rel });
-      }
-    } catch {}
-
-    return res.json({ success: false, reason: 'File not found in output directory' });
   }
 };
 
@@ -380,10 +306,10 @@ export const getPdfBuildStatus = async (req: Request, res: Response): Promise<an
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const session = buildExecutor.sessions.get(sessionId);
+  const session = buildExecutor.getSession(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
-  if (buildExecutor.pdfBuilds.has(sessionId)) {
+  if (buildExecutor.hasPdfBuild(sessionId)) {
     return res.json({ status: 'building' });
   }
 
@@ -400,7 +326,7 @@ export const downloadPdf = async (req: Request, res: Response): Promise<any> => 
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const session = buildExecutor.sessions.get(sessionId);
+  const session = buildExecutor.getSession(sessionId);
   if (!session || !session.pdfReady) {
     return res.status(503).json({ error: 'PDF not ready — start a PDF build first' });
   }
@@ -442,7 +368,7 @@ export const getPreviewHistorySnapshot = async (req: Request, res: Response): Pr
   }
 
   try {
-    const session = buildExecutor.sessions.get(sessionId);
+    const session = buildExecutor.getSession(sessionId);
     const entryFile = String(req.query.entryFile || 'overview.html');
     const baseHref = `/preview/${sessionId}/${path.dirname(entryFile) === '.' ? '' : `${path.dirname(entryFile)}/`}`;
     let html = await readPreviewSnapshotHtml(sessionId, snapshotId);
@@ -471,7 +397,7 @@ export const shareBuild = async (req: Request, res: Response): Promise<any> => {
     return res.status(400).json({ error: 'Invalid session ID' });
   }
 
-  const session = buildExecutor.sessions.get(sessionId);
+  const session = buildExecutor.getSession(sessionId);
   if (!session) {
     return res.status(404).json({ error: 'Build session not found — run a build first' });
   }
@@ -496,7 +422,7 @@ export const shareBuild = async (req: Request, res: Response): Promise<any> => {
 export const cleanupBuild = async (req: Request, res: Response): Promise<any> => {
   const { sessionId } = req.body;
   const cleanupLogin = req.authSession?.user?.login;
-  const cleanupSession = buildExecutor.sessions.get(sessionId);
+  const cleanupSession = buildExecutor.getSession(sessionId);
   if (cleanupLogin && cleanupSession?.creatorLogin && cleanupSession.creatorLogin !== cleanupLogin) {
     return res.status(403).json({ error: 'Access denied' });
   }
@@ -527,7 +453,7 @@ export const prewarmBuild = async (req: Request, res: Response): Promise<any> =>
 
 export const getBuildCacheStatus = (req: Request, res: Response): any => {
   const entries = [];
-  for (const [repoKey, entry] of buildExecutor.buildCache.entries()) {
+  for (const [repoKey, entry] of buildExecutor.getBuildCacheEntries()) {
     entries.push({
       repo:        repoKey,
       commitHash:  entry.commitHash?.slice(0, 7),

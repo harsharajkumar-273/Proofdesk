@@ -16,7 +16,6 @@ export default defineConfig({
         './src/components/RepoInputPage.tsx',
         './src/components/ProfessorDashboardPage.tsx',
         './src/components/GitPanel.tsx',
-        './src/components/Terminal.tsx',
       ],
     },
   },
@@ -33,8 +32,6 @@ export default defineConfig({
       'y-protocols/awareness',
       'lib0/encoding',
       'lib0/decoding',
-      '@xterm/xterm',
-      '@xterm/addon-fit',
     ],
   },
 
@@ -55,14 +52,6 @@ export default defineConfig({
             // looked smaller on paper but produced runtime initialization
             // order errors in production preview/e2e.
             return 'vendor-editor'
-          }
-
-          if (
-            id.includes('@xterm')
-            || id.includes('/xterm/')
-            || id.includes('xterm-addon')
-          ) {
-            return 'vendor-terminal'
           }
 
           if (

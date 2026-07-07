@@ -265,7 +265,6 @@ describe('active backend routes', () => {
     assert.equal(response.body.config.localTestModeEnabled, true);
     assert.equal(response.body.config.sessionSecretConfigured, true);
     assert.equal(response.body.config.proofdeskDataRoot, dataRootDir);
-    assert.equal(response.body.config.terminalMode, 'restricted');
   });
 
   it('accepts frontend monitoring events and exposes recent event history', async () => {
@@ -425,50 +424,6 @@ describe('active backend routes', () => {
     assert.ok(response.body.sessionId);
   });
 
-  it('quick-updates live-editable CSS and JavaScript assets', async () => {
-    const buildResponse = await request(app)
-      .post('/build/init')
-      .set('Authorization', 'Bearer local-test')
-      .send({
-        owner: 'demo',
-        repo: 'course-demo',
-      });
-    assert.equal(buildResponse.status, 200);
-    const sessionId = buildResponse.body.sessionId;
-
-    const updatedCss = '.lesson-section h2 {\n  margin-top: 0;\n  color: #b91c1c;\n}\n';
-    const cssResponse = await request(app)
-      .post('/build/quick-update')
-      .set('Authorization', 'Bearer local-test')
-      .send({
-        sessionId,
-        filePath: 'styles.css',
-        content: updatedCss,
-      });
-
-    assert.equal(cssResponse.status, 200);
-    assert.equal(cssResponse.body.success, true);
-    const previewCssResponse = await request(app).get(`/preview/${sessionId}/styles.css`);
-    assert.equal(previewCssResponse.status, 200);
-    assert.match(previewCssResponse.text, /color: #b91c1c/);
-
-    const updatedJavascript = "badge.textContent = 'Reviewed live during testing';\n";
-    const javascriptResponse = await request(app)
-      .post('/build/quick-update')
-      .set('Authorization', 'Bearer local-test')
-      .send({
-        sessionId,
-        filePath: 'interactive.js',
-        content: updatedJavascript,
-      });
-
-    assert.equal(javascriptResponse.status, 200);
-    assert.equal(javascriptResponse.body.success, true);
-    const previewJavascriptResponse = await request(app).get(`/preview/${sessionId}/interactive.js`);
-    assert.equal(previewJavascriptResponse.status, 200);
-    assert.match(previewJavascriptResponse.text, /Reviewed live during testing/);
-  });
-
   it('rewrites nested preview asset paths for knowls and shared CSS', async () => {
     const knowlResponse = await request(app).get(`/preview/${previewSessionId}/knowl/sample.html`);
     assert.equal(knowlResponse.status, 200);
@@ -496,20 +451,6 @@ describe('active backend routes', () => {
     assert.equal(response.status, 200);
     assert.match(response.text, /href="styles\.css\?proofdeskLive=live-123"/);
     assert.match(response.text, /src="js\/demo\.js\?proofdeskLive=live-123"/);
-  });
-
-  it('rejects invalid quick-update session ids', async () => {
-    const response = await request(app)
-      .post('/build/quick-update')
-      .set('Authorization', 'Bearer local-test')
-      .send({
-        sessionId: 'bad-session',
-        filePath: 'styles.css',
-        content: 'body { color: red; }',
-      });
-
-    assert.equal(response.status, 400);
-    assert.equal(response.body.error, 'Invalid session ID');
   });
 
   it('serves the Prometheus metrics data', async () => {

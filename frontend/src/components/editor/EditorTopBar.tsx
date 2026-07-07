@@ -10,9 +10,7 @@ import {
   Play,
   RefreshCw,
   Save,
-  Terminal as TerminalIcon,
   User,
-  Zap,
   Users,
   Search,
   SplitSquareHorizontal,
@@ -57,10 +55,6 @@ interface EditorTopBarProps {
   compileSectionById?: () => void;
   activeSectionXmlId?: string | null;
   compiling: boolean;
-  liveEditMode: boolean;
-  setLiveEditMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setLiveEditStatus: (value: string) => void;
-  isRebuilding: boolean;
   collaborationEnabled: boolean;
   switchToSoloMode: () => void;
   switchToTeamMode: () => void;
@@ -74,8 +68,6 @@ interface EditorTopBarProps {
   onExportPdf: () => void;
   pdfBuilding: boolean;
   canExportPdf: boolean;
-  terminalOpen: boolean;
-  setTerminalOpen: (value: boolean) => void;
   profileDropdownOpen: boolean;
   setProfileDropdownOpen: (value: boolean) => void;
   onLogout: () => void;
@@ -99,10 +91,6 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
   compileSectionById,
   activeSectionXmlId,
   compiling,
-  liveEditMode,
-  setLiveEditMode,
-  setLiveEditStatus,
-  isRebuilding,
   collaborationEnabled,
   switchToSoloMode,
   switchToTeamMode,
@@ -114,8 +102,6 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
   onExportPdf,
   pdfBuilding,
   canExportPdf,
-  terminalOpen,
-  setTerminalOpen,
   profileDropdownOpen,
   setProfileDropdownOpen,
   onLogout,
@@ -285,23 +271,6 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       </button>
 
       <button
-        data-testid="live-edit-toggle"
-        onClick={() => {
-          setLiveEditMode((value) => !value);
-          setLiveEditStatus('');
-        }}
-        className={`h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
-          liveEditMode
-            ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm'
-            : 'bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300'
-        }`}
-        title="Live Sync — auto-builds on change"
-      >
-        <Zap className={`w-3.5 h-3.5 ${liveEditMode ? 'fill-indigo-500 text-indigo-500' : ''} ${liveEditMode && isRebuilding ? 'animate-pulse' : ''}`} />
-        <span className="hidden md:inline">{liveEditMode ? 'Live Sync' : 'Static'}</span>
-      </button>
-
-      <button
         onClick={toggleSplitView}
         className={`h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
           splitView
@@ -315,14 +284,6 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       </button>
 
       <div className="h-6 w-px flex-shrink-0 bg-zinc-200 mx-1" />
-
-      <button
-        onClick={() => setTerminalOpen(!terminalOpen)}
-        className={`flex-shrink-0 p-2 rounded-lg transition-all ${terminalOpen ? 'bg-indigo-50 text-indigo-600' : 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900'}`}
-        title="Toggle Integrated Terminal"
-      >
-        <TerminalIcon className="w-4 h-4" />
-      </button>
 
       <div className="relative flex-shrink-0">
         <button

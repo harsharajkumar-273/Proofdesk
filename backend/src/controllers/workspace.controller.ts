@@ -31,7 +31,7 @@ import {
 export const getDemoWorkspace = (req: Request, res: Response): any => {
   const firstRepo = (process.env.PREWARM_REPOS || 'QBobWatson/ila').split(',')[0].trim();
   const [owner, repo] = firstRepo.split('/');
-  const cached = buildExecutor.buildCache.get(`${owner}/${repo}`);
+  const cached = buildExecutor.getBuildCacheEntry(`${owner}/${repo}`);
   if (!cached) {
     return res.status(503).json({ error: 'Demo build not ready yet — try again in a few minutes.', building: true });
   }
@@ -51,7 +51,6 @@ export const initWorkspace = async (req: Request, res: Response): Promise<any> =
       preferSeed: Boolean(preferSeed),
       defaultBranch: defaultBranch || 'main',
       creatorLogin: req.authSession?.user?.login || null,
-      notifyEmail: req.authSession?.user?.email || null,
     });
     await ensureWorkspaceGitReady(workspace.sessionId);
     const tree = await getWorkspaceTree(workspace.sessionId);
@@ -67,7 +66,7 @@ export const initWorkspace = async (req: Request, res: Response): Promise<any> =
 
 export const getWorkspaceMeta = async (req: Request<any>, res: Response): Promise<any> => {
   const { sessionId } = req.params;
-  const session = buildExecutor.sessions.get(sessionId);
+  const session = buildExecutor.getSession(sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   res.json({ repo: `${session.owner}/${session.repo}`, owner: session.owner });
 };

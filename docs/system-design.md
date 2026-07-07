@@ -22,6 +22,8 @@
 
 ## 1. High-Level Architecture
 
+This diagram reflects the current default deployment shape: a single backend instance with optional Redis-backed shared state for collaboration, queueing, and log fan-out.
+
 ```mermaid
 graph TB
     subgraph Browser["Browser (React + Vite)"]
@@ -196,7 +198,7 @@ flowchart TD
     subgraph BE2["Backend — post-build"]
         I[Collect artifact list from output/]
         I --> J[syncPreviewBundle to preview/]
-        J --> K[Cache build result in Redis]
+        J --> K[Cache build result in Redis when enabled]
         K --> L[Return sessionId + entryFile]
     end
 
@@ -229,47 +231,25 @@ flowchart LR
 
 ---
 
-## 6. Live vs Full Preview Modes
+## 6. Preview Flow
 
 ```mermaid
 flowchart TD
     Edit([Professor edits file]) --> FT{File type?}
 
-    FT -->|.html / .htm| LiveHTML
-    FT -->|.ptx / .xml\nPreTeXt| LiveXML
-    FT -->|.css / .js| QuickUpdate
-    FT -->|other| FullRebuild
+    FT -->|.html / .htm| HTML
+    FT -->|.ptx / .xml| XML
+    FT -->|other| Rebuild
 
-    subgraph LiveHTML["Live HTML Mode (instant, no backend)"]
-        LH1[prepareHtmlForSrcDoc\nrewrite relative URLs + inject MathJax]
-        LH1 --> LH2[setSrcDocContent → iframe srcDoc=...]
-        LH2 --> LH3[Browser renders HTML immediately]
-        LH3 --> LH4[POST /build/quick-update\nbehind the scenes]
-    end
+    HTML --> H1[prepareHtmlForSrcDoc\nrewrite relative URLs + inject MathJax]
+    H1 --> H2[setSrcDocContent → iframe srcDoc=...]
 
-    subgraph LiveXML["Live PreTeXt Mode (client-side transform)"]
-        LX1[pretexToHtml\nbrowser-side XML → HTML converter]
-        LX1 --> LX2[Converts theorems · equations · lists\nMathJax renders math in iframe]
-        LX2 --> LX3[setSrcDocContent → iframe srcDoc=...]
-        LX3 --> LX4[setTimeout → enqueue full Docker rebuild]
-    end
+    XML --> X1[pretexToHtml\nbrowser-side XML → HTML converter]
+    X1 --> X2[setSrcDocContent → iframe srcDoc=...]
 
-    subgraph QuickUpdate["Quick Update (asset patch only)"]
-        QU1[POST /build/quick-update\nfile content only]
-        QU1 --> QU2[Backend writes file to output/\nno Docker, no re-render]
-        QU2 --> QU3[previewFrameKey++ → iframe reload]
-    end
-
-    subgraph FullRebuild["Full Docker Rebuild"]
-        FR1[POST /build/init or /build/update]
-        FR1 --> FR2[Docker pipeline runs\n15–20 min first build\n2–5 min incremental]
-        FR2 --> FR3[setPreviewUrl → iframe src=/preview/...]
-    end
-
-    style LiveHTML fill:#f0fff8,stroke:#00a86b
-    style LiveXML fill:#f0f5ff,stroke:#4a90d9
-    style QuickUpdate fill:#fffdf0,stroke:#e08e00
-    style FullRebuild fill:#faf5ff,stroke:#7c3aed
+    Rebuild --> R1[POST /build/init or /build/update]
+    R1 --> R2[Docker pipeline runs]
+    R2 --> R3[setPreviewUrl → iframe src=/preview/...]
 ```
 
 ---
@@ -368,7 +348,6 @@ flowchart LR
     Nginx -->|"/workspace/**"| API
     Nginx -->|"/preview/**"| PREV["Preview Static Files\n.proofdesk-data/sessionId/preview/\nserved directly by nginx"]
     Nginx -->|"/collab/ws"| WS["WebSocket Server\nYjs collaboration\n(upgraded connection)"]
-    Nginx -->|"/terminal/ws"| TERM["Terminal Server\nnode-pty / XTerm.js\n(upgraded connection)"]
     Nginx -->|"/health"| API
     Nginx -->|"/monitoring/**"| API
 
@@ -376,7 +355,6 @@ flowchart LR
     style API fill:#f0fff8,stroke:#00a86b
     style PREV fill:#fffdf0,stroke:#e08e00
     style WS fill:#faf5ff,stroke:#7c3aed
-    style TERM fill:#fff5f5,stroke:#e53e3e
 ```
 
 ---
@@ -399,8 +377,7 @@ graph TD
     Split --> MonacoArea["Monaco Editor\nCode editing · Yjs binding"]
     Split --> PreviewPane["PreviewPane\nLive / full build iframe"]
 
-    EP --> StatusBar["EditorStatusBar\nCollaborators · live edit status"]
-    EP --> Terminal["Terminal\nXTerm.js + node-pty WebSocket"]
+    EP --> StatusBar["EditorStatusBar\nCollaborators · preview status"]
     EP --> GitPanel["GitPanel\nDiff · stage · commit · push"]
     EP --> SearchPane["EditorSearchPane\nFile-level find/replace"]
 
@@ -416,7 +393,6 @@ graph TD
     style App fill:#1e40af,color:#fff
     style EP fill:#1e40af,color:#fff
     style PreviewPane fill:#065f46,color:#fff
-    style Terminal fill:#7c3aed,color:#fff
     style GitPanel fill:#92400e,color:#fff
 ```
 

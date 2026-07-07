@@ -31,9 +31,6 @@ interface PreviewPaneProps {
   MonacoEditor: React.ComponentType<Record<string, unknown>>;
   srcDocContent: string | null;
   compiling: boolean;
-  liveEditStatus: string;
-  liveEditMode: boolean;
-  lastSavedAt: Date | null;
   collaborationEnabled: boolean;
   collaborators: CollaborationParticipant[];
   collaborationStatus: string;
@@ -42,7 +39,6 @@ interface PreviewPaneProps {
   compileRepository: () => void;
   jumpToRelatedPreview: () => Promise<void>;
   setEditorWidth: (value: number) => void;
-  isRebuilding: boolean;
   previewUrl: string | null;
   previewFrameKey: number;
   compiledOutput: string;
@@ -68,9 +64,6 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   MonacoEditor,
   srcDocContent,
   compiling,
-  liveEditStatus,
-  liveEditMode,
-  lastSavedAt,
   collaborationEnabled,
   collaborators,
   collaborationStatus,
@@ -79,7 +72,6 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
   compileRepository,
   jumpToRelatedPreview,
   setEditorWidth,
-  isRebuilding,
   previewUrl,
   previewFrameKey,
   compiledOutput,
@@ -206,18 +198,6 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                   <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
                   {srcDocContent ? 'Syncing compiled preview…' : 'Building...'}
                 </div>
-              )}
-              {liveEditStatus && (
-                <span className={`rounded-full px-2 py-0.5 text-xs ${
-                  liveEditStatus.includes('updated') ? 'bg-green-900 text-green-300' :
-                  liveEditStatus.includes('fail') || liveEditStatus.includes('error') ? 'bg-red-900 text-red-300' :
-                  'bg-yellow-900 text-yellow-300'
-                }`}>
-                  {liveEditStatus}
-                </span>
-              )}
-              {liveEditMode && lastSavedAt && !liveEditStatus && (
-                <span className="text-xs text-gray-500">Updated {lastSavedAt.toLocaleTimeString()}</span>
               )}
               {collaborationEnabled && collaborators.length > 0 && (
                 <div className="ml-1 flex items-center space-x-1">
@@ -349,21 +329,13 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
           )}
 
           <div className="relative flex-1 overflow-hidden">
-            {isRebuilding && !srcDocContent && (
-              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-black bg-opacity-40">
-                <div className="flex items-center space-x-2 rounded-lg bg-gray-800 px-4 py-2">
-                  <RefreshCw className="h-4 w-4 animate-spin text-purple-400" />
-                  <span className="text-sm text-purple-300">Rebuilding preview…</span>
-                </div>
-              </div>
-            )}
             {srcDocContent ? (
               <iframe
                 srcDoc={srcDocContent}
                 key={`srcdoc-${previewFrameKey}`}
                 className="h-full w-full"
                 style={{ border: 'none', background: 'white' }}
-                title="Live Preview"
+                title="Build Preview"
                 data-testid="preview-frame"
                 sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-downloads"
               />

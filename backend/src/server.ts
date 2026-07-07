@@ -8,7 +8,6 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import buildExecutor from './services/buildExecutor.js';
 import { attachCollaborationServer } from './services/collaborationServer.js';
-import { attachTerminalServer } from './services/terminalServer.js';
 import localTestRepoService from './services/localTestRepoService.js';
 import { extractAccessToken } from './middleware/auth.js';
 import createAuthRouter from './routes/auth.routes.js';
@@ -19,7 +18,6 @@ import createWorkspaceRouter from './routes/workspace.routes.js';
 import createBuildRouter from './routes/build.routes.js';
 import createTeamRouter from './routes/team.routes.js';
 import createImportRouter from './routes/import.routes.js';
-import createGraphRouter from './routes/graph.routes.js';
 import { loadRuntimeEnv } from './utils/loadRuntimeEnv.js';
 import { formatRuntimeValidation, validateRuntimeConfig } from './utils/runtimeConfig.js';
 import { getMonitoringContextFromRequest, recordMonitoringEvent } from './services/monitoringService.js';
@@ -80,7 +78,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'traceparent']
 }));
 
 // Logging middleware
@@ -104,7 +102,6 @@ app.use(createWorkspaceRouter());
 app.use(createBuildRouter());
 app.use(createTeamRouter());
 app.use(createImportRouter());
-app.use(createGraphRouter());
 
 // User Details Route
 app.get('/user', async (req: Request, res: Response): Promise<any> => {
@@ -131,20 +128,12 @@ app.get('/user', async (req: Request, res: Response): Promise<any> => {
 // ============= START SERVER =============
 let collaborationAttached = false;
 let collaborationServer: any = null;
-let terminalAttached = false;
-let terminalServer: any = null;
 let upgradeRoutingAttached = false;
 
 const ensureCollaborationServer = () => {
   if (collaborationAttached) return;
   collaborationServer = attachCollaborationServer();
   collaborationAttached = true;
-};
-
-const ensureTerminalServer = () => {
-  if (terminalAttached) return;
-  terminalServer = attachTerminalServer();
-  terminalAttached = true;
 };
 
 const ensureRealtimeUpgradeRouting = () => {
@@ -156,13 +145,6 @@ const ensureRealtimeUpgradeRouting = () => {
     if ((requestUrl.pathname === '/collab/ws' || requestUrl.pathname === '/collaboration/ws') && collaborationServer) {
       collaborationServer.handleUpgrade(request, socket, head, (connection: any) => {
         collaborationServer.emit('connection', connection, request);
-      });
-      return;
-    }
-
-    if (requestUrl.pathname === '/terminal/ws' && terminalServer) {
-      terminalServer.handleUpgrade(request, socket, head, (connection: any) => {
-        terminalServer.emit('connection', connection, request);
       });
       return;
     }
@@ -255,7 +237,6 @@ export const startServer = () => {
 
   attachProcessMonitoring();
   ensureCollaborationServer();
-  ensureTerminalServer();
   ensureRealtimeUpgradeRouting();
   startBuildWorker();
 

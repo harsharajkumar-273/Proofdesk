@@ -9,17 +9,10 @@ import {
   getFrontendUrl,
 } from '../services/githubIdentity.js';
 import {
-  buildGoogleAuthUrl,
-  exchangeGoogleCode,
-  getGoogleUser,
-} from '../services/googleIdentity.js';
-import {
   getMonitoringContextFromRequest,
   recordMonitoringEvent,
 } from '../services/monitoringService.js';
 import { hasConfiguredValue } from '../utils/runtimeConfig.js';
-
-const GOOGLE_STATE_COOKIE = 'proofdesk_google_oauth_state';
 
 export const createAuthRouter = (): Router => {
   const router = Router();
@@ -38,82 +31,6 @@ export const createAuthRouter = (): Router => {
     const authUrl = buildGitHubAuthUrl({ clientId: clientId!, redirectUri: redirectUri!, state });
     console.log('Redirecting to GitHub OAuth');
     res.redirect(authUrl);
-  });
-
-  // ── Google OAuth ──────────────────────────────────────────────────────────
-
-  router.get('/google', (req: Request, res: Response): any => {
-    const clientId = process.env.GOOGLE_CLIENT_ID;
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
-
-    if (!hasConfiguredValue(clientId) || !hasConfiguredValue(clientSecret) || !hasConfiguredValue(redirectUri)) {
-      console.warn('Google OAuth attempted without a complete runtime configuration.');
-      return res.redirect(`${getFrontendUrl()}?error=google_not_configured`);
-    }
-
-    const state = authSessionStore.createOAuthState(res, GOOGLE_STATE_COOKIE);
-    const authUrl = buildGoogleAuthUrl({ clientId: clientId!, redirectUri: redirectUri!, state });
-    console.log('Redirecting to Google OAuth');
-    res.redirect(authUrl);
-  });
-
-  router.get('/google/callback', async (req: Request, res: Response): Promise<any> => {
-    const { code, state } = req.query;
-
-    if (!code) {
-      return res.redirect(`${getFrontendUrl()}?error=no_code`);
-    }
-
-    const expectedState = authSessionStore.readOAuthState(req, GOOGLE_STATE_COOKIE);
-    authSessionStore.clearOAuthState(res, GOOGLE_STATE_COOKIE);
-
-    if (!state || !expectedState || state !== expectedState) {
-      return res.redirect(`${getFrontendUrl()}?error=auth_state_mismatch`);
-    }
-
-    try {
-      const tokenData = await exchangeGoogleCode(code as string, {
-        clientId: process.env.GOOGLE_CLIENT_ID!,
-        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-        redirectUri: process.env.GOOGLE_REDIRECT_URI!,
-      });
-
-      const accessToken = tokenData.access_token;
-
-      if (!accessToken) {
-        console.error('No Google access token received:', tokenData);
-        return res.redirect(`${getFrontendUrl()}?error=no_token`);
-      }
-
-      const user = await getGoogleUser(accessToken);
-      await userRepository.upsertGoogleUser({
-        googleId: String(user.id),
-        login: user.email,
-        name: user.name || undefined,
-        email: user.email || undefined,
-        avatarUrl: user.picture || undefined,
-      });
-
-      const session = await authSessionStore.createSession({
-        accessToken,
-        mode: 'google',
-        user,
-      });
-
-      authSessionStore.attachSessionCookie(res, session.id);
-      res.redirect(getFrontendUrl());
-    } catch (error: any) {
-      console.error('Google OAuth callback error:', error.response?.data || error.message);
-      await recordMonitoringEvent({
-        source: 'backend',
-        level: 'error',
-        category: 'google_oauth_callback_failure',
-        message: error.message || 'Google OAuth callback failed.',
-        ...getMonitoringContextFromRequest(req),
-      });
-      res.redirect(`${getFrontendUrl()}?error=auth_failed`);
-    }
   });
 
   router.get('/local-test', async (req: Request, res: Response): Promise<any> => {
@@ -217,16 +134,6 @@ export const createAuthRouter = (): Router => {
     if (!session?.accessToken) {
       authSessionStore.clearSessionCookie(res);
       return res.status(401).json({ authenticated: false });
-    }
-
-    // Google sessions: stored user object is authoritative
-    if (session.mode === 'google') {
-      if (!session.user) {
-        await authSessionStore.destroySession(session.id);
-        authSessionStore.clearSessionCookie(res);
-        return res.status(401).json({ authenticated: false });
-      }
-      return res.json({ authenticated: true, mode: 'google', user: session.user });
     }
 
     // GitHub / local-test sessions: validate against GitHub API

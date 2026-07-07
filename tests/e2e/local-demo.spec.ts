@@ -134,6 +134,7 @@ test('opens the local demo workspace through the UI and builds a preview', async
   await enableEditorTestMode(page);
   await openLocalDemoWorkspace(page);
 
+  await page.locator('select[title*="WASM Sandbox"]').selectOption('docker');
   await page.locator('[data-file-path="course.xml"]').click();
   await expect(page.getByRole('button', { name: /build preview|building/i }).first()).toBeVisible();
   await page.getByRole('button', { name: /build preview|building/i }).first().click();
@@ -152,7 +153,7 @@ test('updates the preview in live-edit mode for JavaScript changes', async ({ pa
   await page.locator('[data-file-path="interactive.js"]').click();
   await waitForEditorTestHook(page);
   await page.getByRole('button', { name: /build preview|building/i }).first().click();
-  await page.getByTestId('live-edit-toggle').click();
+
 
   await page.evaluate(() => {
     const nextValue = `

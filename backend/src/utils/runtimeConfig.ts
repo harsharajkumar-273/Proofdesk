@@ -45,7 +45,6 @@ export interface RuntimeConfig {
   githubClientIdConfigured: boolean;
   githubClientSecretConfigured: boolean;
   githubRedirectUriConfigured: boolean;
-  googleOauthConfigured: boolean;
   sessionSecretConfigured: boolean;
   localTestModeEnabled: boolean;
   prewarmRepoCount: number;
@@ -53,8 +52,6 @@ export interface RuntimeConfig {
   dockerSocketAvailable: boolean;
   proofdeskDataRoot: string;
   proofdeskDataRootExplicit: boolean;
-  terminalMode: 'full' | 'restricted';
-  terminalRuntime: 'container' | 'process';
   sharedStateBackend: 'redis' | 'filesystem';
   redisUrlConfigured: boolean;
 }
@@ -67,12 +64,6 @@ export const getRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): RuntimeC
   const configuredDataRoot = getProofdeskDataRoot(env);
   const explicitDataRoot = typeof env.PROOFDESK_DATA_DIR === 'string' ? env.PROOFDESK_DATA_DIR.trim() : '';
   const sessionSecretConfigured = hasConfiguredValue(env.PROOFDESK_SESSION_SECRET || env.SESSION_ENCRYPTION_SECRET);
-  const terminalMode = String(env.PROOFDESK_TERMINAL_MODE || 'restricted').trim().toLowerCase() === 'full'
-    ? 'full'
-    : 'restricted';
-  const terminalRuntime = String(env.PROOFDESK_TERMINAL_RUNTIME || 'process').trim().toLowerCase() === 'container'
-    ? 'container'
-    : 'process';
   const sharedStateBackend = String(env.PROOFDESK_SHARED_STATE_BACKEND || 'filesystem').trim().toLowerCase() === 'redis'
     ? 'redis'
     : 'filesystem';
@@ -86,10 +77,6 @@ export const getRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): RuntimeC
     githubClientIdConfigured: hasConfiguredValue(env.GITHUB_CLIENT_ID),
     githubClientSecretConfigured: hasConfiguredValue(env.GITHUB_CLIENT_SECRET),
     githubRedirectUriConfigured: hasConfiguredValue(githubRedirectUri),
-    googleOauthConfigured:
-      hasConfiguredValue(env.GOOGLE_CLIENT_ID)
-      && hasConfiguredValue(env.GOOGLE_CLIENT_SECRET)
-      && hasConfiguredValue(env.GOOGLE_REDIRECT_URI),
     sessionSecretConfigured,
     localTestModeEnabled,
     prewarmRepoCount: countCsvEntries(env.PREWARM_REPOS),
@@ -97,8 +84,6 @@ export const getRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): RuntimeC
     dockerSocketAvailable,
     proofdeskDataRoot: configuredDataRoot,
     proofdeskDataRootExplicit: explicitDataRoot.length > 0,
-    terminalMode,
-    terminalRuntime,
     sharedStateBackend,
     redisUrlConfigured,
   };
@@ -166,16 +151,16 @@ export const validateRuntimeConfig = (
     );
   }
 
-  if (!githubOauthConfigured && !config.googleOauthConfigured && !config.localTestModeEnabled) {
+  if (!githubOauthConfigured && !config.localTestModeEnabled) {
     errors.push(
       issue(
         'auth_unavailable',
-        'No authentication provider is enabled. Configure GitHub OAuth, Google OAuth, or local test mode.'
+        'No authentication provider is enabled. Configure GitHub OAuth or local test mode.'
       )
     );
   }
 
-  if ((githubOauthConfigured || config.googleOauthConfigured) && !config.sessionSecretConfigured) {
+  if (githubOauthConfigured && !config.sessionSecretConfigured) {
     (strict ? errors : warnings).push(
       issue(
         'session_secret_missing',
@@ -219,26 +204,6 @@ export const validateRuntimeConfig = (
     );
   }
 
-  if (config.terminalMode !== 'restricted') {
-    (strict ? errors : warnings).push(
-      issue(
-        'terminal_unrestricted',
-        strict
-          ? 'PROOFDESK_TERMINAL_MODE must remain "restricted" in production deployments.'
-          : 'The integrated terminal is running in full shell mode. Use restricted mode for safer professor-facing deployments.'
-      )
-    );
-  }
-
-  if (strict && config.terminalRuntime !== 'container') {
-    errors.push(
-      issue(
-        'terminal_runtime_unisolated',
-        'Set PROOFDESK_TERMINAL_RUNTIME=container so the integrated terminal runs in an isolated container during deployment.'
-      )
-    );
-  }
-
   if (config.sharedStateBackend === 'redis' && !config.redisUrlConfigured) {
     errors.push(
       issue(
@@ -272,7 +237,7 @@ export const validateRuntimeConfig = (
     warnings.push(
       issue(
         'oauth_disabled',
-        'GitHub OAuth is disabled, so only the local demo workspace will be available until OAuth credentials are configured.'
+        'GitHub OAuth is disabled, so local demo mode is the only sign-in path until OAuth credentials are configured.'
       )
     );
   }
@@ -337,7 +302,6 @@ export const getReadinessPayload = (env: NodeJS.ProcessEnv = process.env, option
       prewarmRepoCount: validation.config.prewarmRepoCount,
       dockerSocketAvailable: validation.config.dockerSocketAvailable,
       proofdeskDataRoot: validation.config.proofdeskDataRoot,
-      terminalMode: validation.config.terminalMode,
     },
     errors: validation.errors,
     warnings: validation.warnings,
