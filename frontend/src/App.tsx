@@ -2,9 +2,9 @@ import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import './App.css';
 import { PRODUCT_NAME } from './utils/brand';
+import { clearSessionStorage } from './utils/workspaceStorage';
 
 const LandingPage = lazy(() => import('./components/LandingPage'));
-const DemoPage = lazy(() => import('./components/DemoPage'));
 const RepoInputPage = lazy(() => import('./components/RepoInputPage'));
 const EditorPage = lazy(() => import('./components/EditorPage'));
 const TermsPage = lazy(() => import('./components/TermsPage'));
@@ -57,12 +57,6 @@ const getEntryNotice = (errorCode: string | null): EntryNotice | null => {
         title: 'GitHub sign-in is not configured.',
         detail: 'For local development, you can use "Local Demo Mode" to access the workspace without a GitHub account.',
       };
-    case 'google_not_configured':
-      return {
-        tone: 'info',
-        title: 'Google sign-in is not configured.',
-        detail: 'GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI must be set to enable Google sign-in.',
-      };
     case 'no_code':
       return {
         tone: 'error',
@@ -104,6 +98,23 @@ function App() {
   useEffect(() => {
     const loadSession = async () => {
       const urlParams = new URLSearchParams(window.location.search);
+      
+      const isDemoSession = sessionStorage.getItem('standaloneDemo') === 'true' || urlParams.get('demo') === 'true';
+      if (isDemoSession) {
+        sessionStorage.setItem('standaloneDemo', 'true');
+        if (!sessionStorage.getItem('selectedRepo')) {
+          sessionStorage.setItem('selectedRepo', JSON.stringify({
+            owner: 'demo',
+            name: 'pretext-sandbox',
+            fullName: 'demo/pretext-sandbox',
+            defaultBranch: 'main'
+          }));
+        }
+        setHasWorkspaceAccess(true);
+        setIsLoading(false);
+        return;
+      }
+
       const errorFromUrl = urlParams.get('error');
       if (errorFromUrl) {
         setEntryNotice(getEntryNotice(errorFromUrl));
@@ -152,8 +163,7 @@ function App() {
     })
       .catch(() => {})
       .finally(() => {
-        sessionStorage.removeItem('selectedRepo');
-        sessionStorage.removeItem('teamSession');
+        clearSessionStorage();
         setHasWorkspaceAccess(false);
         window.location.href = '/';
       });
@@ -185,7 +195,7 @@ function App() {
           path="/"
           element={<LandingPage hasWorkspaceAccess={hasWorkspaceAccess} entryNotice={entryNotice} />}
         />
-        <Route path="/demo" element={<DemoPage />} />
+        <Route path="/demo" element={<Navigate to="/editor?demo=true" replace />} />
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/workspace" element={hasWorkspaceAccess ? <RepoInputPage /> : <Navigate to="/" replace />} />
         <Route path="/repo-input" element={<Navigate to="/workspace" replace />} />
