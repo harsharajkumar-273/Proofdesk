@@ -1,0 +1,67 @@
+body {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  background: linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%);
+  color: #0f172a;
+}
+
+.course-shell {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 48px 24px 80px;
+}
+
+.course-header {
+  padding: 24px 28px;
+  border: 1px solid #bfdbfe;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.08);
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.course-header h1 {
+  margin: 0 0 12px;
+  font-size: clamp(2rem, 4vw, 3rem);
+}
+
+.lesson-section {
+  margin-top: 24px;
+  padding: 24px 28px;
+  border: 1px solid #dbeafe;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.lesson-section h2 {
+  margin-top: 0;
+  color: #1d4ed8;
+}
+
+.demo-badge {
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.xml-source {
+  padding: 16px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: auto;
+}

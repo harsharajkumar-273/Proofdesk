@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  githubId  String?  @unique
+  googleId  String?  @unique
+  login     String   @unique
+  name      String?
+  email     String?
+  avatarUrl String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions  WorkspaceSession[]
+}
+
+model WorkspaceSession {
+  id           String   @id // Stores the 16-char hex session ID
+  owner        String
+  repo         String
+  branch       String
+  repoPath     String
+  outputPath   String
+  previewPath  String?
+  creatorLogin String?
+  notifyEmail  String?
+  commitHash   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  creatorId    String?
+  creator      User?    @relation(fields: [creatorId], references: [id])
+
+  buildLogs     BuildLog[]
+  reviewMarkers ReviewMarker[]
+  comments      Comment[]
+}
+
+model BuildLog {
+  id         String           @id @default(uuid())
+  sessionId  String
+  session    WorkspaceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  status     String           // "queued" | "building" | "success" | "failed"
+  xmlId      String?
+  stdout     String?
+  stderr     String?
+  durationMs Int?
+  createdAt  DateTime         @default(now())
+}
+
+model ReviewMarker {
+  id        String           @id @default(uuid())
+  sessionId String
+  session   WorkspaceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  filePath  String
+  line      Int
+  severity  String           // "error" | "warning" | "info"
+  message   String
+  createdAt DateTime         @default(now())
+}
+
+model Comment {
+  id        String           @id @default(uuid())
+  sessionId String
+  session   WorkspaceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  filePath  String
+  line      Int
+  author    String
+  body      String
+  resolved  Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}

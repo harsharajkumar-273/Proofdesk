@@ -1,0 +1,223 @@
+/* HandshakeEditor.css */
+
+/* Remove white backgrounds from activity bar icons */
+.handshake-editor .activity-bar .activity-item {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Activity bar styling */
+.activity-bar {
+  background: #0a0e27 !important;
+  border-right: 1px solid #2a3f5f !important;
+}
+
+.activity-bar .activity-item {
+  background: transparent !important;
+  border: none !important;
+  margin: 0 !important;
+  padding: 12px !important;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.activity-bar .activity-item:hover {
+  background: #151932 !important;
+}
+
+.activity-bar .activity-item.active {
+  background: #151932 !important;
+  color: white !important;
+}
+
+.activity-bar .activity-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 20%;
+  bottom: 20%;
+  width: 2px;
+  background: #3b82f6;
+}
+
+/* Icon styling */
+.activity-bar .activity-item svg {
+  color: #9ca3af !important;
+  transition: color 0.2s ease;
+}
+
+.activity-bar .activity-item:hover svg {
+  color: #d1d5db !important;
+}
+
+.activity-bar .activity-item.active svg {
+  color: white !important;
+}
+
+/* Header button styling */
+.header-button {
+  background: transparent !important;
+  border: none !important;
+  transition: all 0.2s ease;
+}
+
+.header-button:hover {
+  background: #1e2139 !important;
+}
+
+/* Profile dropdown styling */
+.profile-dropdown button {
+  background: transparent !important;
+  border: none !important;
+}
+
+.profile-dropdown button:hover {
+  background: #1e2139 !important;
+}
+
+/* Specific styling for action buttons that should have background */
+.action-button {
+  background: #1e2139 !important;
+}
+
+.action-button:hover {
+  background: #2a3f5f !important;
+}
+
+.action-button.primary {
+  background: #3b82f6 !important;
+}
+
+.action-button.primary:hover {
+  background: #2563eb !important;
+}
+
+.action-button.success {
+  background: #10b981 !important;
+}
+
+.action-button.success:hover {
+  background: #059669 !important;
+}
+
+/* Compilation mode toggle */
+.compilation-toggle button {
+  background: #1e2139 !important;
+}
+
+.compilation-toggle button.active {
+  background: #7c3aed !important;
+}
+
+.compilation-toggle button:not(.active):hover {
+  background: #2a3f5f !important;
+}
+
+/* File tree icons */
+.file-tree-item svg {
+  color: #60a5fa !important; /* Blue for files */
+}
+
+.file-tree-item.folder svg {
+  color: #f59e0b !important; /* Yellow for folders */
+}
+
+/* Remove any white backgrounds from sidebar */
+.sidebar {
+  background: #151932 !important;
+}
+
+.sidebar-header {
+  background: #1e2139 !important;
+}
+
+/* Terminal styling */
+.terminal {
+  background: #0a0e27 !important;
+  border-top: 1px solid #2a3f5f !important;
+}
+
+/* Tab styling */
+.tabs {
+  background: #151932 !important;
+  border-bottom: 1px solid #2a3f5f !important;
+}
+
+.tab {
+  background: transparent !important;
+  border: none !important;
+}
+
+.tab.active {
+  background: #0a0e27 !important;
+}
+
+.tab:hover {
+  background: #1e2139 !important;
+}
+
+/* Editor styling */
+.editor-container {
+  background: #0a0e27 !important;
+}
+
+/* Preview panel styling */
+.preview-panel {
+  background: #0a0e27 !important;
+  border-left: 1px solid #2a3f5f !important;
+}
+
+.preview-header {
+  background: #151932 !important;
+  border-bottom: 1px solid #2a3f5f !important;
+}
+
+/* Scrollbar styling */
+.editor-page-shell ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.editor-page-shell ::-webkit-scrollbar-track {
+  background: #eef4ff;
+}
+
+.editor-page-shell ::-webkit-scrollbar-thumb {
+  background: #bfdbfe;
+  border-radius: 4px;
+}
+
+.editor-page-shell ::-webkit-scrollbar-thumb:hover {
+  background: #60a5fa;
+}
+
+/* Monaco editor overrides */
+.editor-page-shell .monaco-editor {
+  background: #f8fbff !important;
+}
+
+.editor-page-shell .monaco-editor .margin {
+  background: #f8fbff !important;
+}
+
+/* If you're using Tailwind, you can also add these utility classes */
+.bg-transparent-hover:hover {
+  background: transparent !important;
+}
+
+.bg-dark-hover:hover {
+  background: #1e2139 !important;
+}
+
+/* Remove focus rings and outlines */
+.editor-page-shell button:focus,
+.editor-page-shell button:focus-visible {
+  outline: none !important;
+  ring: none !important;
+  box-shadow: none !important;
+}
+
+/* Specific fix for Lucide React icons in buttons */
+.editor-page-shell button svg {
+  background: transparent !important;
+}

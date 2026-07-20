@@ -1,0 +1,6 @@
+node_modules
+bower_modules
+.tmp
+.sconsign.dblite
+build
+

@@ -1,0 +1,28 @@
+{
+  "name": "Proofdesk Workspace",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-20-bullseye",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "forwardPorts": [3000, 4000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Frontend (Vite)",
+      "onAutoForward": "openPreview"
+    },
+    "4000": {
+      "label": "Backend API Server",
+      "onAutoForward": "ignore"
+    }
+  },
+  "postCreateCommand": "npm install && cd frontend && npm install && cd ../backend && npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker"
+      ]
+    }
+  }
+}

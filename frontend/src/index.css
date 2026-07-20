@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light mode colors - Enhanced */
+:root {
+  /* Softer, more cohesive gradients */
+  --bg-gradient-start: #f0fdfa;    /* teal-50 */
+  --bg-gradient-mid: #cffafe;      /* cyan-50 */
+  --bg-gradient-end: #ecfeff;      /* cyan-50 */
+
+  /* Better text contrast */
+  --text-color: #0f172a;            /* slate-900 */
+  --text-secondary: #475569;        /* slate-600 */
+  
+  /* More vibrant, consistent accent */
+  --link-color: #0d9488;            /* teal-600 */
+  --link-hover: #14b8a6;            /* teal-500 */
+  
+  /* Subtle button styling */
+  --button-bg: #ffffff;
+  --button-text: #0f172a;
+  --border-color: #cbd5e1;          /* slate-300 */
+}
+
+/* Dark mode colors - Enhanced */
+.dark {
+  /* Richer, more saturated dark gradients */
+  --bg-gradient-start: #0f172a;     /* slate-900 */
+  --bg-gradient-mid: #134e4a;       /* teal-900 */
+  --bg-gradient-end: #0f172a;       /* slate-900 */
+
+  /* Optimized readability */
+  --text-color: #f1f5f9;            /* slate-100 */
+  --text-secondary: #cbd5e1;        /* slate-300 */
+  
+  /* Brighter accent for dark mode */
+  --link-color: #5eead4;            /* teal-300 */
+  --link-hover: #99f6e4;            /* teal-200 */
+  
+  --button-bg: #1e293b;             /* slate-800 */
+  --button-text: #f1f5f9;
+  --border-color: #475569;          /* slate-600 */
+}
+
+/* Apply smooth transitions */
+* {
+  transition-property: background-color, border-color, color;
+  transition-duration: 500ms;
+  transition-timing-function: ease-in-out;
+}
+
+body {
+  @apply min-h-screen;
+  color: var(--text-color);
+  background: linear-gradient(to bottom right,
+    var(--bg-gradient-start),
+    var(--bg-gradient-mid),
+    var(--bg-gradient-end)
+  );
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 
+               Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 
+               'Helvetica Neue', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+a {
+  color: var(--link-color);
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 200ms ease;
+}
+
+a:hover {
+  color: var(--link-hover);
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  background-color: var(--button-bg);
+  color: var(--button-text);
+  cursor: pointer;
+  transition: all 200ms ease;
+}
+
+button:hover {
+  border-color: var(--link-color);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+  transform: none;
+}
+
+/* Smooth animations */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0A0A0C;
+}

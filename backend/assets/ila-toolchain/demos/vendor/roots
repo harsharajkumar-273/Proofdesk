@@ -1,0 +1,1 @@
+(function(global){function findRoot(f,a,b,tol){tol=tol||1e-6;for(var i=0;i<100;i++){var m=(a+b)/2;if(Math.abs(b-a)<tol)return m;if(f(a)*f(m)<0)b=m;else a=m;}return(a+b)/2;}global.findRoot=findRoot;})(window);

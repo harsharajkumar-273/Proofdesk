@@ -1,0 +1,13 @@
+<course title="Linear Algebra Demo" subtitle="A seeded repository for local product testing">
+  <section title="Vectors">
+    <paragraph>Vectors let us describe direction and magnitude in a compact way.</paragraph>
+    <paragraph>Edit this XML file to test full preview rebuilds without GitHub.</paragraph>
+    <item>Represent vectors as ordered lists of numbers.</item>
+    <item>Use the preview to confirm text updates appear after rebuild.</item>
+  </section>
+  <section title="Matrices">
+    <paragraph>Matrices organize coefficients so we can describe systems and transformations.</paragraph>
+    <item>Use styles.css to test quick asset updates.</item>
+    <item>Use interactive.js to test JavaScript live preview updates.</item>
+  </section>
+</course>
