@@ -10,6 +10,7 @@ async function run() {
     const prAuthor = context.payload.pull_request.user.login;
     const owner = context.repo.owner;
     const repo = context.repo.repo;
+    const prNumber = context.payload.pull_request.number;
 
     // Skip check for the owner themselves
     if (prAuthor === owner) {
@@ -34,7 +35,15 @@ async function run() {
         if (hasForked) {
           console.log(`✅ Verified contributor has a fork of the repository.`);
         } else {
-          core.setFailed(`❌ Contributor has not forked the repository. Please fork the repository to continue.`);
+          // Post a comment explaining the issue
+          await octokit.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: prNumber,
+            body: `⚠️ **Verification Check Failed**\n\nHi @${prAuthor}, it looks like you haven't forked this repository yet. Please fork the repository to continue with your contribution! 🍴`
+          });
+          
+          core.setFailed(`❌ Contributor has not forked the repository.`);
           return;
         }
       } catch (err) {
@@ -64,7 +73,15 @@ async function run() {
       if (hasStarred) {
         console.log(`✅ Contributor has starred the repository.`);
       } else {
-        core.setFailed(`❌ Contributor has not starred the repository. Please star the repository to show support and complete this check!`);
+        // Post a comment explaining the issue
+        await octokit.rest.issues.createComment({
+          owner,
+          repo,
+          issue_number: prNumber,
+          body: `⚠️ **Verification Check Failed**\n\nHi @${prAuthor}, it looks like you haven't starred this repository yet. Please star the repository to show support and complete this check! ⭐`
+        });
+        
+        core.setFailed(`❌ Contributor has not starred the repository.`);
       }
     } catch (err) {
       console.error("Failed to check stars list:", err.message);
