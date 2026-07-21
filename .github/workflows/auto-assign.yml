@@ -2,7 +2,7 @@ name: Auto Assign Issue
 
 on:
   issue_comment:
-    types: [created]
+    types: [created, edited]
 
 jobs:
   assign:
@@ -20,15 +20,21 @@ jobs:
             const body = context.payload.comment.body.toLowerCase();
             const issueNumber = context.issue.number;
             
-            // Define trigger keywords / phrases
+            // Define trigger keywords / phrases (case-insensitive checks)
             const triggers = [
               '.take',
               '/take',
               'assign me',
-              'assign this to me',
-              'i want to work on this',
-              'i\'d like to work on this',
-              'i would like to work on this'
+              'assign this',
+              'assign it to me',
+              'can you assign me',
+              'i want to work',
+              'i\'d like to work',
+              'i would like to work',
+              'like to work',
+              'want to work',
+              'work on this',
+              'work on it'
             ];
             
             const isTriggered = triggers.some(trigger => body.includes(trigger));
