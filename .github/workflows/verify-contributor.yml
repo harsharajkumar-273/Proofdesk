@@ -7,18 +7,90 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install actions packages
-        run: npm install @actions/core @actions/github
-
       - name: Run verification script
-        env:
-          INPUT_GITHUB-TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: node .github/scripts/verify-contributor.js
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prAuthor = context.payload.pull_request.user.login;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+
+            // Skip check for the owner themselves
+            if (prAuthor === owner) {
+              console.log("PR author is the repository owner. Skipping check.");
+              return;
+            }
+
+            console.log(`Verifying contributor ${prAuthor} has starred and forked ${owner}/${repo}...`);
+
+            // 1. Verify Fork
+            const isFork = context.payload.pull_request.head.repo.fork;
+            if (isFork) {
+              console.log("✅ Contributor has successfully forked the repository.");
+            } else {
+              console.log("Checking if contributor has a fork of the repository...");
+              try {
+                const forks = await github.rest.repos.listForks({
+                  owner,
+                  repo,
+                });
+                const hasForked = forks.data.some(f => f.owner.login === prAuthor);
+                if (hasForked) {
+                  console.log("✅ Verified contributor has a fork of the repository.");
+                } else {
+                  // Post a comment explaining the issue
+                  await github.rest.issues.createComment({
+                    owner,
+                    repo,
+                    issue_number: prNumber,
+                    body: `⚠️ **Verification Check Failed**\n\nHi @${prAuthor}, it looks like you haven't forked this repository yet. Please fork the repository to continue with your contribution! 🍴`
+                  });
+                  core.setFailed("❌ Contributor has not forked the repository.");
+                  return;
+                }
+              } catch (err) {
+                console.error("Failed to check forks list:", err.message);
+              }
+            }
+
+            // 2. Verify Star
+            try {
+              let page = 1;
+              let hasStarred = false;
+              
+              while (page < 10) {
+                const starred = await github.rest.activity.listReposStarredByUser({
+                  username: prAuthor,
+                  page,
+                  per_page: 100
+                });
+                
+                if (starred.data.length === 0) break;
+                
+                hasStarred = starred.data.some(r => r.full_name === `${owner}/${repo}`);
+                if (hasStarred) break;
+                page++;
+              }
+
+              if (hasStarred) {
+                console.log("✅ Contributor has starred the repository.");
+              } else {
+                // Post a comment explaining the issue
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body: `⚠️ **Verification Check Failed**\n\nHi @${prAuthor}, it looks like you haven't starred this repository yet. Please star the repository to show support and complete this check! ⭐`
+                });
+                core.setFailed("❌ Contributor has not starred the repository.");
+              }
+            } catch (err) {
+              console.error("Failed to check stars list:", err.message);
+              core.setFailed(`❌ Star verification failed. Note: If your stars are private, please make them public under Settings -> Developer settings -> Public profile.`);
+            }
