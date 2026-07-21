@@ -20,7 +20,8 @@
     "verify:env": "npm run verify:env --prefix backend",
     "verify:env:strict": "npm run verify:env:strict --prefix backend",
     "verify:deploy": "npm run verify:env && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity",
-    "verify:deploy:strict": "npm run verify:env:strict && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity"
+    "verify:deploy:strict": "npm run verify:env:strict && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity",
+    "format": "prettier --write ."
   },
   "keywords": [],
   "author": "",
@@ -36,6 +37,7 @@
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "baseline-browser-mapping": "^2.9.19",
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "prettier": "^3.9.6"
   }
 }
