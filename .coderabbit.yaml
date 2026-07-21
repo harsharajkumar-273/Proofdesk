@@ -1,0 +1,27 @@
+# CodeRabbit Configuration
+# Docs: https://docs.coderabbit.ai
+
+language: "en-US"
+tone: "supportive, constructive, encouraging" # Perfect for Summer of Code students
+
+reviews:
+  profile: "chill"
+  auto_review:
+    enabled: true
+    drafts: false # Do not review work-in-progress drafts
+  path_filters:
+    - "!node_modules/**"
+    - "!**/node_modules/**"
+    - "!package-lock.json"
+    - "!frontend/package-lock.json"
+    - "!dist/**"
+    - "!frontend/dist/**"
+    - "!backend/dist/**"
+  tools:
+    linter:
+      enabled: true
+    ast:
+      enabled: true
+
+chat:
+  auto_reply: true
