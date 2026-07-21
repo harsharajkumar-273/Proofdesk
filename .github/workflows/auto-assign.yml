@@ -7,7 +7,7 @@ on:
 jobs:
   assign:
     runs-on: ubuntu-latest
-    if: !github.event.issue.pull_request
+    if: ${{ !github.event.issue.pull_request }}
     permissions:
       issues: write
     steps:
