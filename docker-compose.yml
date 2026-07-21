@@ -1,4 +1,21 @@
 services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+      - "4000:4000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/frontend/node_modules
+      - /app/backend/node_modules
+    environment:
+      - NODE_ENV=development
+    depends_on:
+      - redis
+
   ila-live:
     build:
       context: ./docker
@@ -11,10 +28,7 @@ services:
     volumes:
       - ${ILA_REPO_PATH:-./builds/ila-repo}:/repo
       - ./builds/output:/output
-      # Persist pretex-cache so LaTeX→SVG equation renders are reused across builds.
-      # This is the biggest speedup: avoids re-rendering hundreds of equations each run.
       - pretex-cache:/home/vagrant/cache
-      # Persist compiled JS/CSS so SCons skips unchanged bundle steps.
       - vagrant-build:/home/vagrant/build
     restart: unless-stopped
 
@@ -25,8 +39,6 @@ services:
       - "6379:6379"
     restart: unless-stopped
 
-
 volumes:
-  # Named volumes persist across container restarts (unlike anonymous bind mounts).
   pretex-cache:
   vagrant-build:
