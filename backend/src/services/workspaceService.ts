@@ -122,6 +122,33 @@ export const getWorkspaceFileContent = async (sessionId: string, relativePath: s
   };
 };
 
+const activeFileLocks = new Map<string, Promise<void>>();
+
+/**
+ * Acquires a per-file async lock to serialize concurrent disk writes to the same file.
+ */
+const acquireFileLock = async <T>(filePath: string, fn: () => Promise<T>): Promise<T> => {
+  const key = path.resolve(filePath);
+  const previous = activeFileLocks.get(key) || Promise.resolve();
+
+  let resolver: () => void;
+  const current = new Promise<void>((resolve) => {
+    resolver = resolve;
+  });
+
+  activeFileLocks.set(key, previous.then(() => current));
+
+  try {
+    await previous;
+    return await fn();
+  } finally {
+    resolver!();
+    if (activeFileLocks.get(key) === previous.then(() => current)) {
+      activeFileLocks.delete(key);
+    }
+  }
+};
+
 export const updateWorkspaceFileContent = async (
   sessionId: string,
   relativePath: string,
@@ -136,17 +163,19 @@ export const updateWorkspaceFileContent = async (
     throw new Error(`File exceeds maximum allowed size of ${MAX_FILE_SIZE_BYTES / 1024 / 1024} MB`);
   }
 
-  await fs.mkdir(path.dirname(targetPath), { recursive: true });
-  await fs.writeFile(targetPath, content, 'utf-8');
+  return acquireFileLock(targetPath, async () => {
+    await fs.mkdir(path.dirname(targetPath), { recursive: true });
+    await fs.writeFile(targetPath, content, 'utf-8');
 
-  const sha = hashContent(content);
-  return {
-    content: {
-      name: path.basename(relativePath),
-      path: relativePath,
-      sha,
-    },
-  };
+    const sha = hashContent(content);
+    return {
+      content: {
+        name: path.basename(relativePath),
+        path: relativePath,
+        sha,
+      },
+    };
+  });
 };
 
 export const readWorkspaceTextFile = async (sessionId: string, relativePath: string): Promise<string> => {
