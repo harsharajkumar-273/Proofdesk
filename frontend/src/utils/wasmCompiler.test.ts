@@ -61,6 +61,10 @@ describe('WebAssembly PreTeXt Compiler Runtime', () => {
     expect(html).toContain('Simple XML Content');
     expect(html).toContain('katex.min.css');
     expect(html).toContain('tailwindcss.com');
+    expect(html).toContain("onerror=\"this.onerror=null;this.href='/assets/katex/katex.min.css';\"");
+    expect(html).toContain("onerror=\"this.onerror=null;this.src='/assets/tailwind/tailwindcss.js';\"");
+    expect(html).toContain('proofdesk-offline-assets');
+    expect(html).toContain('Fallback styles for key layout elements');
   });
 
   it('compiles theorem elements correctly', async () => {

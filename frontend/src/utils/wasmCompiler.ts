@@ -146,37 +146,85 @@ export const compilePretextXmlWasm = async (xmlContent: string): Promise<string>
     throw new Error(`XML Parse Error: ${cleanMessage}`);
   }
 
-  // Wrap compiled body with Tailwind styles, KaTeX script tags, and dark-mode integration
+  // Wrap compiled body with Tailwind styles, KaTeX script tags, offline fallbacks, and dark-mode integration
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '\\\\[', right: '\\\\]', display: true}, {left: '\\\\(', right: '\\\\)', display: false}, {left: '$', right: '$', display: false}], ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'], ignoredClasses: ['no-math'] });"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css" onerror="this.onerror=null;this.href='/assets/katex/katex.min.css';">
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js" onerror="this.onerror=null;this.src='/assets/katex/katex.min.js';"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onerror="this.onerror=null;this.src='/assets/katex/auto-render.min.js';" onload="renderMathInElement(document.body, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '\\\\[', right: '\\\\]', display: true}, {left: '\\\\(', right: '\\\\)', display: false}, {left: '$', right: '$', display: false}], ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'], ignoredClasses: ['no-math'] });"></script>
+  <script src="https://cdn.tailwindcss.com" onerror="this.onerror=null;this.src='/assets/tailwind/tailwindcss.js';"></script>
   <script>
-    tailwind.config = {
-      darkMode: 'class',
+    if (typeof tailwind !== 'undefined') {
+      tailwind.config = {
+        darkMode: 'class',
+      };
+    }
+    // Offline resilience asset caching via Cache Storage
+    if ('caches' in window) {
+      window.addEventListener('load', function() {
+        caches.open('proofdesk-offline-assets').then(function(cache) {
+          var assets = [
+            'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css',
+            'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js',
+            'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js',
+            'https://cdn.tailwindcss.com'
+          ];
+          assets.forEach(function(url) {
+            fetch(url, { mode: 'cors' }).then(function(res) {
+              if (res.ok) cache.put(url, res);
+            }).catch(function() {});
+          });
+        });
+      });
     }
     // Match dark mode class from parent window
     const checkTheme = () => {
       if (document.documentElement) {
-        if (window.parent.document.documentElement.classList.contains('dark')) {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
+        try {
+          if (window.parent && window.parent.document && window.parent.document.documentElement.classList.contains('dark')) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        } catch (e) {
+          // Cross-origin fallback check
         }
       }
     };
     setInterval(checkTheme, 500);
     window.onload = checkTheme;
+
+    // Secondary trigger for KaTeX rendering if load event deferred
+    function renderMathFallback() {
+      if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+          delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '\\\\[', right: '\\\\]', display: true},
+            {left: '\\\\(', right: '\\\\)', display: false},
+            {left: '$', right: '$', display: false}
+          ],
+          ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code', 'option'],
+          ignoredClasses: ['no-math']
+        });
+      }
+    }
+    window.addEventListener('DOMContentLoaded', renderMathFallback);
+    window.addEventListener('load', renderMathFallback);
   </script>
   <style>
     body {
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
+    /* Fallback styles for key layout elements when offline & tailwind CDN fails */
+    .pretext-content { max-width: 56rem; margin-left: auto; margin-right: auto; padding: 1.5rem; }
+    .theorem-box { border-left-width: 4px; border-left-color: #6366f1; padding: 1rem; margin-top: 1rem; margin-bottom: 1rem; border-radius: 0.75rem; background-color: rgba(238, 242, 255, 0.4); }
+    .proof-details { border: 1px solid #e4e4e7; border-radius: 0.75rem; margin-top: 1rem; margin-bottom: 1rem; }
+    .dark .theorem-box { background-color: rgba(49, 46, 129, 0.1); }
+    .dark .proof-details { border-color: #27272a; }
   </style>
 </head>
 <body class="bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 transition-colors duration-200">
