@@ -12,6 +12,12 @@ const upload = multer({
   limits: {
     fileSize: 15 * 1024 * 1024, // 15 MB max file size
   },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype && file.mimetype.toLowerCase() !== 'application/pdf') {
+      return cb(new Error('Invalid file MIME type: expected application/pdf'));
+    }
+    cb(null, true);
+  },
 });
 
 export default function createImportRouter(): Router {

@@ -1,9 +1,39 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { replaceMathDelimiters, parseMarkdownToPretext } = await import('../src/services/pdfImportService.js');
+const { replaceMathDelimiters, parseMarkdownToPretext, validatePdfBuffer } = await import('../src/services/pdfImportService.js');
 
 describe('PDF/LaTeX Ingestion Service', () => {
+  describe('validatePdfBuffer', () => {
+    it('accepts valid PDF buffer with %PDF- header magic bytes', () => {
+      const validBuffer = Buffer.from('%PDF-1.7 header content here');
+      assert.doesNotThrow(() => validatePdfBuffer(validBuffer, 'application/pdf'));
+    });
+
+    it('rejects empty or small buffers', () => {
+      assert.throws(
+        () => validatePdfBuffer(Buffer.from('123')),
+        /Invalid PDF file/
+      );
+    });
+
+    it('rejects non-PDF header signatures', () => {
+      const invalidBuffer = Buffer.from('<html>Not a PDF</html>');
+      assert.throws(
+        () => validatePdfBuffer(invalidBuffer, 'application/pdf'),
+        /Invalid PDF file signature/
+      );
+    });
+
+    it('rejects non-application/pdf MIME types', () => {
+      const validBuffer = Buffer.from('%PDF-1.4 header');
+      assert.throws(
+        () => validatePdfBuffer(validBuffer, 'image/png'),
+        /Invalid file MIME type/
+      );
+    });
+  });
+
   describe('replaceMathDelimiters', () => {
     it('translates inline LaTeX math delimiters \\( ... \\) and $ ... $', () => {
       const input = 'Let \\(x\\) be a vector and $y$ be a scalar.';

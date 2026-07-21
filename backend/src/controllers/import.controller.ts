@@ -10,10 +10,11 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
 
   const fileName = req.file.originalname || 'uploaded.pdf';
   const fileBuffer = req.file.buffer;
+  const mimeType = req.file.mimetype;
 
   try {
     logger.info(`Received PDF import request for file: ${fileName}`);
-    const pretextXml = await pdfImportService.importPdf(fileBuffer, fileName);
+    const pretextXml = await pdfImportService.importPdf(fileBuffer, fileName, mimeType);
     
     res.json({
       success: true,
@@ -23,6 +24,9 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
   } catch (error: any) {
     logger.error(`PDF Import controller failed for file ${fileName}:`, error);
     
+    const isValidationError = typeof error?.message === 'string' &&
+      (error.message.includes('Invalid PDF file') || error.message.includes('Invalid file MIME type'));
+
     await recordMonitoringEvent({
       source: 'backend',
       level: 'error',
@@ -34,7 +38,7 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
       },
     });
 
-    res.status(500).json({
+    res.status(isValidationError ? 400 : 500).json({
       success: false,
       error: 'Conversion failed',
       details: error.message,
