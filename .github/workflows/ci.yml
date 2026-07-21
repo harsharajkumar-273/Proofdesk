@@ -18,7 +18,7 @@ jobs:
       PROOFDESK_SESSION_SECRET: ci-session-secret
       PROOFDESK_DATA_DIR: ./.tmp/proofdesk-ci
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/node@master
@@ -28,7 +28,7 @@ jobs:
           args: --severity-threshold=high --all-projects
         continue-on-error: true
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
