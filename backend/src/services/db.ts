@@ -6,6 +6,18 @@ const isPostgres = databaseUrl.startsWith('postgresql://') || databaseUrl.starts
 
 let prisma: PrismaClient;
 
+/**
+ * Configures SQLite Write-Ahead Logging (WAL) mode and busy_timeout
+ */
+export const configureSqlitePragmas = async (client: PrismaClient): Promise<void> => {
+  try {
+    await client.$executeRawUnsafe('PRAGMA journal_mode=WAL;');
+    await client.$executeRawUnsafe('PRAGMA busy_timeout=5000;');
+  } catch {
+    // Ignore errors during initial setup or unmigrated shadow DBs
+  }
+};
+
 if (isPostgres) {
   prisma = new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
@@ -13,11 +25,14 @@ if (isPostgres) {
 } else {
   const adapter = new PrismaBetterSqlite3({
     url: databaseUrl,
+    timeout: 5000,
   });
   prisma = new PrismaClient({
     adapter,
     log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
+
+  void configureSqlitePragmas(prisma);
 }
 
 export default prisma;
