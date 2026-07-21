@@ -2,6 +2,14 @@ import { trace, context, Span, SpanStatusCode } from '@opentelemetry/api';
 import logger from './utils/logger.js';
 
 const TRACER_NAME = 'proofdesk-core';
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+/**
+ * Checks if OpenTelemetry tracing is enabled via environment variable
+ */
+export const isTracingEnabled = (): boolean => {
+  return TRUE_VALUES.has(String(process.env.ENABLE_TRACING || '').trim().toLowerCase());
+};
 
 export const getTracer = () => {
   return trace.getTracer(TRACER_NAME);
@@ -51,8 +59,10 @@ export const startTraceSpan = (name: string, parentTraceParent?: string | null):
     span = tracer.startSpan(name);
   }
 
-  const sc = span.spanContext();
-  logger.info(`[OTel:SpanStart] name="${name}" traceId="${sc.traceId}" spanId="${sc.spanId}"`);
+  if (isTracingEnabled()) {
+    const sc = span.spanContext();
+    logger.info(`[OTel:SpanStart] name="${name}" traceId="${sc.traceId}" spanId="${sc.spanId}"`);
+  }
   return span;
 };
 
@@ -64,19 +74,24 @@ export const traceAsync = async <T>(
   fn: (span: Span) => Promise<T>,
   parentTraceParent?: string | null
 ): Promise<T> => {
+  const tracingEnabled = isTracingEnabled();
   const startTime = Date.now();
   const span = startTraceSpan(name, parentTraceParent);
   try {
     const result = await fn(span);
     span.setStatus({ code: SpanStatusCode.OK });
-    const duration = Date.now() - startTime;
-    logger.info(`[OTel:SpanEnd] name="${name}" status="OK" duration=${duration}ms traceId="${span.spanContext().traceId}"`);
+    if (tracingEnabled) {
+      const duration = Date.now() - startTime;
+      logger.info(`[OTel:SpanEnd] name="${name}" status="OK" duration=${duration}ms traceId="${span.spanContext().traceId}"`);
+    }
     return result;
   } catch (error: any) {
     span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
     span.recordException(error);
-    const duration = Date.now() - startTime;
-    logger.error(`[OTel:SpanEnd] name="${name}" status="ERROR" duration=${duration}ms traceId="${span.spanContext().traceId}" error="${error.message}"`);
+    if (tracingEnabled) {
+      const duration = Date.now() - startTime;
+      logger.error(`[OTel:SpanEnd] name="${name}" status="ERROR" duration=${duration}ms traceId="${span.spanContext().traceId}" error="${error.message}"`);
+    }
     throw error;
   } finally {
     span.end();

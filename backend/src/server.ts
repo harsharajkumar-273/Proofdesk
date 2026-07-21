@@ -255,6 +255,7 @@ export const startServer = () => {
     console.log(`  GITHUB_CLIENT_SECRET: ${process.env.GITHUB_CLIENT_SECRET ? 'set' : 'NOT SET'}`);
     console.log(`  FRONTEND_URL:      ${process.env.FRONTEND_URL || 'http://localhost:3000'}`);
     console.log(`  LOCAL_TEST_MODE:   ${localTestRepoService.isEnabled() ? 'enabled' : 'disabled'}`);
+    console.log(`  ENABLE_TRACING:    ${runtimeValidation.config.enableTracing ? 'enabled' : 'disabled'}`);
     console.log(`  RUNTIME_READY:     ${runtimeValidation.ready ? 'yes' : 'no'}`);
 
     if (runtimeValidation.errors.length > 0 || runtimeValidation.warnings.length > 0) {

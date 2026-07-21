@@ -100,4 +100,23 @@ describe('runtime configuration validation', () => {
     assert.equal(validation.ready, false);
     assert.ok(validation.errors.some((entry) => entry.code === 'redis_url_missing'));
   });
+
+  it('correctly parses ENABLE_TRACING flag in runtime config', () => {
+    const defaultValidation = validateRuntimeConfig({
+      NODE_ENV: 'development',
+    });
+    assert.equal(defaultValidation.config.enableTracing, false);
+
+    const enabledValidation = validateRuntimeConfig({
+      NODE_ENV: 'development',
+      ENABLE_TRACING: 'true',
+    });
+    assert.equal(enabledValidation.config.enableTracing, true);
+
+    const disabledValidation = validateRuntimeConfig({
+      NODE_ENV: 'development',
+      ENABLE_TRACING: 'false',
+    });
+    assert.equal(disabledValidation.config.enableTracing, false);
+  });
 });

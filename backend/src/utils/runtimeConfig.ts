@@ -47,6 +47,7 @@ export interface RuntimeConfig {
   githubRedirectUriConfigured: boolean;
   sessionSecretConfigured: boolean;
   localTestModeEnabled: boolean;
+  enableTracing: boolean;
   prewarmRepoCount: number;
   shellPath: string;
   dockerSocketAvailable: boolean;
@@ -60,6 +61,7 @@ export const getRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): RuntimeC
   const frontendUrl = env.FRONTEND_URL || '';
   const githubRedirectUri = hasConfiguredValue(env.GITHUB_REDIRECT_URI) ? (env.GITHUB_REDIRECT_URI as string) : '';
   const localTestModeEnabled = toBoolean(env.ENABLE_LOCAL_TEST_MODE);
+  const enableTracing = toBoolean(env.ENABLE_TRACING);
   const dockerSocketAvailable = fs.existsSync(DOCKER_SOCKET_PATH);
   const configuredDataRoot = getProofdeskDataRoot(env);
   const explicitDataRoot = typeof env.PROOFDESK_DATA_DIR === 'string' ? env.PROOFDESK_DATA_DIR.trim() : '';
@@ -79,6 +81,7 @@ export const getRuntimeConfig = (env: NodeJS.ProcessEnv = process.env): RuntimeC
     githubRedirectUriConfigured: hasConfiguredValue(githubRedirectUri),
     sessionSecretConfigured,
     localTestModeEnabled,
+    enableTracing,
     prewarmRepoCount: countCsvEntries(env.PREWARM_REPOS),
     shellPath: env.SHELL || '',
     dockerSocketAvailable,
@@ -299,6 +302,7 @@ export const getReadinessPayload = (env: NodeJS.ProcessEnv = process.env, option
       githubOauthConfigured: validation.config.githubOauthConfigured,
       sessionSecretConfigured: validation.config.sessionSecretConfigured,
       localTestModeEnabled: validation.config.localTestModeEnabled,
+      enableTracing: validation.config.enableTracing,
       prewarmRepoCount: validation.config.prewarmRepoCount,
       dockerSocketAvailable: validation.config.dockerSocketAvailable,
       proofdeskDataRoot: validation.config.proofdeskDataRoot,
