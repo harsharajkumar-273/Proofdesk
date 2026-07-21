@@ -7,7 +7,7 @@ on:
 jobs:
   assign:
     runs-on: ubuntu-latest
-    if: (!github.event.issue.pull_request) && (contains(github.event.comment.body, '.take') || contains(github.event.comment.body, 'i want to work on this'))
+    if: !github.event.issue.pull_request
     permissions:
       issues: write
     steps:
@@ -17,20 +17,40 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const commenter = context.payload.comment.user.login;
+            const body = context.payload.comment.body.toLowerCase();
             const issueNumber = context.issue.number;
             
-            console.log(`Assigning issue #${issueNumber} to user ${commenter}...`);
+            // Define trigger keywords / phrases
+            const triggers = [
+              '.take',
+              '/take',
+              'assign me',
+              'assign this to me',
+              'i want to work on this',
+              'i\'d like to work on this',
+              'i would like to work on this'
+            ];
             
-            await github.rest.issues.addAssignees({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              assignees: [commenter]
-            });
+            const isTriggered = triggers.some(trigger => body.includes(trigger));
             
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issueNumber,
-              body: `Hi @${commenter}, you have been successfully assigned to this issue! Happy coding 🚀`
-            });
+            if (isTriggered) {
+              console.log(`Assigning issue #${issueNumber} to user ${commenter}...`);
+              
+              // Assign the user
+              await github.rest.issues.addAssignees({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                assignees: [commenter]
+              });
+              
+              // Reply confirming the assignment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: `Hi @${commenter}, you have been successfully assigned to this issue! Happy coding 🚀`
+              });
+            } else {
+              console.log(`Comment by ${commenter} did not match any auto-assignment triggers.`);
+            }
