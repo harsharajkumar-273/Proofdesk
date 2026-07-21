@@ -1,0 +1,24 @@
+name: Verify Contributor Star & Fork
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install actions packages
+        run: npm install @actions/core @actions/github
+
+      - name: Run verification script
+        env:
+          INPUT_GITHUB-TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/verify-contributor.js
