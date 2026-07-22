@@ -11,6 +11,8 @@ import buildExecutor from './services/buildExecutor.js';
 import { attachCollaborationServer } from './services/collaborationServer.js';
 import { attachTerminalServer } from './services/terminalServer.js';
 import localTestRepoService from './services/localTestRepoService.js';
+import swaggerUi from 'swagger-ui-express';
+import swaggerJsdoc from 'swagger-jsdoc';
 import { extractAccessToken } from './middleware/auth.js';
 import createAuthRouter from './routes/auth.routes.js';
 import createPreviewRouter from './routes/preview.routes.js';
@@ -121,6 +123,27 @@ app.use(createWorkspaceRouter());
 app.use(createBuildRouter());
 app.use(createTeamRouter());
 app.use(createImportRouter());
+
+// Swagger Configuration
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Proofdesk API',
+      version: '1.0.0',
+      description: 'API documentation for the Proofdesk backend',
+    },
+    servers: [
+      {
+        url: `http://localhost:${process.env.PORT || 4000}`,
+      },
+    ],
+  },
+  apis: ['./src/routes/*.ts'],
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // User Details Route
 app.get('/user', async (req: Request, res: Response): Promise<any> => {
