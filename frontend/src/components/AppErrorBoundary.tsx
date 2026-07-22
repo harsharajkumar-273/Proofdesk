@@ -7,7 +7,7 @@ type Props = {
   children: React.ReactNode;
 };
 
-const FallbackComponent = ({ error, resetErrorBoundary }: any) => {
+const FallbackComponent = ({ resetErrorBoundary }: { resetErrorBoundary: () => void }) => {
   return (
     <div className="simple-shell">
       <div className="simple-page">
@@ -33,7 +33,7 @@ const FallbackComponent = ({ error, resetErrorBoundary }: any) => {
   );
 };
 
-const handleError = (error: Error, info: any) => {
+const handleError = (error: Error, info: { componentStack?: string }) => {
   reportClientMonitoringEvent({
     category: 'frontend_route_crash',
     message: error.message || 'The React application crashed while rendering a route.',
