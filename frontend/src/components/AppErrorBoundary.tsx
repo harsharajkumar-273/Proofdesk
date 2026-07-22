@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { ErrorInfo } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PRODUCT_NAME } from '../utils/brand';
 import { reportClientMonitoringEvent } from '../utils/monitoring';
@@ -33,11 +33,12 @@ const FallbackComponent = ({ resetErrorBoundary }: { resetErrorBoundary: () => v
   );
 };
 
-const handleError = (error: Error, info: { componentStack?: string }) => {
+const handleError = (error: unknown, info: ErrorInfo) => {
+  const err = error instanceof Error ? error : new Error(String(error));
   reportClientMonitoringEvent({
     category: 'frontend_route_crash',
-    message: error.message || 'The React application crashed while rendering a route.',
-    stack: error.stack || '',
+    message: err.message || 'The React application crashed while rendering a route.',
+    stack: err.stack || '',
     componentStack: info.componentStack || '',
   });
 };
