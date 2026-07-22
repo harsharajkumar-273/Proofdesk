@@ -1,6 +1,7 @@
 import './otel.js';
 import express, { Request, Response, NextFunction } from 'express';
 import compression from 'compression';
+import rateLimit from 'express-rate-limit';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -41,6 +42,14 @@ const MATHJAX_ASSET_DIR = path.resolve(__dirname, '../node_modules/mathjax-full/
 let processMonitoringAttached = false;
 
 // Middleware
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
+
 app.use(compression({
   threshold: 512,
 }));
