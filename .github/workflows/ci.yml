@@ -25,8 +25,8 @@ jobs:
         npm install --prefix backend
         
     - name: Lint
-      run: npm run lint || true --prefix frontend || echo "No lint script found or lint failed"
+      run: npm run lint --prefix frontend
       
     - name: Test
-      run: npm run test -- --passWithNoTests || true || true
+      run: npm test -- --passWithNoTests
 
