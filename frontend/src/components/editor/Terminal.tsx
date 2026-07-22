@@ -76,9 +76,10 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose }) => {
           setStatus('disconnected');
           term.write('\r\n\x1b[31m[Terminal Connection Error]\x1b[0m\r\n');
         };
-      } catch (err: any) {
+      } catch (err: unknown) {
         setStatus('disconnected');
-        term.write(`\r\n\x1b[31m[Failed to connect: ${err.message}]\x1b[0m\r\n`);
+        const msg = err instanceof Error ? err.message : String(err);
+        term.write(`\r\n\x1b[31m[Failed to connect: ${msg}]\x1b[0m\r\n`);
       }
     };
 
@@ -99,7 +100,7 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose }) => {
     const handleWindowResize = () => {
       try {
         fitAddon.fit();
-      } catch {}
+      } catch { /* ignore */ }
     };
 
     window.addEventListener('resize', handleWindowResize);
@@ -147,7 +148,7 @@ export const Terminal: React.FC<TerminalProps> = ({ onClose }) => {
         setStatus('disconnected');
         xtermRef.current?.write('\r\n\x1b[31m[Disconnected]\x1b[0m\r\n');
       };
-    } catch {}
+    } catch { /* ignore */ }
   };
 
   return (
