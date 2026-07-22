@@ -291,9 +291,30 @@ const pollMathPixStatus = async (pdfId: string, appId: string, appKey: string): 
 };
 
 /**
+ * Validates that the provided buffer is a legitimate PDF file via magic-number signature and MIME type
+ */
+export const validatePdfBuffer = (buffer: Buffer, mimeType?: string): void => {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 5) {
+    throw new Error('Invalid PDF file: File is empty or too small');
+  }
+
+  // Magic number check: PDF files start with %PDF- (0x25 0x50 0x44 0x46 0x2D)
+  const header = buffer.subarray(0, 5).toString('utf-8');
+  if (!header.startsWith('%PDF-')) {
+    throw new Error('Invalid PDF file signature: File does not contain valid PDF magic bytes');
+  }
+
+  if (mimeType && mimeType.toLowerCase() !== 'application/pdf') {
+    throw new Error(`Invalid file MIME type: expected application/pdf but received ${mimeType}`);
+  }
+};
+
+/**
  * Main Service API for PDF Import
  */
-export const importPdf = async (fileBuffer: Buffer, fileName: string): Promise<string> => {
+export const importPdf = async (fileBuffer: Buffer, fileName: string, mimeType?: string): Promise<string> => {
+  validatePdfBuffer(fileBuffer, mimeType);
+
   if (!isMathPixConfigured()) {
     logger.warn('MathPix credentials not configured. Returning mock PreTeXt XML.');
     // Simulate a tiny delay
