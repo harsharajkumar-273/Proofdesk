@@ -224,6 +224,7 @@ export const ReviewPage: React.FC = () => {
             src={previewSrc ?? ''}
             className="w-full h-full"
             style={{ border: 'none' }}
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
             title="Textbook preview"
           />
         </div>
