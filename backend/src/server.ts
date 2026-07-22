@@ -8,6 +8,7 @@ import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import buildExecutor from './services/buildExecutor.js';
 import { attachCollaborationServer } from './services/collaborationServer.js';
+import { attachTerminalServer } from './services/terminalServer.js';
 import localTestRepoService from './services/localTestRepoService.js';
 import { extractAccessToken } from './middleware/auth.js';
 import createAuthRouter from './routes/auth.routes.js';
@@ -128,11 +129,13 @@ app.get('/user', async (req: Request, res: Response): Promise<any> => {
 // ============= START SERVER =============
 let collaborationAttached = false;
 let collaborationServer: any = null;
+let terminalServer: any = null;
 let upgradeRoutingAttached = false;
 
 const ensureCollaborationServer = () => {
   if (collaborationAttached) return;
   collaborationServer = attachCollaborationServer();
+  terminalServer = attachTerminalServer();
   collaborationAttached = true;
 };
 
@@ -145,6 +148,13 @@ const ensureRealtimeUpgradeRouting = () => {
     if ((requestUrl.pathname === '/collab/ws' || requestUrl.pathname === '/collaboration/ws') && collaborationServer) {
       collaborationServer.handleUpgrade(request, socket, head, (connection: any) => {
         collaborationServer.emit('connection', connection, request);
+      });
+      return;
+    }
+
+    if ((requestUrl.pathname === '/terminal/ws' || requestUrl.pathname === '/terminal') && terminalServer) {
+      terminalServer.wss.handleUpgrade(request, socket, head, (connection: any) => {
+        terminalServer.wss.emit('connection', connection, request);
       });
       return;
     }
