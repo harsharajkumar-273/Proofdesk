@@ -1,10 +1,13 @@
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient as PrismaClientType } from '@prisma/client';
+import pkg from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+
+const { PrismaClient } = pkg;
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./dev.db';
 const isPostgres = databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
 
-let prisma: PrismaClient;
+let prisma: PrismaClientType;
 
 if (isPostgres) {
   prisma = new PrismaClient({
