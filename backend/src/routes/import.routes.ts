@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { requireAccessToken } from '../middleware/auth.js';
+import { importRateLimiter } from '../middleware/rateLimit.js';
 import {
   importPdf,
   importText,
@@ -23,18 +24,20 @@ const upload = multer({
 export default function createImportRouter(): Router {
   const router = Router();
 
-  // PDF conversion endpoint (multipart)
+  // PDF conversion endpoint (multipart) with rate limiting
   router.post(
     '/import/pdf',
     requireAccessToken,
+    importRateLimiter,
     upload.single('file'),
     importPdf
   );
 
-  // Raw LaTeX / Markdown text conversion endpoint
+  // Raw LaTeX / Markdown text conversion endpoint with rate limiting
   router.post(
     '/import/text',
     requireAccessToken,
+    importRateLimiter,
     importText
   );
 
