@@ -351,6 +351,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                     className="h-full w-full"
                     style={{ border: 'none', background: 'white' }}
                     title="Previous Build Preview"
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-downloads"
                   />
                 </div>
                 <div className="flex min-h-0 flex-col">
@@ -365,6 +366,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                     style={{ border: 'none' }}
                     title="Build Preview Diff Current"
                     data-testid="preview-frame"
+                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-downloads"
                   />
                 </div>
               </div>
@@ -376,6 +378,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 style={{ border: 'none' }}
                 title="Build Preview"
                 data-testid="preview-frame"
+                sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals allow-downloads"
               />
             ) : compiledOutput ? (
               <div className="h-full w-full overflow-auto" dangerouslySetInnerHTML={{ __html: compiledOutput }} />

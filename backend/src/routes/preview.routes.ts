@@ -144,6 +144,12 @@ export const createPreviewRouter = (): Router => {
     res.setHeader('Cache-Control', getPreviewCacheHeader(ext));
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
+    res.setHeader(
+      'Content-Security-Policy',
+      "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors 'self';"
+    );
     res.send(responseContent);
   });
 
