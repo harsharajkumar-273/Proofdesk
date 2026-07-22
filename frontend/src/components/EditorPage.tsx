@@ -1764,7 +1764,33 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
+  const disposeMonacoModelForTab = (filePath: string) => {
+    const monaco = monacoRef.current;
+    if (!monaco) return;
+
+    try {
+      const models = monaco.editor.getModels();
+      for (const model of models) {
+        const modelPath = model.uri.path;
+        if (
+          modelPath === filePath ||
+          modelPath === `/${filePath}` ||
+          model.uri.toString().endsWith(filePath)
+        ) {
+          model.dispose();
+        }
+      }
+    } catch (err) {
+      console.warn('[Monaco] Failed to dispose model for tab:', filePath, err);
+    }
+  };
+
   const closeTab = (tabId: string) => {
+    const tabToClose = tabs.find(t => t.id === tabId);
+    if (tabToClose) {
+      disposeMonacoModelForTab(tabToClose.path);
+    }
+
     const tabIndex = tabs.findIndex(t => t.id === tabId);
     const newTabs = tabs.filter(t => t.id !== tabId);
     setTabs(newTabs);
@@ -1786,6 +1812,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         return;
       }
     }
+    tabs.forEach(t => disposeMonacoModelForTab(t.path));
     setTabs([]);
     setActiveTabId(null);
   };
@@ -1793,6 +1820,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const closeOtherTabs = (tabId: string) => {
     const tabToKeep = tabs.find(t => t.id === tabId);
     if (tabToKeep) {
+      tabs.filter(t => t.id !== tabId).forEach(t => disposeMonacoModelForTab(t.path));
       setTabs([tabToKeep]);
       setActiveTabId(tabId);
     }
