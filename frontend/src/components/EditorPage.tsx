@@ -21,6 +21,7 @@ import {
   AlertCircle,
   UploadCloud,
   History,
+  Terminal as TerminalIcon,
 } from 'lucide-react';
 import { applyHandshakeTheme } from '../themes/handshakeTheme';
 import '../themes/handshakeeditor.css';
@@ -35,6 +36,7 @@ import EditorExplorerPane from './editor/EditorExplorerPane';
 import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
+import Terminal from './editor/Terminal';
 import EditorImportPane from './editor/EditorImportPane';
 import { EditorHistoryPane } from './editor/EditorHistoryPane';
 import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
@@ -335,6 +337,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
   const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
   const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history'>('explorer');
+  const [terminalOpen, setTerminalOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
@@ -2731,6 +2734,18 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             <History className="w-5 h-5" />
           </button>
 
+          <button
+            onClick={() => setTerminalOpen(!terminalOpen)}
+            className={`p-2.5 rounded-xl transition-all active:scale-90 ${
+              terminalOpen
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="Integrated Web Terminal"
+          >
+            <TerminalIcon className="w-5 h-5" />
+          </button>
+
         </nav>
 
         {/* Sidebar Container */}
@@ -2929,6 +2944,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           }}
           onClose={() => setStreamingBuildSessionId(null)}
         />
+      )}
+
+      {terminalOpen && (
+        <Terminal onClose={() => setTerminalOpen(false)} />
       )}
 
       <SaveReviewDialog
