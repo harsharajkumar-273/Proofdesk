@@ -1,4 +1,4 @@
-import React, { ErrorInfo } from 'react';
+import React, { type ErrorInfo } from 'react';
 import { ErrorBoundary } from 'react-error-boundary';
 import { PRODUCT_NAME } from '../utils/brand';
 import { reportClientMonitoringEvent } from '../utils/monitoring';
