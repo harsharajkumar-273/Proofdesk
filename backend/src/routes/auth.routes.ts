@@ -9,6 +9,11 @@ import {
   getFrontendUrl,
 } from '../services/githubIdentity.js';
 import {
+  buildGoogleAuthUrl,
+  exchangeGoogleCodeForTokens,
+  getAuthenticatedGoogleUser,
+} from '../services/googleIdentity.js';
+import {
   getMonitoringContextFromRequest,
   recordMonitoringEvent,
 } from '../services/monitoringService.js';
@@ -33,6 +38,22 @@ export const createAuthRouter = (): Router => {
     res.redirect(authUrl);
   });
 
+  router.get('/google', (req: Request, res: Response): any => {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!hasConfiguredValue(clientId) || !hasConfiguredValue(clientSecret) || !hasConfiguredValue(redirectUri)) {
+      console.warn('Google OAuth attempted without a complete runtime configuration.');
+      return res.redirect(`${getFrontendUrl()}?error=google_not_configured`);
+    }
+
+    const state = authSessionStore.createOAuthState(res);
+    const authUrl = buildGoogleAuthUrl({ clientId: clientId!, redirectUri: redirectUri!, state });
+    console.log('Redirecting to Google OAuth');
+    res.redirect(authUrl);
+  });
+
   router.get('/local-test', async (req: Request, res: Response): Promise<any> => {
     if (!localTestRepoService.isEnabled()) {
       return res.status(404).json({ error: 'Local test mode is disabled' });
@@ -46,6 +67,51 @@ export const createAuthRouter = (): Router => {
 
     authSessionStore.attachSessionCookie(res, session.id);
     res.redirect(getFrontendUrl());
+  });
+
+  router.get('/google/callback', async (req: Request, res: Response): Promise<any> => {
+    const { code, state } = req.query;
+
+    if (!code) {
+      return res.redirect(`${getFrontendUrl()}?error=no_code`);
+    }
+
+    const expectedState = authSessionStore.readOAuthState(req);
+    authSessionStore.clearOAuthState(res);
+
+    if (!state || !expectedState || state !== expectedState) {
+      return res.redirect(`${getFrontendUrl()}?error=auth_state_mismatch`);
+    }
+
+    try {
+      const tokens = await exchangeGoogleCodeForTokens({
+        clientId: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        code: String(code),
+        redirectUri: process.env.GOOGLE_REDIRECT_URI!,
+      });
+
+      const user = await getAuthenticatedGoogleUser(tokens.access_token);
+      await userRepository.upsertGoogleUser({
+        googleId: user.id,
+        login: user.login,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatar_url,
+      });
+
+      const session = await authSessionStore.createSession({
+        accessToken: tokens.access_token,
+        mode: 'google',
+        user,
+      });
+
+      authSessionStore.attachSessionCookie(res, session.id);
+      res.redirect(getFrontendUrl());
+    } catch (error: any) {
+      console.error('Google OAuth callback error:', error.response?.data || error.message);
+      res.redirect(`${getFrontendUrl()}?error=auth_failed`);
+    }
   });
 
   router.get('/github/callback', async (req: Request, res: Response): Promise<any> => {
@@ -134,6 +200,14 @@ export const createAuthRouter = (): Router => {
     if (!session?.accessToken) {
       authSessionStore.clearSessionCookie(res);
       return res.status(401).json({ authenticated: false });
+    }
+
+    if (session.mode === 'google' || session.mode === 'local-test') {
+      return res.json({
+        authenticated: true,
+        mode: session.mode,
+        user: session.user,
+      });
     }
 
     // GitHub / local-test sessions: validate against GitHub API

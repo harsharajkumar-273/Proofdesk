@@ -26,6 +26,30 @@ export class UserRepository {
     });
   }
 
+  async upsertGoogleUser(data: {
+    googleId: string;
+    login: string;
+    name?: string;
+    email?: string;
+    avatarUrl?: string;
+  }) {
+    return prisma.user.upsert({
+      where: { login: data.login },
+      create: {
+        githubId: `google_${data.googleId}`,
+        login: data.login,
+        name: data.name,
+        email: data.email,
+        avatarUrl: data.avatarUrl,
+      },
+      update: {
+        name: data.name,
+        email: data.email,
+        avatarUrl: data.avatarUrl,
+      },
+    });
+  }
+
   async getUserByLogin(login: string) {
     return prisma.user.findUnique({
       where: { login },

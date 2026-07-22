@@ -186,6 +186,13 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
                   >
                     <Github className="w-5 h-5" /> Sign in with GitHub
                   </a>
+                  <a
+                    data-testid="google-login-button"
+                    href={`${backendUrl}/auth/google`}
+                    className="flex items-center gap-2 px-6 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-semibold text-base hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all active:scale-[0.98]"
+                  >
+                    <span className="font-bold text-red-500">G</span> Sign in with Google
+                  </a>
                   <button
                     onClick={handleStartDemo}
                     className="flex items-center gap-2 px-6 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-semibold text-base hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all active:scale-[0.98]"
