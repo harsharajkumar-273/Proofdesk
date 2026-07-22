@@ -1,5 +1,6 @@
 import './otel.js';
 import express, { Request, Response, NextFunction } from 'express';
+import compression from 'compression';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -40,6 +41,9 @@ const MATHJAX_ASSET_DIR = path.resolve(__dirname, '../node_modules/mathjax-full/
 let processMonitoringAttached = false;
 
 // Middleware
+app.use(compression({
+  threshold: 512,
+}));
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
