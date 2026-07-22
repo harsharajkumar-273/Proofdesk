@@ -34,13 +34,16 @@ jobs:
           cache: npm
 
       - name: Install root dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund || true
+        run: npm ci
 
       - name: Install frontend dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund || true --prefix frontend
+        run: npm ci --prefix frontend
 
       - name: Install backend dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund || true --prefix backend
+        run: npm ci --prefix backend
+
+      - name: Generate Prisma Client
+        run: npx prisma generate --schema=backend/prisma/schema.prisma
 
       - name: Verify runtime configuration
         run: npm run verify:env
@@ -49,8 +52,7 @@ jobs:
         run: npm test
 
       - name: Lint frontend
-        run: npm run lint || true --prefix frontend
+        run: npm run lint --prefix frontend
 
       - name: Build frontend
         run: npm run build --prefix frontend
-

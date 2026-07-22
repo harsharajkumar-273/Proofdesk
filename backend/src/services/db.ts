@@ -1,15 +1,18 @@
-import { PrismaClient } from '@prisma/client';
+import type { PrismaClient as PrismaClientType } from '@prisma/client';
+import pkg from '@prisma/client';
 import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
+
+const PrismaClient = (pkg as any).PrismaClient || pkg;
 
 const databaseUrl = process.env.DATABASE_URL || 'file:./dev.db';
 const isPostgres = databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://');
 
-let prisma: PrismaClient;
+let prisma: PrismaClientType;
 
 /**
  * Configures SQLite Write-Ahead Logging (WAL) mode and busy_timeout
  */
-export const configureSqlitePragmas = async (client: PrismaClient): Promise<void> => {
+export const configureSqlitePragmas = async (client: PrismaClientType): Promise<void> => {
   try {
     await client.$executeRawUnsafe('PRAGMA journal_mode=WAL;');
     await client.$executeRawUnsafe('PRAGMA busy_timeout=5000;');
