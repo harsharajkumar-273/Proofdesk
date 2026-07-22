@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 export const disposeMonacoModelForTab = (
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   monacoInstance: any,
   filePath: string
 ): boolean => {
