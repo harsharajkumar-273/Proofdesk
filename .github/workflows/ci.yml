@@ -42,6 +42,10 @@ jobs:
       - name: Install backend dependencies
         run: npm ci --prefix backend
 
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        working-directory: backend
+
       - name: Verify runtime configuration
         run: npm run verify:env
 
