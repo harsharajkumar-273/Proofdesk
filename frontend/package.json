@@ -21,6 +21,7 @@
     "lucide-react": "^0.545.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-error-boundary": "^6.1.2",
     "react-router-dom": "^7.9.4",
     "y-monaco": "^0.1.6",
     "y-protocols": "^1.0.7",
