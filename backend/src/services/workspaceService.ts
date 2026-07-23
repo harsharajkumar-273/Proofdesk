@@ -280,3 +280,73 @@ export const searchWorkspaceFiles = async (sessionId: string, query: string): Pr
 
   return results;
 };
+
+export interface ReplaceResult {
+  success: boolean;
+  filesModified: number;
+  totalReplacements: number;
+  modifiedFiles: string[];
+}
+
+export const replaceWorkspaceFiles = async (
+  sessionId: string,
+  query: string,
+  replacement: string,
+  targetPaths?: string[],
+  matchCase: boolean = false
+): Promise<ReplaceResult> => {
+  if (!query) {
+    return { success: true, filesModified: 0, totalReplacements: 0, modifiedFiles: [] };
+  }
+
+  const session = getWorkspaceSession(sessionId);
+  const repoPath = path.resolve(session.repoPath);
+
+  const allFiles = await walkForSearch(repoPath, repoPath);
+  const targetSet = targetPaths && targetPaths.length > 0
+    ? new Set(targetPaths.map((p) => path.normalize(p)))
+    : null;
+
+  let filesModified = 0;
+  let totalReplacements = 0;
+  const modifiedFiles: string[] = [];
+
+  const flags = matchCase ? 'g' : 'gi';
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(escapedQuery, flags);
+
+  for (const filePath of allFiles) {
+    const relativePath = path.relative(repoPath, filePath).replace(/\\/g, '/');
+    if (targetSet && !targetSet.has(path.normalize(relativePath))) {
+      continue;
+    }
+
+    try {
+      const stat = await fs.stat(filePath);
+      if (stat.size > MAX_SEARCH_FILE_SIZE) continue;
+
+      const content = await fs.readFile(filePath, 'utf-8');
+      const matches = content.match(regex);
+
+      if (matches && matches.length > 0) {
+        const count = matches.length;
+        const newContent = content.replace(regex, replacement);
+
+        await updateWorkspaceFileContent(sessionId, relativePath, newContent);
+
+        filesModified++;
+        totalReplacements += count;
+        modifiedFiles.push(relativePath);
+      }
+    } catch (err) {
+      console.error(`[workspace] Failed replace on ${relativePath}:`, err);
+    }
+  }
+
+  return {
+    success: true,
+    filesModified,
+    totalReplacements,
+    modifiedFiles,
+  };
+};
