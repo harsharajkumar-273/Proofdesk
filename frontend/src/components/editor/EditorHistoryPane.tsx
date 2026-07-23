@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { 
   History, GitCommit, Calendar, User, 
-  FileCode, ArrowLeftRight,
-  Undo2, Loader2, X, AlertTriangle
+  FileCode, ArrowLeftRight, Save, RefreshCw, Sparkles,
+  Undo2, Loader2, X, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { requestJson } from '../../utils/editorApi';
 
@@ -38,23 +38,26 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
   const [diffError, setDiffError] = useState<string | null>(null);
   
   const [rollingBackFile, setRollingBackFile] = useState<string | null>(null);
+  const [savingDraft, setSavingDraft] = useState<boolean>(false);
+  const [draftMessage, setDraftMessage] = useState<string | null>(null);
 
   const fetchCommits = useCallback(async () => {
     if (!sessionId) return;
     setLoading(true);
     setError(null);
+
     try {
       const data = await requestJson<{ success: boolean; commits: CommitInfo[] }>(
         `${apiUrl}/workspace/${sessionId}/git/commits`,
         {},
-        'Failed to fetch workspace commit history'
+        'Failed to fetch commit history'
       );
       if (data.success) {
         setCommits(data.commits || []);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || 'Error loading revision history.');
+      setError(msg || 'Could not load git commits history.');
     } finally {
       setLoading(false);
     }
@@ -63,6 +66,35 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
   useEffect(() => {
     void fetchCommits();
   }, [fetchCommits]);
+
+  const handleSaveDraft = async () => {
+    if (!sessionId || savingDraft) return;
+    setSavingDraft(true);
+    setDraftMessage(null);
+
+    try {
+      const res = await requestJson<{ success: boolean; created: boolean; message: string }>(
+        `${apiUrl}/workspace/${sessionId}/drafts/auto-save`,
+        { method: 'POST' },
+        'Failed to save draft snapshot'
+      );
+
+      if (res.success) {
+        if (res.created) {
+          setDraftMessage('Draft snapshot saved successfully!');
+          await fetchCommits();
+        } else {
+          setDraftMessage(res.message || 'No uncommitted changes to draft.');
+        }
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDraftMessage(`Draft save failed: ${msg}`);
+    } finally {
+      setSavingDraft(false);
+      setTimeout(() => setDraftMessage(null), 4000);
+    }
+  };
 
   const toggleCommit = (hash: string) => {
     setExpandedCommit(prev => (prev === hash ? null : hash));
@@ -108,9 +140,7 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
       );
 
       if (data.success) {
-        // Close modal
         setSelectedFileDiff(null);
-        // Call callback to notify parent editor to update model
         await onRollbackSuccess(file);
       }
     } catch (err) {
@@ -135,11 +165,11 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
     return (
       <pre className="font-mono text-xs overflow-x-auto p-4 bg-zinc-950 text-zinc-300 leading-normal select-text">
         {lines.map((line, idx) => {
-          let lineClass = 'text-zinc-400'; // metadata header lines
+          let lineClass = 'text-zinc-400';
           if (line.startsWith('+') && !line.startsWith('+++')) {
             lineClass = 'bg-emerald-950/45 text-emerald-400 border-l-2 border-emerald-500 pl-1';
           } else if (line.startsWith('-') && !line.startsWith('---')) {
-            lineClass = 'bg-rose-950/45 text-rose-400 border-l-2 border-rose-505 pl-1';
+            lineClass = 'bg-rose-950/45 text-rose-400 border-l-2 border-rose-500 pl-1';
           } else if (line.startsWith('@@')) {
             lineClass = 'text-indigo-400 font-semibold bg-indigo-950/20';
           } else if (line.startsWith(' ') || !line.trim()) {
@@ -182,14 +212,48 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0 bg-zinc-50/50 dark:bg-zinc-800/10">
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0 bg-zinc-50/50 dark:bg-zinc-800/10">
         <div className="flex items-center gap-2">
           <History className="w-4 h-4 text-indigo-500" />
           <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
             Revision History
           </span>
+          <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            Auto-Save
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => void handleSaveDraft()}
+            disabled={savingDraft}
+            className="flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-md transition-all disabled:opacity-50"
+            title="Save draft commit now"
+          >
+            {savingDraft ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Save className="w-3 h-3" />
+            )}
+            Save Draft
+          </button>
+          <button
+            onClick={() => void fetchCommits()}
+            className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            title="Refresh commit history"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
+
+      {draftMessage && (
+        <div className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 border-b border-indigo-100 dark:border-indigo-900 text-[11px] font-medium text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5">
+          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+          <span className="truncate">{draftMessage}</span>
+        </div>
+      )}
 
       {/* Commit List Timeline */}
       <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-2">
@@ -201,12 +265,16 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
         ) : (
           commits.map((commit) => {
             const isExpanded = expandedCommit === commit.hash;
+            const isDraft = commit.subject.toLowerCase().includes('draft') || commit.author.toLowerCase().includes('draft');
+
             return (
               <div 
                 key={commit.hash} 
                 className={`border rounded-xl transition-all duration-200 ${
                   isExpanded 
                     ? 'border-indigo-200 bg-indigo-50/10 dark:border-indigo-900/50 dark:bg-indigo-950/5' 
+                    : isDraft
+                    ? 'border-amber-200/80 bg-amber-50/20 dark:border-amber-900/30 dark:bg-amber-950/10 hover:border-amber-300 dark:hover:border-amber-800'
                     : 'border-zinc-250 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-750'
                 }`}
               >
@@ -216,7 +284,13 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
                   className="w-full text-left p-3 flex flex-col gap-1.5 focus:outline-none"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <span className="text-xs font-bold text-zinc-800 dark:text-zinc-250 leading-snug line-clamp-2">
+                    <span className="text-xs font-bold text-zinc-800 dark:text-zinc-250 leading-snug line-clamp-2 flex items-center gap-1.5">
+                      {isDraft && (
+                        <span className="px-1.5 py-0.5 text-[9px] font-extrabold uppercase rounded bg-amber-100 text-amber-700 dark:bg-amber-950/80 dark:text-amber-300 flex-shrink-0 flex items-center gap-0.5">
+                          <Sparkles className="w-2.5 h-2.5" />
+                          Draft
+                        </span>
+                      )}
                       {commit.subject}
                     </span>
                     <span className="text-[10px] font-mono font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded flex-shrink-0">

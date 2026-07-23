@@ -573,3 +573,69 @@ export const rollbackWorkspaceFileToCommit = async (
   
   return getWorkspaceGitStatus(sessionId);
 };
+
+export interface DraftCommitResult {
+  created: boolean;
+  commitSha?: string;
+  message: string;
+  timestamp: string;
+}
+
+const draftStatuses = new Map<string, { lastAutoSave: string; lastCommitSha?: string }>();
+
+export const createWorkspaceDraftCommit = async (
+  sessionId: string,
+  customMessage?: string
+): Promise<DraftCommitResult> => {
+  const session = await ensureWorkspaceGitReady(sessionId);
+  const cwd = path.resolve(session.repoPath);
+
+  const statusRes = await runGit(cwd, ['status', '--porcelain'], { allowFailure: true });
+  if (!statusRes.stdout.trim()) {
+    return {
+      created: false,
+      message: 'No uncommitted changes in workspace to draft',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  await runGit(cwd, ['add', '-A']);
+
+  const timestamp = new Date().toISOString();
+  const commitMsg = customMessage || `draft(auto-save): Auto-saved workspace snapshot at ${timestamp}`;
+
+  const commitRes = await runGit(
+    cwd,
+    ['commit', '-m', commitMsg, '--author=Proofdesk Draft Bot <auto-save@proofdesk.local>'],
+    { allowFailure: true }
+  );
+
+  if (commitRes.code !== 0 && !commitRes.stdout.includes('nothing to commit')) {
+    throw new Error(`Failed to create draft commit: ${commitRes.stderr || commitRes.stdout}`);
+  }
+
+  const shaRes = await runGit(cwd, ['rev-parse', 'HEAD'], { allowFailure: true });
+  const commitSha = shaRes.stdout.trim();
+
+  draftStatuses.set(sessionId, {
+    lastAutoSave: timestamp,
+    lastCommitSha: commitSha,
+  });
+
+  return {
+    created: true,
+    commitSha,
+    message: commitMsg,
+    timestamp,
+  };
+};
+
+export const getWorkspaceDraftStatus = (sessionId: string) => {
+  return (
+    draftStatuses.get(sessionId) || {
+      lastAutoSave: null,
+      lastCommitSha: null,
+    }
+  );
+};
+

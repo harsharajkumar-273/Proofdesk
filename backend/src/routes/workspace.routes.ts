@@ -24,6 +24,8 @@ import {
   getGitCommits,
   getGitCommitFileDiff,
   rollbackFileToCommit,
+  autoSaveDraft,
+  getDraftStatus,
 } from '../controllers/workspace.controller.js';
 
 export default function createWorkspaceRouter(): Router {
@@ -65,6 +67,10 @@ export default function createWorkspaceRouter(): Router {
   router.get('/workspace/:sessionId/git/commits', requireAccessToken, checkWorkspaceOwner, getGitCommits);
   router.get('/workspace/:sessionId/git/commits/:commitSha/diff', requireAccessToken, checkWorkspaceOwner, getGitCommitFileDiff);
   router.post('/workspace/:sessionId/git/commits/:commitSha/rollback', requireAccessToken, checkWorkspaceOwner, rollbackFileToCommit);
+
+  // Draft auto-save operations
+  router.post('/workspace/:sessionId/drafts/auto-save', requireAccessToken, checkWorkspaceOwner, autoSaveDraft);
+  router.get('/workspace/:sessionId/drafts/status', requireAccessToken, checkWorkspaceOwner, getDraftStatus);
 
   return router;
 }

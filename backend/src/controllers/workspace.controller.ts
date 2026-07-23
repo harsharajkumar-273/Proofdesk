@@ -26,6 +26,8 @@ import {
   getWorkspaceCommitHistory,
   getWorkspaceFileDiffAtCommit,
   rollbackWorkspaceFileToCommit,
+  createWorkspaceDraftCommit,
+  getWorkspaceDraftStatus,
 } from '../services/gitWorkspaceService.js';
 
 export const getDemoWorkspace = (req: Request, res: Response): any => {
@@ -307,3 +309,24 @@ export const rollbackFileToCommit = async (req: Request<any>, res: Response): Pr
     res.status(400).json({ error: error.message });
   }
 };
+
+export const autoSaveDraft = async (req: Request<any>, res: Response): Promise<any> => {
+  try {
+    const result = await createWorkspaceDraftCommit(req.params.sessionId, req.body?.message);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    console.error('Workspace draft auto-save error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+export const getDraftStatus = async (req: Request<any>, res: Response): Promise<any> => {
+  try {
+    const status = getWorkspaceDraftStatus(req.params.sessionId);
+    res.json({ success: true, ...status });
+  } catch (error: any) {
+    console.error('Workspace draft status error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
