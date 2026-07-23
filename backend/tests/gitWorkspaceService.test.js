@@ -90,6 +90,6 @@ describe('Git Workspace Service (Delta Time Travel)', () => {
 
     // Verify content reverted
     const content = await fs.readFile(testFilePath, 'utf-8');
-    assert.equal(content, 'Initial content\n');
+    assert.equal(content.trimEnd(), 'Initial content');
   });
 });

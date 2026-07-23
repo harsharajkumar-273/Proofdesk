@@ -20,6 +20,7 @@ import {
   UploadCloud,
   History,
   Terminal as TerminalIcon,
+  ListTree,
 } from 'lucide-react';
 import { applyHandshakeTheme } from '../themes/handshakeTheme';
 import '../themes/handshakeeditor.css';
@@ -31,6 +32,7 @@ import EditorStatusBar from './editor/EditorStatusBar';
 import EditorTabBar from './editor/EditorTabBar';
 import WorkspaceNoticeBanner from './editor/WorkspaceNoticeBanner';
 import EditorExplorerPane from './editor/EditorExplorerPane';
+import EditorOutlinePane from './editor/EditorOutlinePane';
 import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
@@ -334,7 +336,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
   const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
-  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history'>('explorer');
+  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'outline' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history'>('explorer');
   const [terminalOpen, setTerminalOpen] = useState<boolean>(false);
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
@@ -2660,6 +2662,24 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           >
             <FolderTree className="w-5 h-5" />
           </button>
+
+          <button
+            onClick={() => {
+              if (activityBarTab === 'outline' && sidebarOpen) setSidebarOpen(false);
+              else {
+                setActivityBarTab('outline');
+                setSidebarOpen(true);
+              }
+            }}
+            className={`p-2.5 rounded-xl transition-all active:scale-90 ${
+              activityBarTab === 'outline' && sidebarOpen
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="PreTeXt Document Outline"
+          >
+            <ListTree className="w-5 h-5" />
+          </button>
           
           <button
             onClick={() => {
@@ -2824,6 +2844,19 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                   onResolveReviewThread={(threadId) => updateReviewThreadState(threadId, 'resolved')}
                   onSaveReviewMarker={saveReviewMarker}
                   onToggleFolder={toggleFolder}
+                />
+              )}
+
+              {activityBarTab === 'outline' && (
+                <EditorOutlinePane
+                  activeFilePath={activeTab?.path ?? null}
+                  fileContent={activeTab?.content ?? ''}
+                  onOpenFile={openFileInTab}
+                  onRefresh={() => {
+                    if (repo) {
+                      return fetchFileTree(repo).then(() => {});
+                    }
+                  }}
                 />
               )}
               

@@ -425,7 +425,9 @@ describe('active backend routes', () => {
   });
 
   it('rewrites nested preview asset paths for knowls and shared CSS', async () => {
-    const knowlResponse = await request(app).get(`/preview/${previewSessionId}/knowl/sample.html`);
+    const knowlResponse = await request(app)
+      .get(`/preview/${previewSessionId}/knowl/sample.html`)
+      .set('Accept-Encoding', 'identity');
     assert.equal(knowlResponse.status, 200);
     assert.match(knowlResponse.text, /src="\/preview\/aaaaaaaaaaaaaaaa\/images\/important\.svg"/);
     assert.match(knowlResponse.text, /href="\/preview\/aaaaaaaaaaaaaaaa\/figure-images\/sample\.png"/);
