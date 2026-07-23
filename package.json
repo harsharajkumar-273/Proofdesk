@@ -21,7 +21,8 @@
     "verify:env:strict": "npm run verify:env:strict --prefix backend",
     "verify:deploy": "npm run verify:env && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity",
     "verify:deploy:strict": "npm run verify:env:strict && npm run test:frontend && npm run test:backend && npm run build --prefix frontend && npm run test:e2e && npm run test:e2e:sanity",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "prepare": "husky"
   },
   "keywords": [],
   "author": "",
@@ -38,6 +39,11 @@
     "@playwright/test": "^1.59.1",
     "baseline-browser-mapping": "^2.9.19",
     "concurrently": "^9.2.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.1.1",
     "prettier": "^3.9.6"
+  },
+  "lint-staged": {
+    "*.{js,ts,tsx,css,md}": "prettier --write"
   }
 }
