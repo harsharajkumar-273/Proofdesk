@@ -20,7 +20,8 @@ export const extractAccessToken = async (req: Request): Promise<string | null> =
   const token = extractBearerToken(req);
   if (token) {
     req.accessToken = token;
-    req.authSession = null;
+    const bearerSession = await authSessionStore.getSessionByAccessToken(token);
+    req.authSession = bearerSession || null;
   }
 
   return token;
@@ -38,12 +39,17 @@ export const requireAccessToken = async (req: Request, res: Response, next: Next
 
 export const checkWorkspaceOwner = (req: Request, res: Response, next: NextFunction): any => {
   const { sessionId } = req.params;
-  const login = req.authSession?.user?.login;
-  if (!login || !sessionId) return next();
+  if (!sessionId) return next();
+
   const session = buildExecutor.getSession(sessionId as string);
   if (!session) return next();
-  if (session.creatorLogin && session.creatorLogin !== login) {
-    return res.status(403).json({ error: 'Access denied' });
+
+  if (session.creatorLogin) {
+    const login = req.authSession?.user?.login;
+    if (!login || session.creatorLogin !== login) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
   }
+
   next();
 };
