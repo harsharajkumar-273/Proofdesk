@@ -1,10 +1,9 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { loader } from '@monaco-editor/react';
 import {
   getSelectedRepo,
   setSelectedRepo,
-  getTeamSession,
   setTeamSession as saveTeamSessionToStorage,
 } from '../utils/workspaceStorage';
 import * as monacoRuntime from 'monaco-editor/esm/vs/editor/editor.api';
@@ -16,8 +15,7 @@ import TypeScriptWorker from 'monaco-editor/esm/vs/language/typescript/ts.worker
 import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import {
-  GitBranch, Search, FolderTree,
-  RefreshCw,
+  GitBranch, Search,  FolderTree,
   AlertCircle,
   UploadCloud,
   History,
@@ -284,7 +282,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
 
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [, setLastSavedAt] = useState<Date | null>(null);
   const [collaborationEnabled, setCollaborationEnabled] = useState<boolean>(Boolean(initialStoredTeamSessionRef.current));
   const [collaborationStatus, setCollaborationStatus] = useState<string>('');
   const [collaborators, setCollaborators] = useState<CollaborationParticipant[]>([]);
