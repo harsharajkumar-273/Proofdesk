@@ -216,6 +216,28 @@ function checkForbiddenNesting(
 }
 
 /**
+ * Emits the accessibility warning for any <image> entries about to leave the
+ * stack without a description. Used by both the normal close path and the
+ * error-recovery path, so a malformed document doesn't silently swallow the
+ * warning — a missing description is a separate problem from a mismatched tag.
+ */
+function warnUndescribedImages(
+  entries: StackEntry[],
+  content: string,
+  issues: PtxValidationIssue[],
+): void {
+  for (const entry of entries) {
+    if (entry.name === 'image' && !entry.hasDescription) {
+      issues.push(makeIssue(
+        content, entry.offset, entry.tagLength,
+        MISSING_DESCRIPTION_MESSAGE,
+        'warning',
+      ));
+    }
+  }
+}
+
+/**
  * Marks the enclosing <image> when a description element opens as its direct
  * child. Direct-child only: a <description> nested deeper (for example inside a
  * sibling <figure>) does not describe this image.
@@ -267,14 +289,7 @@ export const validatePtxBuffer = (content: string, filename: string): PtxValidat
         'error',
       ));
     } else if (matchIdx === stack.length - 1) {
-      const closing = stack[matchIdx];
-      if (closing.name === 'image' && !closing.hasDescription) {
-        issues.push(makeIssue(
-          content, closing.offset, closing.tagLength,
-          MISSING_DESCRIPTION_MESSAGE,
-          'warning',
-        ));
-      }
+      warnUndescribedImages([stack[matchIdx]], content, issues);
       stack.pop();
     } else {
       // Intervening unclosed element
@@ -284,6 +299,9 @@ export const validatePtxBuffer = (content: string, filename: string): PtxValidat
         `<${unclosed.name}> is not closed before </${token.name}>`,
         'error',
       ));
+      // Everything from the matching open upward is discarded by the recovery
+      // below, so warn about those images before they disappear.
+      warnUndescribedImages(stack.slice(matchIdx), content, issues);
       // Recover by closing everything up to and including the matching open
       stack.splice(matchIdx);
     }

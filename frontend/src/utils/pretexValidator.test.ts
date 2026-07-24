@@ -182,10 +182,36 @@ describe('validatePtxBuffer — image accessibility (missing description)', () =
     expect(validatePtxBuffer('<image source="g.png"/>', 'notes.md')).toHaveLength(0);
   });
 
-  it('points the squiggle at the image tag itself', () => {
-    const xml = '<figure>\n  <image source="graph.png"/>\n</figure>';
-    const issue = warnings(xml)[0];
-    expect(issue.startLineNumber).toBe(2);
-    expect(issue.endColumn).toBeGreaterThan(issue.startColumn);
+  it('points the squiggle at the opening image tag, for both image forms', () => {
+    for (const xml of [
+      '<figure>\n  <image source="graph.png"/>\n</figure>',
+      '<figure>\n  <image source="graph.png"></image>\n</figure>',
+    ]) {
+      const issue = warnings(xml)[0];
+      expect(issue.startLineNumber).toBe(2);
+      expect(issue.startColumn).toBe(3);
+      expect(issue.endColumn).toBeGreaterThan(issue.startColumn);
+    }
+  });
+
+  it('still warns when the image is closed via error recovery', () => {
+    // </image> arrives while <p> is still open, so the validator unwinds the
+    // stack. The structural error and the accessibility warning are separate
+    // problems and both should be reported.
+    const xml = '<image source="g.png"><p>text</image>';
+    const all = validatePtxBuffer(xml, 'chapter.xml');
+    expect(warnings(xml)).toHaveLength(1);
+    expect(all.some((i) => /is not closed before/.test(i.message))).toBe(true);
+  });
+
+  it('does not warn during recovery when the image was described', () => {
+    const xml = '<image source="g.png"><description>d</description><p>text</image>';
+    expect(warnings(xml)).toHaveLength(0);
+  });
+
+  it('warns for every undescribed image discarded by one recovery', () => {
+    // Both images are removed by the same splice; neither should be lost.
+    const xml = '<figure><image source="a.png"><image source="b.png"><p>x</figure>';
+    expect(warnings(xml).length).toBeGreaterThanOrEqual(2);
   });
 });
