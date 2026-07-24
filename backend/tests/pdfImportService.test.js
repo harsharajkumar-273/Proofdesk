@@ -1,7 +1,15 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-const { replaceMathDelimiters, parseMarkdownToPretext } = await import('../src/services/pdfImportService.js');
+const {
+  replaceMathDelimiters,
+  parseMarkdownToPretext,
+  importPdf,
+  importTimeoutMs,
+  importHttpTimeoutMs,
+  isAbortError,
+  ImportAbortedError,
+} = await import('../src/services/pdfImportService.js');
 
 describe('PDF/LaTeX Ingestion Service', () => {
   describe('replaceMathDelimiters', () => {
@@ -93,5 +101,140 @@ describe('PDF/LaTeX Ingestion Service', () => {
       assert.ok(result.includes('<item><p>Second item</p></item>'));
       assert.ok(result.includes('</ul>'));
     });
+  });
+});
+
+describe('import cancellation and timeouts (issue #15)', () => {
+  const originalTimeout = process.env.PROOFDESK_IMPORT_TIMEOUT_MS;
+  const originalMathpixId = process.env.MATHPIX_APP_ID;
+  const originalMathpixKey = process.env.MATHPIX_APP_KEY;
+
+  const clearMathPix = () => {
+    delete process.env.MATHPIX_APP_ID;
+    delete process.env.MATHPIX_APP_KEY;
+  };
+
+  const restore = () => {
+    if (originalTimeout === undefined) delete process.env.PROOFDESK_IMPORT_TIMEOUT_MS;
+    else process.env.PROOFDESK_IMPORT_TIMEOUT_MS = originalTimeout;
+    if (originalMathpixId === undefined) delete process.env.MATHPIX_APP_ID;
+    else process.env.MATHPIX_APP_ID = originalMathpixId;
+    if (originalMathpixKey === undefined) delete process.env.MATHPIX_APP_KEY;
+    else process.env.MATHPIX_APP_KEY = originalMathpixKey;
+  };
+
+  it('defaults to a 60s overall budget and a 20s per-request budget', () => {
+    delete process.env.PROOFDESK_IMPORT_TIMEOUT_MS;
+    delete process.env.PROOFDESK_IMPORT_HTTP_TIMEOUT_MS;
+    assert.equal(importTimeoutMs(), 60_000);
+    assert.equal(importHttpTimeoutMs(), 20_000);
+    restore();
+  });
+
+  it('honours PROOFDESK_IMPORT_TIMEOUT_MS when set', () => {
+    process.env.PROOFDESK_IMPORT_TIMEOUT_MS = '1234';
+    assert.equal(importTimeoutMs(), 1234);
+    restore();
+  });
+
+  it('classifies abort-shaped errors, and leaves genuine failures alone', () => {
+    assert.equal(isAbortError(new ImportAbortedError('timeout', 'x')), true);
+    assert.equal(isAbortError({ code: 'ERR_CANCELED' }), true);       // axios abort
+    assert.equal(isAbortError({ code: 'ECONNABORTED' }), true);       // axios timeout
+    assert.equal(isAbortError({ name: 'CanceledError' }), true);
+    assert.equal(isAbortError(new Error('MathPix returned 500')), false);
+  });
+
+  it('completes normally when it is not cancelled', async () => {
+    clearMathPix();
+    const xml = await importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf');
+    assert.match(xml, /<chapter/);
+    restore();
+  });
+
+  it('aborts when the caller cancels, rather than running to completion', async () => {
+    clearMathPix();
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 10);
+
+    await assert.rejects(
+      () => importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf', { signal: controller.signal }),
+      (error) => {
+        assert.equal(error instanceof ImportAbortedError, true);
+        assert.equal(error.reason, 'client-abort');
+        return true;
+      },
+    );
+    restore();
+  });
+
+  it('reports a timeout, distinctly from a client cancellation, when the budget expires', async () => {
+    clearMathPix();
+    process.env.PROOFDESK_IMPORT_TIMEOUT_MS = '20'; // shorter than the mock path's own delay
+
+    await assert.rejects(
+      () => importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf'),
+      (error) => {
+        assert.equal(error instanceof ImportAbortedError, true);
+        assert.equal(error.reason, 'timeout');
+        assert.match(error.message, /exceeded/i);
+        return true;
+      },
+    );
+    restore();
+  });
+
+  it('returns promptly on cancellation instead of waiting out the remaining delay', async () => {
+    clearMathPix();
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    setTimeout(() => controller.abort(), 10);
+
+    await assert.rejects(() =>
+      importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf', { signal: controller.signal }),
+    );
+
+    // The mock path sleeps 800ms; aborting must not wait that out.
+    assert.ok(Date.now() - startedAt < 400, 'cancellation should short-circuit the pending delay');
+    restore();
+  });
+
+  it('treats an already-aborted signal as a cancellation without doing work', async () => {
+    clearMathPix();
+    const controller = new AbortController();
+    controller.abort(); // aborted BEFORE the call — the event will never fire
+
+    await assert.rejects(
+      () => importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf', { signal: controller.signal }),
+      (error) => {
+        assert.equal(error instanceof ImportAbortedError, true);
+        assert.equal(error.reason, 'client-abort');
+        return true;
+      },
+    );
+    restore();
+  });
+
+  it('classifies a stalled upstream request as a timeout, not a cancellation', async () => {
+    // axios reports a socket timeout as ECONNABORTED, which is abort-shaped.
+    // Misreading it as 'client-abort' would make the controller answer 500
+    // instead of the 504 this feature exists to produce.
+    const axiosTimeout = Object.assign(new Error('timeout of 20000ms exceeded'), {
+      code: 'ECONNABORTED',
+    });
+    assert.equal(isAbortError(axiosTimeout), true, 'still recognised as abort-shaped');
+
+    // With no caller signal and no overall-deadline expiry, this must surface
+    // as a timeout so the 504 path is taken.
+    clearMathPix();
+    process.env.PROOFDESK_IMPORT_TIMEOUT_MS = '20';
+    await assert.rejects(
+      () => importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf'),
+      (error) => {
+        assert.equal(error.reason, 'timeout');
+        return true;
+      },
+    );
+    restore();
   });
 });

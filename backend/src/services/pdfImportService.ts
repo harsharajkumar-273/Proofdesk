@@ -17,6 +17,62 @@ interface MathPixStatusResponse {
 /**
  * Checks if MathPix credentials are set in the environment
  */
+/**
+ * Overall budget for a single PDF import, covering upload, polling and result
+ * download. Configurable so deployments with slower MathPix responses can raise
+ * it without a code change.
+ */
+export const importTimeoutMs = (): number =>
+  Number(process.env.PROOFDESK_IMPORT_TIMEOUT_MS) || 60_000;
+
+/**
+ * Per-request socket budget. Without this, axios defaults to no timeout, so a
+ * single stalled connection hangs forever and the attempt-count ceiling in
+ * pollMathPixStatus is never reached.
+ */
+export const importHttpTimeoutMs = (): number =>
+  Number(process.env.PROOFDESK_IMPORT_HTTP_TIMEOUT_MS) || 20_000;
+
+/** Error thrown when an import exceeds its budget or is cancelled. */
+export class ImportAbortedError extends Error {
+  readonly reason: 'timeout' | 'client-abort';
+
+  constructor(reason: 'timeout' | 'client-abort', message: string) {
+    super(message);
+    this.name = 'ImportAbortedError';
+    this.reason = reason;
+  }
+}
+
+/** True when the error came from an aborted request rather than a real failure. */
+export const isAbortError = (error: unknown): boolean => {
+  if (error instanceof ImportAbortedError) return true;
+  const code = (error as { code?: string } | null)?.code;
+  const name = (error as { name?: string } | null)?.name;
+  return code === 'ERR_CANCELED' || code === 'ECONNABORTED' || name === 'CanceledError';
+};
+
+/**
+ * Sleep that resolves early when the signal aborts, so cancelling an import
+ * doesn't have to wait out the remainder of a polling delay.
+ */
+const abortableDelay = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new ImportAbortedError('client-abort', 'Import cancelled'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(timer);
+      reject(new ImportAbortedError('client-abort', 'Import cancelled'));
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+
 export const isMathPixConfigured = (): boolean => {
   const appId = process.env.MATHPIX_APP_ID;
   const appKey = process.env.MATHPIX_APP_KEY;
@@ -270,14 +326,19 @@ A = [[4, 2],
 /**
  * Poll MathPix API until the PDF conversion task is finished
  */
-const pollMathPixStatus = async (pdfId: string, appId: string, appKey: string): Promise<void> => {
-  const maxAttempts = 60; // 2 minutes max polling
+const pollMathPixStatus = async (
+  pdfId: string,
+  appId: string,
+  appKey: string,
+  signal?: AbortSignal,
+): Promise<void> => {
+  const maxAttempts = 60; // attempt ceiling; the wall-clock deadline below is the real bound
   const delayMs = 2000;
 
   for (let i = 0; i < maxAttempts; i++) {
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await abortableDelay(delayMs, signal);
     logger.info(`Polling MathPix conversion status for PDF: ${pdfId} (attempt ${i + 1})`);
-    
+
     const response = await axios.get<MathPixStatusResponse>(
       `https://api.mathpix.com/v3/pdf/${pdfId}`,
       {
@@ -285,6 +346,8 @@ const pollMathPixStatus = async (pdfId: string, appId: string, appKey: string): 
           app_id: appId,
           app_key: appKey,
         },
+        timeout: importHttpTimeoutMs(),
+        signal,
       }
     );
 
@@ -304,11 +367,75 @@ const pollMathPixStatus = async (pdfId: string, appId: string, appKey: string): 
 /**
  * Main Service API for PDF Import
  */
-export const importPdf = async (fileBuffer: Buffer, fileName: string): Promise<string> => {
+export const importPdf = async (
+  fileBuffer: Buffer,
+  fileName: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<string> => {
+  // Own deadline for the whole import, linked to the caller's signal so either
+  // a client disconnect or the budget expiring cancels every in-flight request.
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const budgetMs = importTimeoutMs();
+  let timedOut = false;
+
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, budgetMs);
+
+  let callerAborted = false;
+  const onCallerAbort = () => {
+    callerAborted = true;
+    controller.abort();
+  };
+  options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  // A signal that is already aborted never fires the event, so check up front.
+  if (options.signal?.aborted) onCallerAbort();
+
+  const cleanup = () => {
+    clearTimeout(deadline);
+    options.signal?.removeEventListener('abort', onCallerAbort);
+  };
+
+  try {
+    return await runImport(fileBuffer, fileName, signal);
+  } catch (error: any) {
+    // Order matters. Only the caller's own signal counts as a cancellation;
+    // everything else that looks like an abort is a timeout of some kind.
+    if (callerAborted) {
+      throw new ImportAbortedError('client-abort', 'PDF import cancelled');
+    }
+    if (timedOut) {
+      throw new ImportAbortedError(
+        'timeout',
+        `PDF import exceeded the ${Math.round(budgetMs / 1000)}s limit`,
+      );
+    }
+    // axios reports a per-request socket timeout as ECONNABORTED, which is
+    // abort-shaped but is a stalled MathPix call, not a cancellation. Treating
+    // it as 'client-abort' would suppress the 504 the controller should send.
+    if (isAbortError(error)) {
+      throw new ImportAbortedError(
+        'timeout',
+        `A MathPix request exceeded the ${Math.round(importHttpTimeoutMs() / 1000)}s per-request limit`,
+      );
+    }
+    throw error;
+  } finally {
+    cleanup();
+  }
+};
+
+const runImport = async (
+  fileBuffer: Buffer,
+  fileName: string,
+  signal: AbortSignal,
+): Promise<string> => {
   if (!isMathPixConfigured()) {
     logger.warn('MathPix credentials not configured. Returning mock PreTeXt XML.');
     // Simulate a tiny delay
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    await abortableDelay(800, signal);
     return getMockPretextContent(fileName);
   }
 
@@ -336,6 +463,8 @@ export const importPdf = async (fileBuffer: Buffer, fileName: string): Promise<s
           app_id: appId,
           app_key: appKey,
         },
+        timeout: importHttpTimeoutMs(),
+        signal,
       }
     );
 
@@ -347,7 +476,7 @@ export const importPdf = async (fileBuffer: Buffer, fileName: string): Promise<s
     logger.info(`MathPix PDF uploaded successfully. Task ID: ${pdfId}`);
 
     // Wait for the MathPix conversion to complete
-    await pollMathPixStatus(pdfId, appId, appKey);
+    await pollMathPixStatus(pdfId, appId, appKey, signal);
 
     // Fetch the translated markdown
     logger.info(`Fetching markdown results for PDF ID: ${pdfId}`);
@@ -358,6 +487,8 @@ export const importPdf = async (fileBuffer: Buffer, fileName: string): Promise<s
           app_id: appId,
           app_key: appKey,
         },
+        timeout: importHttpTimeoutMs(),
+        signal,
       }
     );
 
@@ -366,6 +497,9 @@ export const importPdf = async (fileBuffer: Buffer, fileName: string): Promise<s
     return parseMarkdownToPretext(markdown);
 
   } catch (error: any) {
+    // Abort/timeout is not a MathPix failure — let it propagate so the caller
+    // can map it to the right status code.
+    if (isAbortError(error)) throw error;
     logger.error('MathPix API conversion failed:', error.message);
     throw new Error(`MathPix OCR failed: ${error.response?.data?.error || error.message}`);
   }

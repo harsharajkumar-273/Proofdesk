@@ -11,18 +11,61 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
   const fileName = req.file.originalname || 'uploaded.pdf';
   const fileBuffer = req.file.buffer;
 
+  // Cancel the MathPix work if the client goes away, instead of letting it run
+  // to completion against a socket nobody is listening on.
+  //
+  // This listens on the *response*, not the request: since Node 16 the request
+  // stream emits 'close' as soon as its body has been consumed — which multer
+  // does before this handler even runs — so req.on('close') fires on every
+  // healthy request and would cancel imports that are working fine.
+  // res 'close' with writableFinished still false means the socket went away
+  // before we finished replying, which is an actual disconnect.
+  const controller = new AbortController();
+  let clientAborted = false;
+  const onClientClose = () => {
+    if (res.writableFinished) return;
+    clientAborted = true;
+    logger.info(`Client disconnected during PDF import of ${fileName}; cancelling`);
+    controller.abort();
+  };
+  res.on('close', onClientClose);
+
   try {
     logger.info(`Received PDF import request for file: ${fileName}`);
-    const pretextXml = await pdfImportService.importPdf(fileBuffer, fileName);
-    
+    const pretextXml = await pdfImportService.importPdf(fileBuffer, fileName, {
+      signal: controller.signal,
+    });
+
+    if (res.writableEnded) return;
     res.json({
       success: true,
       pretext: pretextXml,
       mathPixConfigured: pdfImportService.isMathPixConfigured(),
     });
   } catch (error: any) {
+    // The client hung up: nothing to respond to, and this is not a server fault.
+    if (clientAborted || res.writableEnded) {
+      return;
+    }
+
+    if (error instanceof pdfImportService.ImportAbortedError && error.reason === 'timeout') {
+      logger.warn(`PDF import timed out for file ${fileName}`);
+      await recordMonitoringEvent({
+        source: 'backend',
+        level: 'warn',
+        category: 'pdf_import_timeout',
+        message: error.message,
+        metadata: { fileName },
+      });
+      return res.status(504).json({
+        success: false,
+        error: 'Conversion timed out',
+        details: error.message,
+      });
+    }
+
     logger.error(`PDF Import controller failed for file ${fileName}:`, error);
-    
+
     await recordMonitoringEvent({
       source: 'backend',
       level: 'error',
@@ -39,6 +82,8 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
       error: 'Conversion failed',
       details: error.message,
     });
+  } finally {
+    res.removeListener('close', onClientClose);
   }
 };
 
