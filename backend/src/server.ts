@@ -30,6 +30,7 @@ import { logger, requestContainer } from './utils/logger.js';
 import { metricsMiddleware } from './middleware/metrics.js';
 import { tracingMiddleware } from './middleware/tracing.js';
 import { startBuildWorker } from './services/buildQueue.js';
+import { startDraftAutoSaveWorker } from './services/draftAutoSaveService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -290,6 +291,7 @@ export const startServer = () => {
   ensureCollaborationServer();
   ensureRealtimeUpgradeRouting();
   startBuildWorker();
+  startDraftAutoSaveWorker();
 
   // Start the periodic cleanup task (every hour) to prevent disk exhaustion
   buildExecutor.startPeriodicCleanup();
