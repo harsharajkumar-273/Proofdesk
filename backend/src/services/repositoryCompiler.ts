@@ -10,6 +10,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DOCKER_CONTEXT = path.resolve(__dirname, '../../docker');
 
+// Sandbox resource limits for containers that execute untrusted repository content.
+// README.md advertises a "512MB RAM and 64 PID limit"; without these flags the containers ran
+// with unrestricted host resources, so a runaway build could exhaust the host's memory or fork
+// bomb it. Kept as one constant so every build execution stays in step.
+const DOCKER_RESOURCE_LIMITS = '--memory 512m --pids-limit 64';
+
 interface RunResult {
   stdout: string;
   stderr: string;
@@ -100,6 +106,7 @@ export default class RepositoryCompiler {
     // Step 2: docker build
     const dockerCmd = [
       'docker run --rm',
+      DOCKER_RESOURCE_LIMITS,
       `-v "${repoDir}:/repo"`,
       `-v "${outputDir}:/output"`,
       DOCKER_IMAGE,
@@ -143,6 +150,7 @@ export default class RepositoryCompiler {
 
     const dockerCmd = [
       'docker run --rm',
+      DOCKER_RESOURCE_LIMITS,
       `-v "${session.repoDir}:/repo"`,
       `-v "${session.outputDir}:/output"`,
       DOCKER_IMAGE,

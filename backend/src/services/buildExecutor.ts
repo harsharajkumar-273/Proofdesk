@@ -127,6 +127,12 @@ const SHARED_DOCKER_VOLUMES = [
   '-v mra-pretex-cache:/home/vagrant/cache',
 ].join(' ');
 
+// Sandbox resource limits for containers that execute untrusted repository content.
+// README.md advertises a "512MB RAM and 64 PID limit"; without these flags the containers ran
+// with unrestricted host resources, so a runaway build could exhaust the host's memory or fork
+// bomb it. Kept as one constant so every build execution stays in step.
+const DOCKER_RESOURCE_LIMITS = '--memory 512m --pids-limit 64';
+
 export interface BuildSession {
   id?: string;
   owner: string;
@@ -668,6 +674,7 @@ class BuildExecutor {
     const cmd = [
       'docker run -d',
       `--name ${containerName}`,
+      DOCKER_RESOURCE_LIMITS,
       `-v "${session.repoPath}:/repo"`,
       `-v "${session.outputPath}:/output"`,
       `-v "${session.buildPath || path.join(path.dirname(session.repoPath), 'build')}:/home/vagrant/build"`,
@@ -1727,6 +1734,7 @@ class BuildExecutor {
 
       const cmd = [
         'docker run --rm',
+        DOCKER_RESOURCE_LIMITS,
         '-e BUILD_PDF=1',
         `-v "${session.repoPath}:/repo"`,
         `-v "${session.outputPath}:/output"`,
