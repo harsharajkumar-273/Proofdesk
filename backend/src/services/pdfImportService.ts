@@ -29,7 +29,8 @@ export const isMathPixConfigured = (): boolean => {
  * - \[ equation \] -> <me>equation</me>
  * - $$ equation $$ -> <me>equation</me>
  * - \( equation \) -> <m>equation</m>
- * - $ equation $ -> <m>equation</m>
+ * - $equation$ -> <m>equation</m>  (delimiters must hug the content, so prose
+ *   currency like "$10 and $20" or "$5,$10" is left alone)
  */
 export const replaceMathDelimiters = (text: string): string => {
   let result = text;
@@ -49,8 +50,18 @@ export const replaceMathDelimiters = (text: string): string => {
     return `<m>${eq.trim()}</m>`;
   });
 
-  // 4. Inline equations $ ... $ (avoiding $$)
-  result = result.replace(/(?<!\$)\$([^$]+)\$(?!\$)/g, (_, eq) => {
+  // 4. Inline equations $...$ (avoiding $$ and prose currency).
+  //
+  // Two guards, both taken from the rule Pandoc and CommonMark-math use:
+  //   - the delimiters must hug their content (no space just inside either one), and
+  //   - the closing $ must not be followed by a digit.
+  //
+  // Together they keep prose currency out. "costs $10 and $20" offers only "10 and " as a
+  // candidate span, which ends in a space; "$5,$10" and "$10/$20" have no space but close onto a
+  // digit. Real inline math is written tight and is not usually followed by a digit, so
+  // $x + y = z$ and $5x + 2$ both still convert. Content cannot span a line break either, which
+  // stops two unrelated amounts on separate lines from pairing up.
+  result = result.replace(/(?<!\$)\$(?![\s$])([^$\n]*[^\s$])\$(?![$\d])/g, (_, eq) => {
     return `<m>${eq.trim()}</m>`;
   });
 
