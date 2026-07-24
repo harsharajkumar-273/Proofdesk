@@ -38,6 +38,9 @@ const PTX_ELEMENTS = new Set([
   'm', 'me', 'men', 'mrow', 'mdn', 'md',
   'ol', 'ul', 'dl', 'li',
   'figure', 'image', 'video', 'interactive', 'table', 'tabular',
+  // Accessibility children of <image>. Registering them here is required for
+  // the tokenizer to emit them at all, since it skips unknown elements.
+  'description', 'shortdescription',
   'row', 'cell', 'col',
   'program', 'console', 'input', 'output', 'listing', 'cd',
   'xref', 'ref', 'cite',
@@ -81,6 +84,8 @@ interface StackEntry {
   name: string;
   offset: number;
   tagLength: number;
+  /** Set on an <image> entry once a description child has been seen. */
+  hasDescription?: boolean;
 }
 
 // Matches XML comments/PIs/CDATA first (skip them), then element tags
@@ -119,6 +124,17 @@ function offsetToPosition(content: string, offset: number): { lineNumber: number
   }
   return { lineNumber: line, column: capped - lastNewline };
 }
+
+/**
+ * Accessibility: PreTeXt renders an <image>'s description as the HTML alt
+ * attribute, so an image without one is inaccessible. <shortdescription> is
+ * PreTeXt's newer short-form alt text and satisfies the requirement equally —
+ * accepting both avoids flagging authors who use the current element.
+ */
+const IMAGE_DESCRIPTION_ELEMENTS = new Set(['description', 'shortdescription']);
+
+const MISSING_DESCRIPTION_MESSAGE =
+  '<image> is missing a <description> child — screen readers will have no alt text for it';
 
 function makeIssue(
   content: string,
@@ -199,6 +215,41 @@ function checkForbiddenNesting(
   }
 }
 
+/**
+ * Emits the accessibility warning for any <image> entries about to leave the
+ * stack without a description. Used by both the normal close path and the
+ * error-recovery path, so a malformed document doesn't silently swallow the
+ * warning — a missing description is a separate problem from a mismatched tag.
+ */
+function warnUndescribedImages(
+  entries: StackEntry[],
+  content: string,
+  issues: PtxValidationIssue[],
+): void {
+  for (const entry of entries) {
+    if (entry.name === 'image' && !entry.hasDescription) {
+      issues.push(makeIssue(
+        content, entry.offset, entry.tagLength,
+        MISSING_DESCRIPTION_MESSAGE,
+        'warning',
+      ));
+    }
+  }
+}
+
+/**
+ * Marks the enclosing <image> when a description element opens as its direct
+ * child. Direct-child only: a <description> nested deeper (for example inside a
+ * sibling <figure>) does not describe this image.
+ */
+function markDescriptionOnParentImage(name: string, stack: StackEntry[]): void {
+  if (!IMAGE_DESCRIPTION_ELEMENTS.has(name)) return;
+  const parent = stack[stack.length - 1];
+  if (parent && parent.name === 'image') {
+    parent.hasDescription = true;
+  }
+}
+
 export const validatePtxBuffer = (content: string, filename: string): PtxValidationIssue[] => {
   if (!isPtxFile(filename)) return [];
 
@@ -209,11 +260,22 @@ export const validatePtxBuffer = (content: string, filename: string): PtxValidat
   for (const token of tokens) {
     if (token.type === 'self-closing') {
       checkForbiddenNesting(token, stack, content, issues);
+      // A self-closing <image/> can have no children, so it can never carry a
+      // description.
+      if (token.name === 'image') {
+        issues.push(makeIssue(
+          content, token.offset, token.tagLength,
+          MISSING_DESCRIPTION_MESSAGE,
+          'warning',
+        ));
+      }
+      markDescriptionOnParentImage(token.name, stack);
       continue;
     }
 
     if (token.type === 'open') {
       checkForbiddenNesting(token, stack, content, issues);
+      markDescriptionOnParentImage(token.name, stack);
       stack.push({ name: token.name, offset: token.offset, tagLength: token.tagLength });
       continue;
     }
@@ -227,6 +289,7 @@ export const validatePtxBuffer = (content: string, filename: string): PtxValidat
         'error',
       ));
     } else if (matchIdx === stack.length - 1) {
+      warnUndescribedImages([stack[matchIdx]], content, issues);
       stack.pop();
     } else {
       // Intervening unclosed element
@@ -236,6 +299,9 @@ export const validatePtxBuffer = (content: string, filename: string): PtxValidat
         `<${unclosed.name}> is not closed before </${token.name}>`,
         'error',
       ));
+      // Everything from the matching open upward is discarded by the recovery
+      // below, so warn about those images before they disappear.
+      warnUndescribedImages(stack.slice(matchIdx), content, issues);
       // Recover by closing everything up to and including the matching open
       stack.splice(matchIdx);
     }

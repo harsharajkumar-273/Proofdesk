@@ -125,3 +125,93 @@ describe('validatePtxBuffer', () => {
     expect(issues).toHaveLength(0);
   });
 });
+
+describe('validatePtxBuffer — image accessibility (missing description)', () => {
+  const warnings = (xml: string) =>
+    validatePtxBuffer(xml, 'chapter.xml').filter((i) => /missing a <description>/.test(i.message));
+
+  it('flags a self-closing <image/> with no description', () => {
+    const issues = warnings('<figure><image source="graph.png" width="60%"/></figure>');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+  });
+
+  it('flags a paired <image> with no description child', () => {
+    const issues = warnings('<figure><image source="graph.png"></image></figure>');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].severity).toBe('warning');
+  });
+
+  it('accepts an <image> with a <description> child', () => {
+    const xml = '<figure><image source="graph.png"><description>A parabola opening upward.</description></image></figure>';
+    expect(warnings(xml)).toHaveLength(0);
+  });
+
+  it('accepts an <image> with a <shortdescription> child', () => {
+    const xml = '<image source="g.png"><shortdescription>A parabola.</shortdescription></image>';
+    expect(warnings(xml)).toHaveLength(0);
+  });
+
+  it('accepts a self-closing <description/> child', () => {
+    expect(warnings('<image source="g.png"><description/></image>')).toHaveLength(0);
+  });
+
+  it('does not credit a <description> that is not a direct child of the image', () => {
+    // The description here belongs to the figure, not the image.
+    const xml = '<figure><description>Figure caption.</description><image source="g.png"/></figure>';
+    expect(warnings(xml)).toHaveLength(1);
+  });
+
+  it('reports each offending image separately', () => {
+    const xml = '<figure><image source="a.png"/><image source="b.png"/></figure>';
+    expect(warnings(xml)).toHaveLength(2);
+  });
+
+  it('reports only the image that lacks a description', () => {
+    const xml =
+      '<figure><image source="a.png"><description>Described.</description></image><image source="b.png"/></figure>';
+    expect(warnings(xml)).toHaveLength(1);
+  });
+
+  it('is a warning, never an error, so it does not block compilation', () => {
+    const issues = validatePtxBuffer('<image source="g.png"/>', 'chapter.xml');
+    expect(issues.every((i) => i.severity === 'warning')).toBe(true);
+  });
+
+  it('ignores images in non-PreTeXt files', () => {
+    expect(validatePtxBuffer('<image source="g.png"/>', 'notes.md')).toHaveLength(0);
+  });
+
+  it('points the squiggle at the opening image tag, for both image forms', () => {
+    for (const xml of [
+      '<figure>\n  <image source="graph.png"/>\n</figure>',
+      '<figure>\n  <image source="graph.png"></image>\n</figure>',
+    ]) {
+      const issue = warnings(xml)[0];
+      expect(issue.startLineNumber).toBe(2);
+      expect(issue.startColumn).toBe(3);
+      expect(issue.endColumn).toBeGreaterThan(issue.startColumn);
+    }
+  });
+
+  it('still warns when the image is closed via error recovery', () => {
+    // </image> arrives while <p> is still open, so the validator unwinds the
+    // stack. The structural error and the accessibility warning are separate
+    // problems and both should be reported.
+    const xml = '<image source="g.png"><p>text</image>';
+    const all = validatePtxBuffer(xml, 'chapter.xml');
+    expect(warnings(xml)).toHaveLength(1);
+    expect(all.some((i) => /is not closed before/.test(i.message))).toBe(true);
+  });
+
+  it('does not warn during recovery when the image was described', () => {
+    const xml = '<image source="g.png"><description>d</description><p>text</image>';
+    expect(warnings(xml)).toHaveLength(0);
+  });
+
+  it('warns for every undescribed image discarded by one recovery', () => {
+    // Both images are removed by the same splice; neither should be lost.
+    const xml = '<figure><image source="a.png"><image source="b.png"><p>x</figure>';
+    expect(warnings(xml).length).toBeGreaterThanOrEqual(2);
+  });
+});
