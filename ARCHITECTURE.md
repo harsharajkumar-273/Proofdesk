@@ -26,8 +26,12 @@ Proofdesk is a modern repository analyzer and bi-directional editor built with a
 - **CI/CD**: GitHub Actions (Linting, Testing)
 - **Testing**: Vitest (Unit Tests), Playwright (E2E Tests)
 
+## Isolated Compilation Sandbox
+Proofdesk utilizes a custom Docker image (`mra-pretext-builder`) to provide a secure, isolated environment for document compilation. This sandbox ensures that user-submitted content can be built safely without affecting the main backend server or host machine. By using isolated volume mounts, it manages its own build cache and cleanly separates source repositories from compilation outputs.
+
 ## Component Interaction
 1. **Client**: The frontend serves the UI for repository analysis and editing. It establishes real-time connections via WebSockets to the backend for collaborative features (Yjs).
 2. **Server**: The Express backend provides REST APIs and WebSocket endpoints, handles database operations, and manages background tasks using BullMQ and Redis.
 3. **Database**: Prisma interfaces with a Better-SQLite3 database for persistent storage.
 4. **Queue**: Redis brokers asynchronous jobs for complex repository analysis tasks without blocking the main event loop.
+5. **Compilation Sandbox**: The `mra-pretext-builder` Docker container runs as an isolated sandbox to safely compile user documents without exposing the host system.
