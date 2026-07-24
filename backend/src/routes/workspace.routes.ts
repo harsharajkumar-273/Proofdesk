@@ -10,6 +10,7 @@ import {
   getReviewMarkers,
   saveReviewMarkers,
   searchWorkspace,
+  replaceWorkspace,
   getGitStatus,
   getGitDiff,
   stageFile,
@@ -47,8 +48,9 @@ export default function createWorkspaceRouter(): Router {
   router.get('/workspace/:sessionId/review-markers', requireAccessToken, checkWorkspaceOwner, getReviewMarkers);
   router.put('/workspace/:sessionId/review-markers', requireAccessToken, checkWorkspaceOwner, saveReviewMarkers);
 
-  // Workspace search
+  // Workspace search & replace
   router.get('/workspace/:sessionId/search', requireAccessToken, checkWorkspaceOwner, searchWorkspace);
+  router.post('/workspace/:sessionId/replace', requireAccessToken, checkWorkspaceOwner, replaceWorkspace);
 
   // Git operations
   router.get('/workspace/:sessionId/git/status', requireAccessToken, checkWorkspaceOwner, getGitStatus);

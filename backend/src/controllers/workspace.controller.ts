@@ -8,6 +8,7 @@ import {
   getWorkspaceReviewMarkers,
   saveWorkspaceReviewMarkers,
   searchWorkspaceFiles,
+  replaceWorkspaceFiles,
   getWorkspaceSession,
 } from '../services/workspaceService.js';
 import {
@@ -135,6 +136,28 @@ export const searchWorkspace = async (req: Request<any>, res: Response): Promise
     res.json({ results });
   } catch (error: any) {
     console.error('Workspace search error:', error.message);
+    res.status(error.message === 'Workspace session not found' ? 404 : 400).json({ error: error.message });
+  }
+};
+
+export const replaceWorkspace = async (req: Request<any>, res: Response): Promise<any> => {
+  const { query, replacement = '', paths, matchCase } = req.body ?? {};
+  const queryStr = String(query || '').trim();
+  if (!queryStr) {
+    return res.status(400).json({ error: 'Search query is required for replace operation' });
+  }
+
+  try {
+    const result = await replaceWorkspaceFiles(
+      req.params.sessionId,
+      queryStr,
+      String(replacement),
+      Array.isArray(paths) ? paths : undefined,
+      Boolean(matchCase)
+    );
+    res.json(result);
+  } catch (error: any) {
+    console.error('Workspace replace error:', error.message);
     res.status(error.message === 'Workspace session not found' ? 404 : 400).json({ error: error.message });
   }
 };
