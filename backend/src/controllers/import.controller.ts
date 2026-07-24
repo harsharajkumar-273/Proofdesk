@@ -13,15 +13,22 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
 
   // Cancel the MathPix work if the client goes away, instead of letting it run
   // to completion against a socket nobody is listening on.
+  //
+  // This listens on the *response*, not the request: since Node 16 the request
+  // stream emits 'close' as soon as its body has been consumed — which multer
+  // does before this handler even runs — so req.on('close') fires on every
+  // healthy request and would cancel imports that are working fine.
+  // res 'close' with writableFinished still false means the socket went away
+  // before we finished replying, which is an actual disconnect.
   const controller = new AbortController();
   let clientAborted = false;
   const onClientClose = () => {
-    if (res.writableEnded) return;
+    if (res.writableFinished) return;
     clientAborted = true;
     logger.info(`Client disconnected during PDF import of ${fileName}; cancelling`);
     controller.abort();
   };
-  req.on('close', onClientClose);
+  res.on('close', onClientClose);
 
   try {
     logger.info(`Received PDF import request for file: ${fileName}`);
@@ -76,7 +83,7 @@ export const importPdf = async (req: Request, res: Response): Promise<any> => {
       details: error.message,
     });
   } finally {
-    req.removeListener('close', onClientClose);
+    res.removeListener('close', onClientClose);
   }
 };
 

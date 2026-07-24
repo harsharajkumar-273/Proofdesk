@@ -198,4 +198,43 @@ describe('import cancellation and timeouts (issue #15)', () => {
     assert.ok(Date.now() - startedAt < 400, 'cancellation should short-circuit the pending delay');
     restore();
   });
+
+  it('treats an already-aborted signal as a cancellation without doing work', async () => {
+    clearMathPix();
+    const controller = new AbortController();
+    controller.abort(); // aborted BEFORE the call — the event will never fire
+
+    await assert.rejects(
+      () => importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf', { signal: controller.signal }),
+      (error) => {
+        assert.equal(error instanceof ImportAbortedError, true);
+        assert.equal(error.reason, 'client-abort');
+        return true;
+      },
+    );
+    restore();
+  });
+
+  it('classifies a stalled upstream request as a timeout, not a cancellation', async () => {
+    // axios reports a socket timeout as ECONNABORTED, which is abort-shaped.
+    // Misreading it as 'client-abort' would make the controller answer 500
+    // instead of the 504 this feature exists to produce.
+    const axiosTimeout = Object.assign(new Error('timeout of 20000ms exceeded'), {
+      code: 'ECONNABORTED',
+    });
+    assert.equal(isAbortError(axiosTimeout), true, 'still recognised as abort-shaped');
+
+    // With no caller signal and no overall-deadline expiry, this must surface
+    // as a timeout so the 504 path is taken.
+    clearMathPix();
+    process.env.PROOFDESK_IMPORT_TIMEOUT_MS = '20';
+    await assert.rejects(
+      () => importPdf(Buffer.from('%PDF-1.4'), 'sample.pdf'),
+      (error) => {
+        assert.equal(error.reason, 'timeout');
+        return true;
+      },
+    );
+    restore();
+  });
 });

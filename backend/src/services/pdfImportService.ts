@@ -384,8 +384,14 @@ export const importPdf = async (
     controller.abort();
   }, budgetMs);
 
-  const onCallerAbort = () => controller.abort();
+  let callerAborted = false;
+  const onCallerAbort = () => {
+    callerAborted = true;
+    controller.abort();
+  };
   options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  // A signal that is already aborted never fires the event, so check up front.
+  if (options.signal?.aborted) onCallerAbort();
 
   const cleanup = () => {
     clearTimeout(deadline);
@@ -395,14 +401,25 @@ export const importPdf = async (
   try {
     return await runImport(fileBuffer, fileName, signal);
   } catch (error: any) {
+    // Order matters. Only the caller's own signal counts as a cancellation;
+    // everything else that looks like an abort is a timeout of some kind.
+    if (callerAborted) {
+      throw new ImportAbortedError('client-abort', 'PDF import cancelled');
+    }
     if (timedOut) {
       throw new ImportAbortedError(
         'timeout',
         `PDF import exceeded the ${Math.round(budgetMs / 1000)}s limit`,
       );
     }
+    // axios reports a per-request socket timeout as ECONNABORTED, which is
+    // abort-shaped but is a stalled MathPix call, not a cancellation. Treating
+    // it as 'client-abort' would suppress the 504 the controller should send.
     if (isAbortError(error)) {
-      throw new ImportAbortedError('client-abort', 'PDF import cancelled');
+      throw new ImportAbortedError(
+        'timeout',
+        `A MathPix request exceeded the ${Math.round(importHttpTimeoutMs() / 1000)}s per-request limit`,
+      );
     }
     throw error;
   } finally {
