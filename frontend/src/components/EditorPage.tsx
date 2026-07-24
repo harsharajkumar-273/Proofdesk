@@ -194,6 +194,22 @@ interface Tab {
   language?: string;
 }
 
+/**
+ * Local CSS/JS from the workspace to inline into the WASM preview.
+ *
+ * Sourced from open tabs so the preview reflects unsaved edits — an asset the
+ * author is actively editing should render as edited, which is the point of a
+ * live preview. Assets are inlined rather than linked because a srcDoc iframe
+ * has no base URL for a relative href to resolve against.
+ *
+ * Defined at module scope so it is a stable reference and does not become a
+ * dependency of the preview effect, which already re-runs on `tabs`.
+ */
+const collectWorkspaceAssets = (openTabs: Tab[]): { path: string; content: string }[] =>
+  openTabs
+    .filter((tab) => tab.path.endsWith('.css') || tab.path.endsWith('.js'))
+    .map((tab) => ({ path: tab.path, content: tab.content }));
+
 interface EditorPageProps {
   onLogout: () => void;
 }
@@ -1057,7 +1073,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       const runWasmCompile = async () => {
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(tab.content);
+          const html = await compilePretextXmlWasm(tab.content, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
         } catch (error) {
           console.error('[WASM] Auto-compile failed:', error);
@@ -2169,7 +2185,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (activeTab && (activeTab.path.endsWith('.xml') || activeTab.path.endsWith('.ptx'))) {
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(activeTab.content);
+          const html = await compilePretextXmlWasm(activeTab.content, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
         } catch (err) {
           console.error('[WASM] Switch compile failed:', err);
@@ -2177,6 +2193,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       }
     }
   };
+
 
   const compileRepository = async (repoData: Repository | null = repo) => {
     setSrcDocContent(null);
@@ -2188,7 +2205,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         setCompiling(true);
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(activeTab.content);
+          const html = await compilePretextXmlWasm(activeTab.content, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
           setCompilationModeState('repository');
         } catch (err) {
@@ -2382,7 +2399,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       try {
         if (compilerRuntime === 'wasm' && (next.filePath.endsWith('.xml') || next.filePath.endsWith('.ptx'))) {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(next.value);
+          const html = await compilePretextXmlWasm(next.value, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
           setLastSavedAt(new Date());
           rebuildInFlightRef.current = false;

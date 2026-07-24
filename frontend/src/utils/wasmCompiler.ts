@@ -174,10 +174,69 @@ def pretext_to_html(xml_content):
 `;
 
 /**
+ * A local workspace file to make available to the preview.
+ *
+ * Only `.css` and `.js` are used; anything else is ignored. Contents are
+ * inlined rather than linked because a `srcDoc` iframe has no base URL and no
+ * server behind it, so a relative `<link href="styles.css">` could never
+ * resolve.
+ */
+export interface WorkspaceAsset {
+  path: string;
+  content: string;
+}
+
+const hasExtension = (path: string, ext: string): boolean =>
+  path.toLowerCase().endsWith(ext);
+
+/**
+ * Escapes a closing tag sequence so file contents can't terminate the element
+ * they're inlined into. A stylesheet containing the literal text "</style>", or
+ * a script containing "</script>", would otherwise end the block early and
+ * corrupt the rest of the document.
+ */
+const escapeClosingTag = (content: string, tagName: string): string =>
+  content.replace(new RegExp(`</(${tagName})`, 'gi'), '<\\/$1');
+
+/** Inlines workspace stylesheets as <style> blocks, in the order given. */
+const buildAssetStyles = (assets: WorkspaceAsset[]): string =>
+  assets
+    .filter((asset) => hasExtension(asset.path, '.css'))
+    .map(
+      (asset) =>
+        `  <style data-proofdesk-asset="${escapeHtmlAttribute(asset.path)}">\n${escapeClosingTag(asset.content, 'style')}\n  </style>`,
+    )
+    .join('\n');
+
+/** Inlines workspace scripts as <script> blocks, in the order given. */
+const buildAssetScripts = (assets: WorkspaceAsset[]): string =>
+  assets
+    .filter((asset) => hasExtension(asset.path, '.js'))
+    .map(
+      (asset) =>
+        `  <script data-proofdesk-asset="${escapeHtmlAttribute(asset.path)}">\n${escapeClosingTag(asset.content, 'script')}\n  </script>`,
+    )
+    .join('\n');
+
+/** Escapes a value for safe use inside a double-quoted HTML attribute. */
+const escapeHtmlAttribute = (value: string): string =>
+  String(value ?? '').replace(
+    /[<>&"']/g,
+    (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' })[c] as string,
+  );
+
+/**
  * Compiles a PreTeXt XML string into modern interactive HTML layout client-side.
  * Runs inside browser Pyodide runtime.
+ *
+ * @param xmlContent The PreTeXt XML to compile.
+ * @param assets Optional local workspace CSS/JS to inline into the preview so
+ *   custom styles and interactive components render in WASM mode.
  */
-export const compilePretextXmlWasm = async (xmlContent: string): Promise<string> => {
+export const compilePretextXmlWasm = async (
+  xmlContent: string,
+  assets: WorkspaceAsset[] = [],
+): Promise<string> => {
   const pyodide = await loadPyodideRuntime();
 
   // Load parser helper function inside pyodide environment
@@ -203,6 +262,12 @@ export const compilePretextXmlWasm = async (xmlContent: string): Promise<string>
     }
     throw new Error(`XML Parse Error: ${cleanMessage}`);
   }
+
+  // Local workspace assets: stylesheets go in <head> so they cascade over the
+  // defaults below, scripts go after the body content so the DOM they act on
+  // already exists.
+  const assetStyles = buildAssetStyles(assets);
+  const assetScripts = buildAssetScripts(assets);
 
   // Wrap compiled body with Tailwind styles, KaTeX script tags, and dark-mode integration
   return `<!DOCTYPE html>
@@ -236,9 +301,11 @@ export const compilePretextXmlWasm = async (xmlContent: string): Promise<string>
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
   </style>
+${assetStyles}
 </head>
 <body class="bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 transition-colors duration-200">
   ${compiledBody}
+${assetScripts}
 </body>
 </html>`;
 };
