@@ -3,7 +3,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import buildExecutor from '../services/buildExecutor.js';
 import { ensurePreviewBundle } from '../services/previewBundleService.js';
-import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
+import { injectLatestPreTeXtLayoutFix, transformPreviewFile } from '../services/previewTransformService.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
 
 const getPreviewMimeType = (ext: string): string => {
@@ -132,9 +132,12 @@ export const createPreviewRouter = (): Router => {
     const previewVersion = Array.isArray(req.query.t) ? (req.query.t[0] as string) : (req.query.t as string);
 
     let responseContent: string | Buffer;
+    const transformed = transformPreviewFile(filePath, content.toString('utf-8'), sessionId);
     if (ext === '.html' || ext === '.htm') {
-      const html = versionLivePreviewAssets(content.toString('utf-8'), previewVersion);
+      const html = versionLivePreviewAssets(transformed, previewVersion);
       responseContent = injectLatestPreTeXtLayoutFix(html);
+    } else if (ext === '.css') {
+      responseContent = transformed;
     } else {
       responseContent = content;
     }
