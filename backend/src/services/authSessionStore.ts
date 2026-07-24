@@ -325,6 +325,25 @@ class AuthSessionStore {
     return session;
   }
 
+  async getSessionByAccessToken(accessToken: string) {
+    await this.ensureLoaded();
+    if (!accessToken) return null;
+
+    const now = Date.now();
+    for (const session of this.sessions.values()) {
+      if (session.accessToken === accessToken) {
+        const updatedAt = session.updatedAt || session.createdAt || 0;
+        if (updatedAt + SESSION_TTL_MS < now) {
+          this.sessions.delete(session.id);
+          this.schedulePersist();
+          return null;
+        }
+        return session;
+      }
+    }
+    return null;
+  }
+
   async getSessionFromRequest(req: any) {
     const cookies = parseCookies(req.headers.cookie || '');
     const sessionId = cookies[SESSION_COOKIE_NAME];
