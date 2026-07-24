@@ -15,6 +15,24 @@ def pretext_to_html(xml_content):
     def clean_text(text):
         return text if text else ""
 
+    THEOREM_LIKE = ('theorem', 'lemma', 'corollary', 'proposition', 'definition',
+                    'example', 'remark', 'claim', 'conjecture', 'axiom', 'principle')
+
+    def esc(value):
+        # Attribute values come from the document and are interpolated into raw
+        # HTML, so they must be escaped or a name= can inject live markup.
+        return (str(value or '')
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+                .replace('"', '&quot;')
+                .replace("'", '&#39;'))
+
+    def title_of(node):
+        # PreTeXt puts an environment's heading in a direct <title> child.
+        child = node.find('title')
+        return ''.join(child.itertext()).strip() if child is not None else ''
+
     def render_node(node, parent_tag=None):
         tag = node.tag
         
@@ -62,9 +80,16 @@ def pretext_to_html(xml_content):
             return f"<div class='subsection my-6'>{inner_html}</div>{tail_html}"
         elif tag == 'chapter':
             return f"<section class='chapter my-10'>{inner_html}</section>{tail_html}"
-        elif tag in ('subsubsection', 'paragraphs'):
+        elif tag == 'subsubsection':
             return f"<div class='subsubsection my-4'>{inner_html}</div>{tail_html}"
+        elif tag == 'paragraphs':
+            return f"<div class='paragraphs my-4'>{inner_html}</div>{tail_html}"
         elif tag == 'title':
+            # Already promoted into the parent's header by the branches above.
+            if parent_tag in THEOREM_LIKE or parent_tag == 'exercise':
+                return tail_html
+            if parent_tag == 'paragraphs':
+                return f"<p class='paragraphs-title font-bold text-sm text-zinc-800 dark:text-zinc-200 mt-4 mb-1'>{inner_html}</p>{tail_html}"
             if parent_tag in ('pretext', 'article', 'book'):
                 return f"<h1 class='text-2xl font-extrabold text-zinc-900 dark:text-white mt-2 mb-4 tracking-tight'>{inner_html}</h1>{tail_html}"
             elif parent_tag == 'section':
@@ -77,18 +102,18 @@ def pretext_to_html(xml_content):
                 return f"<h4 class='text-sm font-bold text-zinc-800 dark:text-zinc-350 mt-2 mb-1'>{inner_html}</h4>{tail_html}"
         elif tag == 'p':
             return f"<p class='my-3 text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed'>{inner_html}</p>{tail_html}"
-        elif tag in ('theorem', 'lemma', 'corollary', 'proposition', 'definition', 'example', 'remark', 'claim', 'conjecture', 'axiom', 'principle'):
-            name_attr = node.get('name', '')
-            name_span = f" <span class='italic text-zinc-500'>({name_attr})</span>" if name_attr else ""
+        elif tag in THEOREM_LIKE:
+            heading = title_of(node) or node.get('name', '')
+            name_span = f" <span class='italic text-zinc-500'>({esc(heading)})</span>" if heading else ""
             return f"<div class='theorem-box bg-indigo-50/40 dark:bg-indigo-950/10 border-l-4 border-indigo-500 p-4 my-4 rounded-r-xl'><h3 class='text-xs font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400 flex items-center gap-1.5'>{tag.capitalize()}{name_span}</h3>{inner_html}</div>{tail_html}"
         elif tag == 'statement':
             return f"<div class='statement'>{inner_html}</div>{tail_html}"
         elif tag in ('solution', 'hint', 'answer'):
             label = tag.capitalize()
-            return f"<details class='border border-zinc-200 dark:border-zinc-800 rounded-xl my-3 bg-zinc-50/20 dark:bg-zinc-900/10'><summary class='font-bold text-xs text-emerald-650 dark:text-emerald-400 cursor-pointer p-3 select-none'>{label} (click to expand)</summary><div class='p-4 border-t border-zinc-200 dark:border-zinc-800 text-sm'>{inner_html}</div></details>{tail_html}"
+            return f"<details class='border border-zinc-200 dark:border-zinc-800 rounded-xl my-3 bg-zinc-50/20 dark:bg-zinc-900/10'><summary class='font-bold text-xs text-emerald-600 dark:text-emerald-400 cursor-pointer p-3 select-none'>{label} (click to expand)</summary><div class='p-4 border-t border-zinc-200 dark:border-zinc-800 text-sm'>{inner_html}</div></details>{tail_html}"
         elif tag == 'exercise':
-            name_attr = node.get('name', '')
-            name_span = f" <span class='italic text-zinc-500'>({name_attr})</span>" if name_attr else ""
+            heading = title_of(node) or node.get('name', '')
+            name_span = f" <span class='italic text-zinc-500'>({esc(heading)})</span>" if heading else ""
             return f"<div class='exercise-box bg-emerald-50/40 dark:bg-emerald-950/10 border-l-4 border-emerald-500 p-4 my-4 rounded-r-xl'><h3 class='text-xs font-bold uppercase tracking-wider text-emerald-700 dark:text-emerald-400'>Exercise{name_span}</h3>{inner_html}</div>{tail_html}"
         elif tag == 'proof':
             return f"<details class='proof-details border border-zinc-200 dark:border-zinc-800 rounded-xl my-4 bg-zinc-50/20 dark:bg-zinc-900/10'><summary class='font-bold text-xs text-indigo-650 dark:text-indigo-400 cursor-pointer p-3 select-none hover:bg-zinc-50/50 dark:hover:bg-zinc-800/10 rounded-t-xl'>Proof (click to expand)</summary><div class='p-4 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/50 rounded-b-xl text-sm'>{inner_html}</div></details>{tail_html}"
@@ -118,13 +143,13 @@ def pretext_to_html(xml_content):
         elif tag == 'term':
             return f"<strong class='font-semibold text-zinc-900 dark:text-white'>{inner_html}</strong>{tail_html}"
         elif tag == 'alert':
-            return f"<strong class='font-bold text-pink-650 dark:text-pink-400'>{inner_html}</strong>{tail_html}"
+            return f"<strong class='font-bold text-pink-600 dark:text-pink-400'>{inner_html}</strong>{tail_html}"
         elif tag == 'q':
             return f"<q class='italic'>{inner_html}</q>{tail_html}"
         elif tag == 'blockquote':
             return f"<blockquote class='border-l-4 border-zinc-300 dark:border-zinc-700 pl-4 my-4 italic text-sm text-zinc-600 dark:text-zinc-300'>{inner_html}</blockquote>{tail_html}"
         elif tag == 'c':
-            return f"<code class='bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-xs font-mono text-pink-650 dark:text-pink-400'>{inner_html}</code>{tail_html}"
+            return f"<code class='bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded text-xs font-mono text-pink-600 dark:text-pink-400'>{inner_html}</code>{tail_html}"
         elif tag in ('program', 'console'):
             return f"<pre class='bg-zinc-900 text-zinc-100 p-4 rounded-xl font-mono text-xs overflow-x-auto my-4 border border-zinc-800'>{inner_html}</pre>{tail_html}"
         elif tag == 'table':
