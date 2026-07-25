@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   UploadCloud,
   FileText,
@@ -8,7 +8,17 @@ import {
   FileCode,
   ArrowRight,
   Sparkles,
+  GitCompare,
+  Code2,
 } from 'lucide-react';
+import {
+  diffLines,
+  formatDiffSummary,
+  formatFileSize,
+  validateImportFile,
+  extractDroppedFile,
+  type DiffRow,
+} from '../../utils/importDiff';
 
 interface EditorImportPaneProps {
   sessionId: string | null;
@@ -17,6 +27,29 @@ interface EditorImportPaneProps {
   onCreateNewFile: (fileName: string, content: string) => Promise<void>;
   activeTabOpen: boolean;
 }
+
+/**
+ * Reads an error body that may not be JSON.
+ *
+ * Multer rejects oversized uploads before the route handler runs, so the
+ * response is Express's default error output rather than the controller's JSON
+ * shape. Calling `res.json()` on that throws, which surfaced a JSON parse error
+ * instead of the real problem.
+ */
+const readErrorMessage = async (response: Response, fallback: string): Promise<string> => {
+  const body = await response.text();
+  if (!body) return `${fallback} (HTTP ${response.status})`;
+
+  try {
+    const parsed = JSON.parse(body) as { error?: string; details?: string };
+    return parsed.details || parsed.error || `${fallback} (HTTP ${response.status})`;
+  } catch {
+    // Not JSON — surface a short readable prefix rather than raw HTML.
+    const stripped = body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!stripped) return `${fallback} (HTTP ${response.status})`;
+    return stripped.length > 180 ? `${stripped.slice(0, 180)}…` : stripped;
+  }
+};
 
 const EditorImportPane: React.FC<EditorImportPaneProps> = ({
   apiUrl,
@@ -29,39 +62,102 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [converting, setConverting] = useState(false);
   const [convertedXml, setConvertedXml] = useState('');
+  /** The text the draft was generated from, so the preview can diff against it. */
+  const [conversionSource, setConversionSource] = useState('');
+  const [previewMode, setPreviewMode] = useState<'diff' | 'raw'>('diff');
   const [mathPixConfigured, setMathPixConfigured] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [insertSuccess, setInsertSuccess] = useState(false);
   const [newFileName, setNewFileName] = useState('src/imported-pretext.xml');
   const [creatingFile, setCreatingFile] = useState(false);
-  
+  const [isDragActive, setIsDragActive] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const insertTimerRef = useRef<number | null>(null);
+  /**
+   * Drag events fire for every child element, so a plain enter/leave pair
+   * flickers. Counting depth keeps the highlight stable.
+   */
+  const dragDepthRef = useRef(0);
 
   useEffect(() => {
-    // Fetch import configuration status
+    const controller = new AbortController();
+
     const fetchConfig = async () => {
       try {
         const res = await fetch(`${apiUrl}/import/config`, {
-          headers: {
-            'Authorization': `Bearer local-test`, // fallback token / session auth
-          },
+          // The backend authenticates via an httpOnly session cookie and sets
+          // cors({ credentials: true }). The frontend runs on a different
+          // origin, so the cookie is only sent when this is explicit.
+          credentials: 'include',
+          signal: controller.signal,
         });
         if (res.ok) {
           const data = (await res.json()) as { mathPixConfigured: boolean };
           setMathPixConfigured(data.mathPixConfigured);
         }
       } catch (err) {
+        if ((err as Error)?.name === 'AbortError') return;
         console.warn('Failed to fetch import config:', err);
       }
     };
+
     void fetchConfig();
+    return () => controller.abort();
   }, [apiUrl]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      setPdfFile(e.target.files[0]);
-      setError(null);
+  useEffect(
+    () => () => {
+      if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
+    },
+    [],
+  );
+
+  /** Validates and stores a candidate file from either the picker or a drop. */
+  const acceptFile = useCallback((file: File | null) => {
+    const validation = validateImportFile(file);
+    if (!validation.ok) {
+      setPdfFile(null);
+      setError(validation.error ?? 'That file cannot be imported.');
+      return;
     }
+    setPdfFile(file);
+    setError(null);
+  }, []);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    acceptFile(e.target.files?.[0] ?? null);
+    // Reset so selecting the same file twice still fires a change event.
+    e.target.value = '';
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current += 1;
+    setIsDragActive(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    // Without preventDefault the browser navigates to the dropped file.
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setIsDragActive(false);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepthRef.current = 0;
+    setIsDragActive(false);
+    acceptFile(extractDroppedFile(e.dataTransfer));
   };
 
   const handleConvertText = async () => {
@@ -74,18 +170,19 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
     try {
       const res = await fetch(`${apiUrl}/import/text`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: latexInput }),
       });
-      
+
       if (!res.ok) {
-        throw new Error('Failed to convert text content');
+        throw new Error(await readErrorMessage(res, 'Failed to convert text content'));
       }
-      
+
       const data = (await res.json()) as { success: boolean; pretext: string };
       setConvertedXml(data.pretext);
+      setConversionSource(latexInput);
+      setPreviewMode('diff');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg || 'Text conversion failed');
@@ -95,29 +192,33 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
   };
 
   const handleConvertPdf = async () => {
-    if (!pdfFile) {
-      setError('Please select a PDF file first.');
+    const validation = validateImportFile(pdfFile);
+    if (!validation.ok) {
+      setError(validation.error ?? 'Please select a PDF file first.');
       return;
     }
     setConverting(true);
     setError(null);
-    
+
     const formData = new FormData();
-    formData.append('file', pdfFile);
+    formData.append('file', pdfFile as File);
 
     try {
       const res = await fetch(`${apiUrl}/import/pdf`, {
         method: 'POST',
+        credentials: 'include',
         body: formData,
       });
 
       if (!res.ok) {
-        const errData = (await res.json()) as { error?: string; details?: string };
-        throw new Error(errData.details || errData.error || 'Failed to convert PDF file');
+        throw new Error(await readErrorMessage(res, 'Failed to convert PDF file'));
       }
 
       const data = (await res.json()) as { success: boolean; pretext: string };
       setConvertedXml(data.pretext);
+      // A PDF has no textual "before", so the draft shows as all additions.
+      setConversionSource('');
+      setPreviewMode('diff');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg || 'PDF conversion failed');
@@ -130,7 +231,8 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
     if (!convertedXml) return;
     onInsertAtCursor(convertedXml);
     setInsertSuccess(true);
-    setTimeout(() => setInsertSuccess(false), 2000);
+    if (insertTimerRef.current !== null) window.clearTimeout(insertTimerRef.current);
+    insertTimerRef.current = window.setTimeout(() => setInsertSuccess(false), 2000);
   };
 
   const handleCreateNewFile = async () => {
@@ -140,12 +242,43 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
     try {
       await onCreateNewFile(newFileName.trim(), convertedXml);
       setConvertedXml('');
+      setConversionSource('');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(msg || 'Failed to create file');
     } finally {
       setCreatingFile(false);
     }
+  };
+
+  const diff = useMemo(
+    () => (convertedXml ? diffLines(conversionSource, convertedXml) : null),
+    [conversionSource, convertedXml],
+  );
+
+  const renderDiffRow = (row: DiffRow, index: number) => {
+    const tone =
+      row.type === 'add'
+        ? 'bg-emerald-500/10 text-emerald-300'
+        : row.type === 'remove'
+          ? 'bg-rose-500/10 text-rose-300'
+          : 'text-zinc-400';
+    const sign = row.type === 'add' ? '+' : row.type === 'remove' ? '-' : ' ';
+
+    return (
+      <div key={index} className={`flex gap-2 px-2 leading-5 ${tone}`}>
+        <span className="w-8 flex-shrink-0 select-none text-right text-zinc-600 tabular-nums">
+          {row.oldLine ?? ''}
+        </span>
+        <span className="w-8 flex-shrink-0 select-none text-right text-zinc-600 tabular-nums">
+          {row.newLine ?? ''}
+        </span>
+        <span aria-hidden="true" className="w-2 flex-shrink-0 select-none">
+          {sign}
+        </span>
+        <span className="whitespace-pre-wrap break-words">{row.text || '\u00A0'}</span>
+      </div>
+    );
   };
 
   return (
@@ -198,7 +331,10 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
       <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
         {/* Error Message */}
         {error && (
-          <div className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-xl text-rose-600 dark:text-rose-400 text-xs">
+          <div
+            role="alert"
+            className="p-3 bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 rounded-xl text-rose-600 dark:text-rose-400 text-xs"
+          >
             {error}
           </div>
         )}
@@ -208,19 +344,45 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
           <div className="flex flex-col gap-3">
             <div
               onClick={() => fileInputRef.current?.click()}
-              className="border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-indigo-400 dark:hover:border-indigo-800 rounded-xl p-6 text-center cursor-pointer transition-colors"
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  fileInputRef.current?.click();
+                }
+              }}
+              role="button"
+              tabIndex={0}
+              aria-label="Select or drop a PDF document to import"
+              className={`border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                isDragActive
+                  ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-950/30'
+                  : 'border-zinc-200 dark:border-zinc-800 hover:border-indigo-400 dark:hover:border-indigo-800'
+              }`}
             >
               <input
                 type="file"
                 ref={fileInputRef}
                 onChange={handleFileChange}
-                accept="application/pdf"
+                accept="application/pdf,.pdf"
                 className="hidden"
               />
-              <UploadCloud className="w-8 h-8 mx-auto mb-2 text-zinc-400" />
-              {pdfFile ? (
+              <UploadCloud
+                className={`w-8 h-8 mx-auto mb-2 ${isDragActive ? 'text-indigo-500' : 'text-zinc-400'}`}
+              />
+              {isDragActive ? (
+                <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                  Drop the PDF to import it
+                </div>
+              ) : pdfFile ? (
                 <div className="text-xs font-bold text-zinc-950 dark:text-zinc-50 truncate">
                   {pdfFile.name}
+                  <span className="ml-1 font-normal text-zinc-500">
+                    ({formatFileSize(pdfFile.size)})
+                  </span>
                 </div>
               ) : (
                 <div className="text-xs text-zinc-500">
@@ -247,8 +409,9 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
             <textarea
               value={latexInput}
               onChange={(e) => setLatexInput(e.target.value)}
+              aria-label="LaTeX or Markdown source"
               placeholder="# Vector Math&#10;Let u and v be vectors in R^3:&#10;u = \langle 1, 2, 3 \rangle&#10;v = \langle 4, 5, 6 \rangle&#10;&#10;Their cross product is:&#10;\[ u \times v = \langle -3, 6, -3 \rangle \]"
-              className="flex-1 min-h-[150px] p-3 text-xs border border-zinc-200 dark:border-zinc-850 bg-zinc-50 dark:bg-zinc-950 rounded-xl outline-none font-mono focus:border-indigo-500 transition-colors"
+              className="flex-1 min-h-[150px] p-3 text-xs border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 rounded-xl outline-none font-mono focus:border-indigo-500 transition-colors"
             />
 
             <button
@@ -267,18 +430,73 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
         )}
 
         {/* Conversion Results preview */}
-        {convertedXml && (
-          <div className="flex flex-col gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
-              <FileCode className="w-4 h-4 text-indigo-500" />
-              <span>Conversion Result</span>
-            </h3>
+        {convertedXml && diff && (
+          <div className="flex flex-col gap-3 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                <FileCode className="w-4 h-4 text-indigo-500" />
+                <span>Conversion Result</span>
+              </h3>
+              <div className="flex items-center gap-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 p-0.5">
+                <button
+                  onClick={() => setPreviewMode('diff')}
+                  aria-pressed={previewMode === 'diff'}
+                  title="Show as a changeset"
+                  className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors ${
+                    previewMode === 'diff'
+                      ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400'
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                  }`}
+                >
+                  <GitCompare className="w-3 h-3" />
+                  <span>Diff</span>
+                </button>
+                <button
+                  onClick={() => setPreviewMode('raw')}
+                  aria-pressed={previewMode === 'raw'}
+                  title="Show raw XML"
+                  className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider flex items-center gap-1 transition-colors ${
+                    previewMode === 'raw'
+                      ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400'
+                      : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                  }`}
+                >
+                  <Code2 className="w-3 h-3" />
+                  <span>Raw</span>
+                </button>
+              </div>
+            </div>
 
-            <textarea
-              readOnly
-              value={convertedXml}
-              className="w-full min-h-[160px] p-3 text-xs bg-zinc-900 dark:bg-zinc-950 text-emerald-400 dark:text-emerald-500 rounded-xl outline-none font-mono border border-zinc-850"
-            />
+            <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+              <span className="font-bold text-emerald-600 dark:text-emerald-400">
+                {formatDiffSummary(diff.summary)}
+              </span>
+              <span>
+                {conversionSource
+                  ? '· compared against your pasted source'
+                  : '· new content, nothing replaced'}
+              </span>
+            </div>
+
+            {diff.truncated && (
+              <div className="text-[11px] text-amber-600 dark:text-amber-400">
+                Document is large — showing a whole-block comparison rather than a
+                line-by-line one.
+              </div>
+            )}
+
+            {previewMode === 'diff' ? (
+              <div className="max-h-[320px] overflow-auto rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-900 dark:bg-zinc-950 py-2 font-mono text-[11px]">
+                {diff.rows.map(renderDiffRow)}
+              </div>
+            ) : (
+              <textarea
+                readOnly
+                value={convertedXml}
+                aria-label="Converted PreTeXt XML"
+                className="w-full min-h-[160px] p-3 text-xs bg-zinc-900 dark:bg-zinc-950 text-emerald-400 dark:text-emerald-500 rounded-xl outline-none font-mono border border-zinc-200 dark:border-zinc-800"
+              />
+            )}
 
             <div className="flex flex-col gap-2">
               <button
@@ -303,13 +521,14 @@ const EditorImportPane: React.FC<EditorImportPaneProps> = ({
                   value={newFileName}
                   onChange={(e) => setNewFileName(e.target.value)}
                   placeholder="src/new-chapter.xml"
+                  aria-label="New file path"
                   className="w-full p-2 text-xs border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 rounded-lg outline-none font-mono focus:border-indigo-500"
                 />
-                
+
                 <button
                   onClick={handleCreateNewFile}
                   disabled={creatingFile || !newFileName.trim()}
-                  className="w-full h-9 rounded-xl bg-indigo-600 hover:bg-indigo-505 text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-40"
+                  className="w-full h-9 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-colors"
                 >
                   {creatingFile ? (
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
