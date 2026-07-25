@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Hunspell dictionary copied from dictionary-en by scripts/copy-dictionary.js
+public/dictionaries/

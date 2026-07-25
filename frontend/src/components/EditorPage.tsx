@@ -78,6 +78,12 @@ import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
 import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
+import {
+  isSpellCheckableFile,
+  spellCheckBuffer,
+  type SpellChecker,
+} from '../utils/proseSpellCheck';
+import { loadSpellChecker } from '../utils/spellDictionary';
 import { parseBuildErrors } from '../utils/buildErrorParser';
 import { type PreviewSnapshotEntry } from '../utils/previewDiff';
 import { MonacoYjsCollaborationSession } from '../utils/yjsCollaboration';
@@ -288,6 +294,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [compiledOutput, setCompiledOutput] = useState<string>('');
   const [repoCompilationResult, setRepoCompilationResult] = useState<CompilationResult | null>(null);
   
+  // Prose spell-check diagnostics for the active tab. Held in state rather
+  // than derived synchronously because the Hunspell dictionary is fetched
+  // lazily on first use.
+  const [spellDiagnostics, setSpellDiagnostics] = useState<Diagnostic[]>([]);
+
   const [buildSessionId, setBuildSessionId] = useState<string | null>(null);
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
   const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
@@ -455,13 +466,21 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       );
       if (tab) result.push({ ...err, filePath: tab.path, fileName: tab.name });
     }
+    // Spell-check diagnostics are produced asynchronously (the dictionary is
+    // fetched on first use), so they arrive via state rather than being
+    // recomputed synchronously here.
+    result.push(...spellDiagnostics);
     return result;
-  }, [tabs, buildErrors]);
+  }, [tabs, buildErrors, spellDiagnostics]);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const reviewDecorationIdsRef = useRef<string[]>([]);
   const mathValidationTimerRef = useRef<number | null>(null);
   const ptxValidationTimerRef = useRef<number | null>(null);
+  const spellCheckTimerRef = useRef<number | null>(null);
+  // Cached across renders so the 550 KB dictionary is fetched at most once
+  // per editor session.
+  const spellCheckerRef = useRef<SpellChecker | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
   
   const sidebarResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
@@ -1184,6 +1203,94 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (ptxValidationTimerRef.current !== null) {
         window.clearTimeout(ptxValidationTimerRef.current);
         ptxValidationTimerRef.current = null;
+      }
+    };
+  }, [activeTab, editorReady]);
+
+  // Slice 3: prose spell checking.
+  //
+  // Mirrors the validator effects above but is asynchronous: the Hunspell
+  // dictionary is fetched from public/dictionaries/ on first use, so the
+  // debounce window is longer (600ms) and the results are written to state as
+  // well as to Monaco, since the Problems panel aggregates diagnostics
+  // synchronously and cannot await the dictionary.
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const model = editor?.getModel?.();
+    if (!monaco || !model) return;
+
+    if (!activeTab || !isSpellCheckableFile(activeTab.path)) {
+      monaco.editor.setModelMarkers(model, 'proofdesk-spell', []);
+      setSpellDiagnostics((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    if (spellCheckTimerRef.current !== null) {
+      window.clearTimeout(spellCheckTimerRef.current);
+    }
+
+    const content = activeTab.content;
+    const path = activeTab.path;
+    const name = activeTab.name;
+    let cancelled = false;
+
+    spellCheckTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        let checker = spellCheckerRef.current;
+        if (!checker) {
+          checker = await loadSpellChecker();
+          // A failed dictionary load disables spell checking silently rather
+          // than breaking the editor; loadSpellChecker already warned.
+          if (!checker) return;
+          spellCheckerRef.current = checker;
+        }
+
+        // The tab may have changed while the dictionary was downloading.
+        if (cancelled) return;
+        if (activeTabRef.current?.path !== path) return;
+
+        const latestEditor = editorRef.current;
+        const latestModel = latestEditor?.getModel?.();
+        const latestMonaco = monacoRef.current;
+        if (!latestModel || !latestMonaco) return;
+
+        const issues = spellCheckBuffer(content, checker);
+        latestMonaco.editor.setModelMarkers(
+          latestModel,
+          'proofdesk-spell',
+          issues.map((issue) => ({
+            severity: latestMonaco.MarkerSeverity.Warning,
+            message: issue.message,
+            source: issue.source,
+            startLineNumber: issue.startLineNumber,
+            startColumn: issue.startColumn,
+            endLineNumber: issue.endLineNumber,
+            endColumn: issue.endColumn,
+          })),
+        );
+
+        setSpellDiagnostics(
+          issues.map((issue) => ({
+            filePath: path,
+            fileName: name,
+            startLineNumber: issue.startLineNumber,
+            startColumn: issue.startColumn,
+            endLineNumber: issue.endLineNumber,
+            endColumn: issue.endColumn,
+            message: issue.message,
+            severity: 'warning' as const,
+            source: issue.source,
+          })),
+        );
+      })();
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      if (spellCheckTimerRef.current !== null) {
+        window.clearTimeout(spellCheckTimerRef.current);
+        spellCheckTimerRef.current = null;
       }
     };
   }, [activeTab, editorReady]);
