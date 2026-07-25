@@ -34,6 +34,7 @@ import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
 import EditorImportPane from './editor/EditorImportPane';
+import CommandPalette from './editor/CommandPalette';
 import { EditorHistoryPane } from './editor/EditorHistoryPane';
 import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
 import {
@@ -78,6 +79,9 @@ import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
 import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
+import type { PaletteCommand } from '../utils/commandPalette';
+import { PTX_SNIPPETS, indentSnippet, leadingWhitespace } from '../utils/ptxSnippets';
+import { findTagAtPosition, getTagDoc, formatTagDocMarkdown } from '../utils/ptxHoverDocs';
 import {
   isSpellCheckableFile,
   spellCheckBuffer,
@@ -383,6 +387,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.userAgent.indexOf('Mac OS X') !== -1;
@@ -390,6 +396,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (modifierPressed && e.key === '\\') {
         e.preventDefault();
         toggleSplitView();
+      }
+      // Cmd/Ctrl+K opens the command palette. Monaco treats Ctrl+K as a chord
+      // prefix, so it is also registered as an editor command in
+      // handleEditorDidMount for when focus is inside the editor.
+      if (modifierPressed && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCommandPaletteOpen((open) => !open);
       }
     };
 
@@ -481,6 +494,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   // Cached across renders so the 550 KB dictionary is fetched at most once
   // per editor session.
   const spellCheckerRef = useRef<SpellChecker | null>(null);
+  // Monaco language providers are registered globally, not per-editor, so the
+  // registration must be disposed if the editor remounts — otherwise every
+  // remount stacks another provider and hovers are duplicated.
+  const hoverProviderRef = useRef<Monaco.IDisposable | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
   
   const sidebarResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
@@ -900,7 +917,43 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     editor.onDidChangeCursorPosition((event) => {
       setSelectedReviewLine(event.position.lineNumber);
     });
+
+    // Cmd/Ctrl+K while the editor has focus. Registered here as well as on
+    // window because Monaco consumes Ctrl+K as a chord prefix and would
+    // otherwise swallow the shortcut.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+      setCommandPaletteOpen((open) => !open);
+    });
+
+    // PreTeXt hover documentation. Registered against 'xml' because
+    // getLanguageFromFilename maps both .xml and .ptx to it, and guarded by
+    // the active tab so it cannot fire for unrelated XML files.
+    hoverProviderRef.current?.dispose();
+    hoverProviderRef.current = monaco.languages.registerHoverProvider('xml', {
+      provideHover: (model, position) => {
+        if (!isPtxFile(activeTabRef.current?.path)) return null;
+
+        const line = model.getLineContent(position.lineNumber);
+        const tag = findTagAtPosition(line, position.column);
+        if (!tag) return null;
+
+        const doc = getTagDoc(tag);
+        if (!doc) return null;
+
+        return {
+          contents: [{ value: formatTagDocMarkdown(doc), isTrusted: false }],
+        };
+      },
+    });
   };
+
+  useEffect(
+    () => () => {
+      hoverProviderRef.current?.dispose();
+      hoverProviderRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -1830,6 +1883,124 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       showNoticeFromError(error, `Failed to open ${path}`);
     }
   };
+
+  /**
+   * Inserts a PreTeXt snippet at the cursor, re-indented to match the current
+   * line so the block lines up with its siblings.
+   */
+  const insertSnippet = (snippetId: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const snippet = PTX_SNIPPETS.find((entry) => entry.id === snippetId);
+    if (!snippet) return;
+
+    const selection = editor.getSelection();
+    const model = editor.getModel();
+    if (!selection || !model) return;
+
+    const currentLine = model.getLineContent(selection.startLineNumber);
+    const body = indentSnippet(snippet.body, leadingWhitespace(currentLine));
+
+    const range = new monacoRuntime.Range(
+      selection.startLineNumber,
+      selection.startColumn,
+      selection.endLineNumber,
+      selection.endColumn,
+    );
+
+    editor.executeEdits('snippet', [
+      { range, text: body, forceMoveMarkers: true },
+    ]);
+    editor.focus();
+  };
+
+  /**
+   * Every action the command palette can run.
+   *
+   * Built from the same handlers the toolbar uses, so the palette cannot drift
+   * out of sync with what the buttons do. Commands that need context the user
+   * does not currently have are listed but disabled, which keeps the palette a
+   * complete index of the editor rather than a shifting subset.
+   */
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const commands: PaletteCommand[] = [
+      {
+        id: 'build.compile-repository',
+        title: 'Compile Repository',
+        group: 'Build',
+        keywords: ['build', 'render', 'make'],
+        enabled: !compiling,
+        run: () => { void compileRepository(); },
+      },
+      {
+        id: 'build.compile-section',
+        title: 'Compile Current Section',
+        group: 'Build',
+        keywords: ['build', 'partial'],
+        enabled: !compiling && !!activeSectionXmlIdRef.current,
+        run: () => { void compileSectionById(); },
+      },
+      {
+        id: 'file.save-review',
+        title: 'Review and Save Changes',
+        group: 'File',
+        keywords: ['commit', 'stage', 'push'],
+        run: () => openSaveReview(),
+      },
+      {
+        id: 'layout.toggle-split',
+        title: 'Toggle Split View',
+        group: 'Layout',
+        hint: 'Ctrl+\\',
+        keywords: ['preview', 'pane'],
+        run: () => toggleSplitView(),
+      },
+      {
+        id: 'layout.toggle-sidebar',
+        title: 'Toggle Sidebar',
+        group: 'Layout',
+        keywords: ['explorer', 'panel'],
+        run: () => setSidebarOpen((open) => !open),
+      },
+    ];
+
+    const panes: Array<{ id: typeof activityBarTab; label: string }> = [
+      { id: 'explorer', label: 'Explorer' },
+      { id: 'search', label: 'Search' },
+      { id: 'git', label: 'Source Control' },
+      { id: 'problems', label: 'Problems' },
+      { id: 'import', label: 'Import PDF / LaTeX' },
+      { id: 'history', label: 'History' },
+    ];
+    for (const pane of panes) {
+      commands.push({
+        id: `view.${pane.id}`,
+        title: `Show ${pane.label}`,
+        group: 'View',
+        keywords: ['panel', 'sidebar', 'open'],
+        run: () => {
+          setActivityBarTab(pane.id);
+          setSidebarOpen(true);
+        },
+      });
+    }
+
+    for (const snippet of PTX_SNIPPETS) {
+      commands.push({
+        id: `snippet.${snippet.id}`,
+        title: `Insert ${snippet.title}`,
+        group: 'Snippet',
+        hint: snippet.description,
+        keywords: snippet.keywords,
+        enabled: !!activeTab,
+        run: () => insertSnippet(snippet.id),
+      });
+    }
+
+    return commands;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compiling, activeTab, activityBarTab]);
 
   const handleInsertImportedText = (text: string) => {
     const editor = editorRef.current;
@@ -3025,6 +3196,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
           </div>
         </div>
       </main>
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        commands={paletteCommands}
+      />
 
       <EditorStatusBar
         compilationMode={compilationMode}
