@@ -19,6 +19,7 @@ import {
   stageAllWorkspaceFiles,
   unstageAllWorkspaceFiles,
   commitWorkspaceChanges,
+  saveWorkspaceDraft,
   pullWorkspaceBranch,
   pushWorkspaceBranch,
   switchWorkspaceBranch,
@@ -222,6 +223,23 @@ export const commitChanges = async (req: Request<any>, res: Response): Promise<a
     res.json(result);
   } catch (error: any) {
     console.error('Workspace git commit error:', error.message);
+    res.status(400).json({ error: error.message });
+  }
+};
+
+export const saveDraft = async (req: Request<any>, res: Response): Promise<any> => {
+  try {
+    // Prefer the authenticated session's login; fall back to the body only
+    // when there is no session user, so a client cannot write to another
+    // author's draft branch just by asking.
+    const username = req.authSession?.user?.login || req.body?.username;
+    if (!username) {
+      return res.status(400).json({ error: 'Unable to determine username for draft branch' });
+    }
+    const result = await saveWorkspaceDraft(req.params.sessionId, username);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Workspace draft save error:', error.message);
     res.status(400).json({ error: error.message });
   }
 };

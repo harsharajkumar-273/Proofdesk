@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, CheckCircle2, AlertCircle, AlertTriangle, Cpu, Zap, Files } from 'lucide-react';
+import { User, CheckCircle2, AlertCircle, AlertTriangle, Cpu, Zap, Files, CloudUpload } from 'lucide-react';
 
 interface EditorStatusBarProps {
   compilationMode: 'repository' | 'file';
@@ -11,6 +11,9 @@ interface EditorStatusBarProps {
   errorCount?: number;
   warningCount?: number;
   onOpenProblems?: () => void;
+  /** Status-bar label for the background draft auto-save, if enabled. */
+  draftSaveLabel?: string | null;
+  draftSaveFailed?: boolean;
 }
 
 const EditorStatusBar: React.FC<EditorStatusBarProps> = ({
@@ -23,9 +26,25 @@ const EditorStatusBar: React.FC<EditorStatusBarProps> = ({
   errorCount = 0,
   warningCount = 0,
   onOpenProblems,
+  draftSaveLabel = null,
+  draftSaveFailed = false,
 }) => (
   <footer className="editor-statusbar h-7 bg-zinc-100 dark:bg-zinc-900 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-4 overflow-x-auto px-3 text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-500 flex-shrink-0 z-40">
     <div className="flex flex-shrink-0 items-center gap-3 sm:gap-5">
+      {draftSaveLabel && (
+        <div
+          className="flex items-center gap-1.5"
+          title="Unsaved work is committed to a drafts/<username> branch in the background"
+        >
+          <CloudUpload
+            className={`w-3 h-3 ${draftSaveFailed ? 'text-amber-500' : 'text-zinc-400'}`}
+          />
+          <span className={draftSaveFailed ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-300'}>
+            {draftSaveLabel}
+          </span>
+        </div>
+      )}
+
       <div className="flex items-center gap-1.5">
         <Cpu className="w-3 h-3 text-zinc-400" />
         <span className="hidden text-zinc-400 sm:inline">Mode</span>

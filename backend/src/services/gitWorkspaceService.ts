@@ -12,6 +12,8 @@ interface GitOptions {
   needsRemote?: boolean;
   allowFailure?: boolean;
   maxBuffer?: number;
+  /** Extra environment variables, used to point git at an alternate index. */
+  env?: Record<string, string>;
 }
 
 interface GitResult {
@@ -52,6 +54,7 @@ const runGit = async (cwd: string, args: string[], options: GitOptions = {}): Pr
     needsRemote = false,
     allowFailure = false,
     maxBuffer = 20 * 1024 * 1024,
+    env = {},
   } = options;
 
   const finalArgs = withGitAuthConfig(args, token, needsRemote);
@@ -63,6 +66,7 @@ const runGit = async (cwd: string, args: string[], options: GitOptions = {}): Pr
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
+        ...env,
       },
     });
 
@@ -426,6 +430,146 @@ export const switchWorkspaceBranch = async (
   session.defaultBranch = session.defaultBranch || nextBranch;
 
   return getWorkspaceGitStatus(sessionId);
+};
+
+/** Branch namespace for auto-saved drafts. */
+const DRAFT_BRANCH_PREFIX = 'drafts/';
+
+/**
+ * Sanitises a username into a branch-safe segment.
+ *
+ * Dots are replaced rather than preserved: git rejects any ref containing
+ * "..", so allowing dots through means a username like "a..b" — or one that
+ * merely sanitises into consecutive dots — produces a name git will refuse.
+ * Runs are collapsed and the ends trimmed so the result cannot begin or end
+ * with a separator either.
+ */
+const toDraftBranch = (username: string): string => {
+  const cleaned = String(username || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[-_]+|[-_]+$/g, '')
+    .slice(0, 64)
+    // Slicing can leave a trailing separator behind.
+    .replace(/[-_]+$/g, '');
+  if (!cleaned) throw new Error('A username is required to save a draft');
+  return `${DRAFT_BRANCH_PREFIX}${cleaned}`;
+};
+
+export interface DraftSaveResult {
+  /** True when a new draft commit was written. */
+  saved: boolean;
+  branch: string;
+  /** Commit sha of the draft tip, whether newly written or unchanged. */
+  commitSha: string | null;
+  /** Why nothing was written, when saved is false. */
+  reason?: 'unchanged' | 'empty-workspace';
+  savedAt: string;
+}
+
+/**
+ * Commits the current worktree to `drafts/<username>` without touching the
+ * checked-out branch, HEAD, the index, or the working tree.
+ *
+ * The obvious implementation — switch to the draft branch, commit, switch
+ * back — moves the author off their branch while they are typing, and strands
+ * them there if any step fails. This uses git's plumbing instead:
+ *
+ *   GIT_INDEX_FILE=<temp> git read-tree HEAD   seed a throwaway index
+ *   GIT_INDEX_FILE=<temp> git add -A           stage the live worktree into it
+ *   GIT_INDEX_FILE=<temp> git write-tree       turn it into a tree object
+ *   git commit-tree <tree> -p <parent>         build a commit off to one side
+ *   git update-ref refs/heads/drafts/<user>    move only the draft ref
+ *
+ * None of those commands read or write the real index, so the author's staged
+ * and unstaged state is preserved exactly.
+ *
+ * The temporary index lives inside `.git/` rather than the working tree. Put
+ * anywhere under the worktree it would be picked up by `git add -A` and
+ * committed into the draft alongside the author's files.
+ */
+export const saveWorkspaceDraft = async (
+  sessionId: string,
+  username: string
+): Promise<DraftSaveResult> => {
+  const session = await ensureWorkspaceGitReady(sessionId);
+  const cwd = path.resolve(session.repoPath);
+  const branch = toDraftBranch(username);
+
+  if (!VALID_BRANCH_RE.test(branch)) {
+    throw new Error(`Invalid draft branch name: "${branch}"`);
+  }
+
+  // A workspace with no commits has no HEAD to parent from.
+  const headResult = await runGit(cwd, ['rev-parse', '--verify', 'HEAD'], {
+    allowFailure: true,
+  });
+  if (headResult.code !== 0) {
+    return {
+      saved: false,
+      branch,
+      commitSha: null,
+      reason: 'empty-workspace',
+      savedAt: new Date().toISOString(),
+    };
+  }
+  const headSha = headResult.stdout.trim();
+
+  const gitDir = (await runGit(cwd, ['rev-parse', '--git-dir'])).stdout.trim();
+  const gitDirAbsolute = path.isAbsolute(gitDir) ? gitDir : path.join(cwd, gitDir);
+  const tempIndex = path.join(
+    gitDirAbsolute,
+    `proofdesk-draft-index-${process.pid}-${Date.now()}`
+  );
+  const indexEnv = { GIT_INDEX_FILE: tempIndex };
+
+  try {
+    await runGit(cwd, ['read-tree', headSha], { env: indexEnv });
+    await runGit(cwd, ['add', '-A'], { env: indexEnv });
+    const tree = (await runGit(cwd, ['write-tree'], { env: indexEnv })).stdout.trim();
+
+    // Chain onto the previous draft when there is one, so the draft branch
+    // keeps a history rather than a single clobbered commit.
+    const existing = await runGit(cwd, ['rev-parse', '--verify', `refs/heads/${branch}`], {
+      allowFailure: true,
+    });
+    const parent = existing.code === 0 ? existing.stdout.trim() : headSha;
+
+    // Nothing changed since the last draft: skip, so an idle author does not
+    // accumulate an empty commit every interval.
+    const parentTree = await runGit(cwd, ['rev-parse', `${parent}^{tree}`], {
+      allowFailure: true,
+    });
+    if (parentTree.code === 0 && parentTree.stdout.trim() === tree) {
+      return {
+        saved: false,
+        branch,
+        commitSha: parent,
+        reason: 'unchanged',
+        savedAt: new Date().toISOString(),
+      };
+    }
+
+    const message = `draft: auto-save ${new Date().toISOString()}`;
+    const commitSha = (
+      await runGit(cwd, ['commit-tree', tree, '-p', parent, '-m', message])
+    ).stdout.trim();
+
+    await runGit(cwd, ['update-ref', `refs/heads/${branch}`, commitSha]);
+
+    return {
+      saved: true,
+      branch,
+      commitSha,
+      savedAt: new Date().toISOString(),
+    };
+  } finally {
+    // Best effort: a stray temp index inside .git is harmless but untidy.
+    await fs.rm(tempIndex, { force: true }).catch(() => {});
+    await fs.rm(`${tempIndex}.lock`, { force: true }).catch(() => {});
+  }
 };
 
 export const createWorkspacePullRequest = async (
