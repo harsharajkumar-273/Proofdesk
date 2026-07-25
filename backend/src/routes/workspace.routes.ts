@@ -17,6 +17,7 @@ import {
   stageAll,
   unstageAll,
   commitChanges,
+  saveDraft,
   pullChanges,
   pushChanges,
   switchBranch,
@@ -58,6 +59,7 @@ export default function createWorkspaceRouter(): Router {
   router.post('/workspace/:sessionId/git/stage-all', requireAccessToken, checkWorkspaceOwner, stageAll);
   router.post('/workspace/:sessionId/git/unstage-all', requireAccessToken, checkWorkspaceOwner, unstageAll);
   router.post('/workspace/:sessionId/git/commit', requireAccessToken, checkWorkspaceOwner, commitChanges);
+  router.post('/workspace/:sessionId/git/draft', requireAccessToken, checkWorkspaceOwner, saveDraft);
   router.post('/workspace/:sessionId/git/pull', requireAccessToken, checkWorkspaceOwner, pullChanges);
   router.post('/workspace/:sessionId/git/push', requireAccessToken, checkWorkspaceOwner, pushChanges);
   router.post('/workspace/:sessionId/git/branch', requireAccessToken, checkWorkspaceOwner, switchBranch);

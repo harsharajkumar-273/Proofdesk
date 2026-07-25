@@ -79,6 +79,16 @@ import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
 import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
+import {
+  DRAFT_SAVE_INTERVAL_MS,
+  applyDraftSaveError,
+  applyDraftSaveResult,
+  formatDraftSavedLabel,
+  initialDraftSaveState,
+  requestDraftSave,
+  shouldAttemptDraftSave,
+  type DraftSaveState,
+} from '../utils/draftSaveService';
 import type { PaletteCommand } from '../utils/commandPalette';
 import { PTX_SNIPPETS, indentSnippet, leadingWhitespace } from '../utils/ptxSnippets';
 import { findTagAtPosition, getTagDoc, formatTagDocMarkdown } from '../utils/ptxHoverDocs';
@@ -428,6 +438,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const unsavedTabs = useMemo(() => tabs.filter((tab) => tab.hasUnsavedChanges), [tabs]);
+  const unsavedCountRef = useRef<number>(0);
+  unsavedCountRef.current = unsavedTabs.length;
   const reviewEntries = useMemo(
     () => Object.values(reviewMarkers).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [reviewMarkers]
@@ -494,6 +506,47 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   // Cached across renders so the 550 KB dictionary is fetched at most once
   // per editor session.
   const spellCheckerRef = useRef<SpellChecker | null>(null);
+
+  // Background draft auto-save. The backend commits the workspace to
+  // drafts/<username> using git plumbing, so this never switches the author's
+  // branch or disturbs their staged and unstaged state.
+  const [draftSave, setDraftSave] = useState<DraftSaveState>(initialDraftSaveState);
+  const draftSaveRef = useRef<DraftSaveState>(draftSave);
+  draftSaveRef.current = draftSave;
+
+  useEffect(() => {
+    const runDraftSave = async () => {
+      if (
+        !shouldAttemptDraftSave({
+          sessionId: buildSessionIdRef.current,
+          status: draftSaveRef.current.status,
+          unsavedCount: unsavedCountRef.current,
+        })
+      ) {
+        return;
+      }
+
+      const sessionId = buildSessionIdRef.current;
+      if (!sessionId) return;
+
+      setDraftSave((previous) => ({ ...previous, status: 'saving' }));
+      try {
+        const result = await requestDraftSave({ apiUrl: API_URL, sessionId });
+        setDraftSave((previous) => applyDraftSaveResult(previous, result));
+      } catch (error) {
+        // A failed draft save is background housekeeping — surface it in the
+        // status bar but never interrupt the author with a modal or a toast.
+        console.warn('[proofdesk] Draft auto-save failed:', error);
+        setDraftSave((previous) => applyDraftSaveError(previous, error));
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void runDraftSave();
+    }, DRAFT_SAVE_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [API_URL]);
   // Monaco language providers are registered globally, not per-editor, so the
   // registration must be disposed if the editor remounts — otherwise every
   // remount stacks another provider and hovers are duplicated.
@@ -3209,6 +3262,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         repoCompilationResult={repoCompilationResult}
         openTabsCount={tabs.length}
         unsavedCount={unsavedTabs.length}
+        draftSaveLabel={formatDraftSavedLabel(draftSave)}
+        draftSaveFailed={draftSave.status === 'error'}
         userLogin={userData?.login}
         errorCount={allDiagnostics.filter((d) => d.severity === 'error').length}
         warningCount={allDiagnostics.filter((d) => d.severity === 'warning').length}
