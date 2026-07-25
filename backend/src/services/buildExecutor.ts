@@ -14,6 +14,7 @@ import githubCacheStore from './githubCacheStore.js';
 import { recordPreviewSnapshot } from './previewHistoryService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import logger from '../utils/logger.js';
+import { resolveContainedPath } from '../utils/pathContainment.js';
 import { dockerBuildDurationSeconds, activeBuildJobs } from './metricsService.js';
 import {
   getRedisClient,
@@ -1589,7 +1590,13 @@ class BuildExecutor {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('Invalid session');
 
-    await fs.writeFile(path.join(session.repoPath, filePath), content, 'utf-8');
+    // `filePath` arrives straight from the request body. Prove it stays inside
+    // the session's repository before opening it for writing — both against
+    // traversal in the path itself and against symlinks committed into the
+    // repository, which a lexical check cannot see.
+    const targetPath = await resolveContainedPath(session.repoPath, filePath);
+
+    await fs.writeFile(targetPath, content, 'utf-8');
     logger.info(`Updated file: ${filePath}${xmlId ? ` (section: ${xmlId})` : ''}`, { sessionId });
 
     if (session.localTestMode) {
