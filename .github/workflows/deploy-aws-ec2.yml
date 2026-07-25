@@ -133,6 +133,17 @@ jobs:
             cd ${APP_DIR}
 
             tar -xzf proofdesk-release.tgz
+
+            # Pre-build the PreTeXt builder image, mirroring deploy-oci.yml.
+            # Without this the first compile request triggers an inline docker
+            # build inside the Express backend, which can outlast the client's
+            # request timeout.
+            #
+            # Note this is a full rebuild every deploy, not a cached no-op as
+            # on OCI: the 'docker system prune -af' above clears the layer
+            # cache, so there is nothing left to reuse.
+            docker build -t mra-pretext-builder ./docker
+
             docker compose -f docker-compose.prod.yml up --build -d
             docker compose -f docker-compose.prod.yml ps
             docker image prune -f
