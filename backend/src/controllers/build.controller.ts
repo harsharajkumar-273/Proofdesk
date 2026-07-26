@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { Octokit } from '@octokit/rest';
 import fs from 'fs/promises';
 import { createReadStream } from 'fs';
 import path from 'path';
@@ -443,9 +444,20 @@ export const prewarmBuild = async (req: Request, res: Response): Promise<any> =>
     return res.status(400).json({ error: 'owner and repo are required and must be valid GitHub names' });
   }
 
+  const token = req.headers.authorization?.split(' ')[1] || null;
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const octokit = new Octokit({ auth: token });
+    await octokit.repos.get({ owner, repo });
+  } catch (err: any) {
+    return res.status(err.status === 404 ? 404 : 403).json({ error: 'Repository not found or access denied' });
+  }
+
   res.json({ status: 'prewarm started', owner, repo });
 
-  const token = req.headers.authorization?.split(' ')[1] || null;
   buildExecutor.prewarm(owner, repo, token as any).catch((err: any) => {
     console.error(`Prewarm failed for ${owner}/${repo}:`, err.message);
   });
