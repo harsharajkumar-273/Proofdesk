@@ -21,6 +21,12 @@ const ensureChildPath = (basePath: string, relativePath: string = ''): string =>
   if (!resolved.startsWith(`${basePath}${path.sep}`) && resolved !== basePath) {
     throw new Error('Access denied');
   }
+
+  const relativeToRoot = path.relative(basePath, resolved);
+  if (relativeToRoot === '.git' || relativeToRoot.startsWith(`.git${path.sep}`)) {
+    throw new Error('Access to .git directory is forbidden');
+  }
+
   return resolved;
 };
 
