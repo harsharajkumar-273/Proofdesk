@@ -597,9 +597,9 @@ class BuildExecutor {
 
   /* ─── Docker execution with line-by-line log streaming ───────────────────── */
 
-  _spawnDockerWithLogs(cmd: string, sessionId: string): Promise<{ stdout: string; stderr: string }> {
+  _spawnDockerWithLogs(cmd: string, args: string[], sessionId: string): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(cmd, { shell: true });
+      const proc = spawn(cmd, args, { shell: false });
       let stdout = '';
       let stderr = '';
       const buf = { out: '', err: '' };
@@ -1322,16 +1322,15 @@ class BuildExecutor {
       };
     }
 
-    const cmd = [
-      'docker exec',
-      xmlId ? `-e SECTION_XMLID="${xmlId}"` : '',
+    const args = [
+      'exec',
+      ...(xmlId ? ['-e', `SECTION_XMLID=${xmlId}`] : []),
       containerName,
-      '/usr/local/bin/docker-entrypoint.sh build',
-    ]
-      .filter(Boolean)
-      .join(' ');
+      '/usr/local/bin/docker-entrypoint.sh',
+      'build'
+    ];
 
-    logger.info(`Running build: ${cmd}`, { sessionId, cmd });
+    logger.info(`Running build: docker ${args.join(' ')}`, { sessionId });
 
     const buildStartTime = process.hrtime();
     activeBuildJobs.inc();
@@ -1345,7 +1344,7 @@ class BuildExecutor {
           span.setAttribute('sessionId', sessionId);
           span.setAttribute('repo', repoKey);
           if (xmlId) span.setAttribute('xmlId', xmlId);
-          return this._spawnDockerWithLogs(cmd, sessionId);
+          return this._spawnDockerWithLogs('docker', args, sessionId);
         },
         options.traceParent
       );
@@ -1435,7 +1434,7 @@ class BuildExecutor {
         entryFile,
         stdout,
         stderr,
-        command: cmd,
+        command: `docker ${args.join(' ')}`,
         sessionId,
       };
     } catch (err: any) {
@@ -1458,7 +1457,7 @@ class BuildExecutor {
         entryFile: null,
         stdout: err.stdout || '',
         stderr: err.stderr || err.message,
-        command: cmd,
+        command: `docker ${args.join(' ')}`,
         sessionId,
       };
     } finally {
