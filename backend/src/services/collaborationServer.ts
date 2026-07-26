@@ -10,6 +10,7 @@ import {
   removeAwarenessStates,
 } from 'y-protocols/awareness';
 import authSessionStore from './authSessionStore.js';
+import buildExecutor from './buildExecutor.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
 import { websocketActiveConnections } from './metricsService.js';
 import {
@@ -417,6 +418,13 @@ export const attachCollaborationServer = (): WebSocketServer => {
 
       if (!isValidRoomId(roomId)) {
         connection.close(1008, 'roomId is required');
+        return;
+      }
+
+      const login = authSession.user?.login;
+      const session = buildExecutor.getSession(roomId as string);
+      if (login && session && session.creatorLogin && session.creatorLogin !== login) {
+        connection.close(1008, 'access denied');
         return;
       }
 
