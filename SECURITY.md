@@ -13,7 +13,7 @@ We take security seriously and are committed to ensuring Proofdesk remains a sec
 
 If you discover a security vulnerability within Proofdesk, please **do not** open a public issue. We appreciate your efforts to responsibly disclose your findings.
 
-Please report security issues by sending an email to the repository maintainers or by using GitHub's built-in private vulnerability reporting feature (if enabled for this repository).
+Please report security issues directly by emailing our security team at **security@proofdesk.app**. You may also use GitHub's built-in private vulnerability reporting feature for this repository.
 
 ### What to include in your report
 
@@ -36,8 +36,8 @@ To help us triage and resolve the issue quickly, please include the following de
 
 We are continuously working to improve the security posture of Proofdesk. Recent proactive measures include:
 - Securing internal monitoring endpoints against unauthorized access.
-- Strengthening WebSocket authentication to prevent Insecure Direct Object Reference (IDOR) vulnerabilities in collaborative rooms.
-- Implementing robust rate limiting and authentication checks on build initialization and prewarming endpoints to prevent Denial of Service (DoS).
+- Strengthening WebSocket authentication to prevent Insecure Direct Object Reference (IDOR) vulnerabilities in collaborative rooms by strictly enforcing session creator verification.
+- Implementing rate limiting on build initialization (`initBuild`) and requiring authentication via `requireAccessToken` on prewarming endpoints (`/build/prewarm`) to mitigate Denial of Service (DoS) risks.
 - Hardening containerized build environments (via `scons` and Docker) against path traversal and command injection.
 
 Thank you for helping keep Proofdesk secure!

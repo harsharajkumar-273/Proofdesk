@@ -422,8 +422,18 @@ export const attachCollaborationServer = (): WebSocketServer => {
       }
 
       const login = authSession.user?.login;
+      if (!login) {
+        connection.close(1008, 'authenticated user required');
+        return;
+      }
+
       const session = buildExecutor.getSession(roomId as string);
-      if (login && session && session.creatorLogin && session.creatorLogin !== login) {
+      if (!session) {
+        connection.close(1008, 'invalid session');
+        return;
+      }
+
+      if (!session.creatorLogin || session.creatorLogin !== login) {
         connection.close(1008, 'access denied');
         return;
       }
