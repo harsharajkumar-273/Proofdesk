@@ -59,9 +59,21 @@ export class WorkspaceRepository {
   }
 
   async deleteSession(id: string) {
-    return prisma.workspaceSession.delete({
+    const session = await prisma.workspaceSession.findUnique({ where: { id } });
+    const result = await prisma.workspaceSession.delete({
       where: { id },
     });
+
+    if (session) {
+      try {
+        const buildExecutorModule = await import('../services/buildExecutor.js');
+        await buildExecutorModule.default.cleanup(id);
+      } catch (err: any) {
+        console.error(`[WorkspaceRepository] Disk cleanup failed for deleted session ${id}:`, err.message);
+      }
+    }
+
+    return result;
   }
 
   async createBuildLog(data: {

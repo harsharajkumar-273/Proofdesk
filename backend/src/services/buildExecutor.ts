@@ -13,6 +13,7 @@ import { getProofdeskDataRoot, getProofdeskDataPath } from '../utils/dataPaths.j
 import githubCacheStore from './githubCacheStore.js';
 import { recordPreviewSnapshot } from './previewHistoryService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
+import prisma from './db.js';
 import logger from '../utils/logger.js';
 import { resolveContainedPath } from '../utils/pathContainment.js';
 import { dockerBuildDurationSeconds, activeBuildJobs } from './metricsService.js';
@@ -334,7 +335,7 @@ class BuildExecutor {
     console.log('[BuildExecutor] Periodic cleanup task started (1h interval)');
   }
 
-  async runGlobalCleanup(): Promise<void> {
+  async runGlobalCleanup(): Promise<{ deletedDirs: string[] }> {
     console.log('[BuildExecutor] Running global cleanup check...');
     const now = Date.now();
     const MAX_AGE = Number(process.env.PROOFDESK_CACHE_TTL_MS) || 24 * 60 * 60 * 1000; // 24h
@@ -390,24 +391,41 @@ class BuildExecutor {
 
     await this._saveCache();
 
-    // 3. Clean up orphans in .proofdesk-data that aren't in sessions OR buildCache
+    // 3. Clean up orphans in workDir that aren't in database sessions OR buildCache
+    const deletedDirs: string[] = [];
     try {
+      let dbSessionIds = new Set<string>();
+      try {
+        const dbSessions = await prisma.workspaceSession.findMany({
+          select: { id: true },
+        });
+        dbSessionIds = new Set(dbSessions.map((s) => s.id));
+      } catch {
+        dbSessionIds = new Set(this.sessions.keys());
+      }
+
       const dirs = await fs.readdir(this.workDir);
       for (const dir of dirs) {
         if (!/^[0-9a-f]{16}$/.test(dir)) continue;
 
         const fullPath = path.join(this.workDir, dir);
+        const inDb = dbSessionIds.has(dir);
         const inSessions = this.sessions.has(dir);
-        const inCache = [...this.buildCache.values()].some((e) => path.dirname(e.repoPath) === fullPath);
+        const inCache = [...this.buildCache.values()].some(
+          (e) => path.resolve(path.dirname(e.repoPath)) === path.resolve(fullPath)
+        );
 
-        if (!inSessions && !inCache) {
+        if (!inDb && !inSessions && !inCache) {
           console.log(`[BuildExecutor] Deleting orphaned data directory: ${dir}`);
           await fs.rm(fullPath, { recursive: true, force: true });
+          deletedDirs.push(fullPath);
         }
       }
     } catch (err: any) {
       console.error('[BuildExecutor] Orphan cleanup error:', err.message);
     }
+
+    return { deletedDirs };
   }
 
   scheduleCleanup(sessionId: string): void {
