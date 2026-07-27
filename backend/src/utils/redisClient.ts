@@ -18,6 +18,27 @@ export const getSharedStateBackend = (): 'redis' | 'filesystem' =>
 export const isRedisSharedStateEnabled = (): boolean =>
   getSharedStateBackend() === 'redis' && REDIS_URL().length > 0;
 
+let isReconnectingMap = new Map<string, boolean>();
+const reconnectListeners: Array<() => void> = [];
+
+export const onRedisReconnect = (callback: () => void): () => void => {
+  reconnectListeners.push(callback);
+  return () => {
+    const idx = reconnectListeners.indexOf(callback);
+    if (idx >= 0) reconnectListeners.splice(idx, 1);
+  };
+};
+
+export const notifyRedisReconnect = (): void => {
+  for (const listener of [...reconnectListeners]) {
+    try {
+      listener();
+    } catch (err: any) {
+      console.error('[RedisReconnect] Listener callback error:', err?.message || err);
+    }
+  }
+};
+
 const createConnectedClient = async (scope: string): Promise<any> => {
   const client = createClient({
     url: REDIS_URL(),
@@ -29,6 +50,20 @@ const createConnectedClient = async (scope: string): Promise<any> => {
   });
 
   client.on('error', (error) => logRedisError(scope, error));
+  
+  client.on('reconnecting', () => {
+    isReconnectingMap.set(scope, true);
+    console.warn(`[Redis:${scope}] Connection lost, attempting reconnection...`);
+  });
+
+  client.on('ready', () => {
+    if (isReconnectingMap.get(scope)) {
+      isReconnectingMap.set(scope, false);
+      console.log(`[Redis:${scope}] Reconnected and ready.`);
+      notifyRedisReconnect();
+    }
+  });
+
   await client.connect();
   return client;
 };

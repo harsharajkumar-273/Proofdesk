@@ -1,5 +1,5 @@
 import { Queue, Worker, Job } from 'bullmq';
-import { isRedisSharedStateEnabled } from '../utils/redisClient.js';
+import { isRedisSharedStateEnabled, onRedisReconnect } from '../utils/redisClient.js';
 import buildExecutor from './buildExecutor.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import logger from '../utils/logger.js';
@@ -31,16 +31,98 @@ export const buildQueue = isRedisSharedStateEnabled()
   ? new Queue(QUEUE_NAME, { connection: connectionOptions })
   : null;
 
+export interface LocalQueueJob {
+  id: string;
+  sessionId: string;
+  options: any;
+  resolve: (val: any) => void;
+  reject: (err: any) => void;
+  createdAt: number;
+}
+
+const pendingMigratedResolvers = new Map<
+  string,
+  { resolve: (val: any) => void; reject: (err: any) => void }
+>();
+
+export const registerMigratedResolver = (
+  key: string,
+  resolve: (val: any) => void,
+  reject: (err: any) => void
+) => {
+  pendingMigratedResolvers.set(key, { resolve, reject });
+};
+
+export const resolveMigratedJob = (key: string, result: any) => {
+  const resolver = pendingMigratedResolvers.get(key);
+  if (resolver) {
+    pendingMigratedResolvers.delete(key);
+    resolver.resolve(result);
+  }
+};
+
+export const rejectMigratedJob = (key: string, err: any) => {
+  const resolver = pendingMigratedResolvers.get(key);
+  if (resolver) {
+    pendingMigratedResolvers.delete(key);
+    resolver.reject(err);
+  }
+};
+
 // ── In-Process Local Fallback Queue ──
-class InProcessBuildQueue {
-  private queue: Array<{ sessionId: string; options: any; resolve: (val: any) => void; reject: (err: any) => void }> = [];
+export class InProcessBuildQueue {
+  private queue: LocalQueueJob[] = [];
   private running = false;
+
+  get pendingCount(): number {
+    return this.queue.length;
+  }
+
+  get isRunning(): boolean {
+    return this.running;
+  }
+
+  getPendingJobs(): LocalQueueJob[] {
+    return [...this.queue];
+  }
 
   async add(sessionId: string, options: any): Promise<any> {
     return new Promise((resolve, reject) => {
-      this.queue.push({ sessionId, options, resolve, reject });
+      const id = `job_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      this.queue.push({ id, sessionId, options, resolve, reject, createdAt: Date.now() });
       void this.processNext();
     });
+  }
+
+  public async migrateToRedisQueue(targetQueue: Queue): Promise<number> {
+    if (this.queue.length === 0) return 0;
+
+    const jobsToMigrate = [...this.queue];
+    this.queue = [];
+
+    let migratedCount = 0;
+    for (const job of jobsToMigrate) {
+      try {
+        const bullJob = await targetQueue.add(
+          'compile',
+          { sessionId: job.sessionId, options: job.options, migrationId: job.id },
+          {
+            removeOnComplete: true,
+            removeOnFail: true,
+          }
+        );
+
+        registerMigratedResolver(bullJob.id || job.id, job.resolve, job.reject);
+        registerMigratedResolver(job.id, job.resolve, job.reject);
+        migratedCount += 1;
+        logger.info(`Migrated local fallback job ${job.id} to Redis BullMQ queue (Job ID: ${bullJob.id})`);
+      } catch (err: any) {
+        logger.error(`Failed to migrate local fallback job ${job.id} to Redis, restoring to local queue`, err);
+        this.queue.push(job);
+      }
+    }
+
+    return migratedCount;
   }
 
   private async processNext() {
@@ -89,7 +171,25 @@ class InProcessBuildQueue {
   }
 }
 
-const localQueue = new InProcessBuildQueue();
+export const localQueue = new InProcessBuildQueue();
+
+export const migrateLocalQueueToRedis = async (): Promise<number> => {
+  if (isRedisSharedStateEnabled() && buildQueue && localQueue.pendingCount > 0) {
+    logger.info(`Migrating ${localQueue.pendingCount} pending jobs from local fallback queue to Redis BullMQ queue...`);
+    return await localQueue.migrateToRedisQueue(buildQueue);
+  }
+  return 0;
+};
+
+// Register heartbeat/reconnection listener to automatically migrate local fallback queue back to Redis
+if (isRedisSharedStateEnabled()) {
+  onRedisReconnect(() => {
+    logger.info('[BuildQueue] Redis reconnection detected. Initiating task migration from fallback queue to BullMQ...');
+    migrateLocalQueueToRedis().catch((err) => {
+      logger.error('[BuildQueue] Task migration to Redis failed after reconnection:', err);
+    });
+  });
+}
 
 const ensureSessionHydrated = async (sessionId: string) => {
   if (!buildExecutor.hasSession(sessionId)) {
@@ -115,12 +215,20 @@ const ensureSessionHydrated = async (sessionId: string) => {
 
 export const pushBuildJob = async (sessionId: string, options: { xmlId?: string | null; traceParent?: string | null } = {}): Promise<boolean> => {
   if (isRedisSharedStateEnabled() && buildQueue) {
-    logger.info(`Pushing build job to Redis queue for session ${sessionId}`, { sessionId, options });
-    await buildQueue.add('compile', { sessionId, options }, {
-      removeOnComplete: true,
-      removeOnFail: true,
-    });
-    return true;
+    try {
+      logger.info(`Pushing build job to Redis queue for session ${sessionId}`, { sessionId, options });
+      await buildQueue.add('compile', { sessionId, options }, {
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+      return true;
+    } catch (redisErr: any) {
+      logger.warn(`Redis queue add failed for session ${sessionId} (${redisErr.message}). Falling back to local in-process queue.`);
+      localQueue.add(sessionId, options).catch((err) => {
+        logger.error(`Local in-process queue job failed for session ${sessionId}`, err);
+      });
+      return true;
+    }
   } else {
     logger.info(`Pushing build job to in-process local queue for session ${sessionId}`, { sessionId, options });
     localQueue.add(sessionId, options).catch((err) => {
@@ -167,8 +275,19 @@ export const startBuildWorker = (): void => {
     { connection: connectionOptions, concurrency: 2 }
   );
 
-  buildWorker.on('failed', (job, err) => {
+  buildWorker.on('completed', (job: Job, result: any) => {
+    const migrationId = job?.data?.options?.migrationId || job?.id;
+    if (migrationId) {
+      resolveMigratedJob(migrationId, result);
+    }
+  });
+
+  buildWorker.on('failed', (job: Job | undefined, err: Error) => {
     logger.error(`Background build job failed for job ${job?.id}`, err);
+    const migrationId = job?.data?.options?.migrationId || job?.id;
+    if (migrationId) {
+      rejectMigratedJob(migrationId, err);
+    }
     if (job?.data?.sessionId) {
       const errResult = {
         success: false,
