@@ -14,6 +14,7 @@ import githubCacheStore from './githubCacheStore.js';
 import { recordPreviewSnapshot } from './previewHistoryService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import logger from '../utils/logger.js';
+import { resolveContainedPath } from '../utils/pathContainment.js';
 import { dockerBuildDurationSeconds, activeBuildJobs } from './metricsService.js';
 import {
   getRedisClient,
@@ -126,6 +127,12 @@ const PATCHED_TOOLCHAIN_FILES = [
 const SHARED_DOCKER_VOLUMES = [
   '-v mra-pretex-cache:/home/vagrant/cache',
 ].join(' ');
+
+// Sandbox resource limits for containers that execute untrusted repository content.
+// README.md advertises a "512MB RAM and 64 PID limit"; without these flags the containers ran
+// with unrestricted host resources, so a runaway build could exhaust the host's memory or fork
+// bomb it. Kept as one constant so every build execution stays in step.
+const DOCKER_RESOURCE_LIMITS = '--memory 512m --pids-limit 64';
 
 export interface BuildSession {
   id?: string;
@@ -590,9 +597,9 @@ class BuildExecutor {
 
   /* ─── Docker execution with line-by-line log streaming ───────────────────── */
 
-  _spawnDockerWithLogs(cmd: string, sessionId: string): Promise<{ stdout: string; stderr: string }> {
+  _spawnDockerWithLogs(cmd: string, args: string[], sessionId: string): Promise<{ stdout: string; stderr: string }> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(cmd, { shell: true });
+      const proc = spawn(cmd, args, { shell: false });
       let stdout = '';
       let stderr = '';
       const buf = { out: '', err: '' };
@@ -668,6 +675,7 @@ class BuildExecutor {
     const cmd = [
       'docker run -d',
       `--name ${containerName}`,
+      DOCKER_RESOURCE_LIMITS,
       `-v "${session.repoPath}:/repo"`,
       `-v "${session.outputPath}:/output"`,
       `-v "${session.buildPath || path.join(path.dirname(session.repoPath), 'build')}:/home/vagrant/build"`,
@@ -1314,16 +1322,15 @@ class BuildExecutor {
       };
     }
 
-    const cmd = [
-      'docker exec',
-      xmlId ? `-e SECTION_XMLID="${xmlId}"` : '',
+    const args = [
+      'exec',
+      ...(xmlId ? ['-e', `SECTION_XMLID=${xmlId}`] : []),
       containerName,
-      '/usr/local/bin/docker-entrypoint.sh build',
-    ]
-      .filter(Boolean)
-      .join(' ');
+      '/usr/local/bin/docker-entrypoint.sh',
+      'build'
+    ];
 
-    logger.info(`Running build: ${cmd}`, { sessionId, cmd });
+    logger.info(`Running build: docker ${args.join(' ')}`, { sessionId });
 
     const buildStartTime = process.hrtime();
     activeBuildJobs.inc();
@@ -1337,7 +1344,7 @@ class BuildExecutor {
           span.setAttribute('sessionId', sessionId);
           span.setAttribute('repo', repoKey);
           if (xmlId) span.setAttribute('xmlId', xmlId);
-          return this._spawnDockerWithLogs(cmd, sessionId);
+          return this._spawnDockerWithLogs('docker', args, sessionId);
         },
         options.traceParent
       );
@@ -1427,7 +1434,7 @@ class BuildExecutor {
         entryFile,
         stdout,
         stderr,
-        command: cmd,
+        command: `docker ${args.join(' ')}`,
         sessionId,
       };
     } catch (err: any) {
@@ -1450,7 +1457,7 @@ class BuildExecutor {
         entryFile: null,
         stdout: err.stdout || '',
         stderr: err.stderr || err.message,
-        command: cmd,
+        command: `docker ${args.join(' ')}`,
         sessionId,
       };
     } finally {
@@ -1582,7 +1589,13 @@ class BuildExecutor {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('Invalid session');
 
-    await fs.writeFile(path.join(session.repoPath, filePath), content, 'utf-8');
+    // `filePath` arrives straight from the request body. Prove it stays inside
+    // the session's repository before opening it for writing — both against
+    // traversal in the path itself and against symlinks committed into the
+    // repository, which a lexical check cannot see.
+    const targetPath = await resolveContainedPath(session.repoPath, filePath);
+
+    await fs.writeFile(targetPath, content, 'utf-8');
     logger.info(`Updated file: ${filePath}${xmlId ? ` (section: ${xmlId})` : ''}`, { sessionId });
 
     if (session.localTestMode) {
@@ -1727,6 +1740,7 @@ class BuildExecutor {
 
       const cmd = [
         'docker run --rm',
+        DOCKER_RESOURCE_LIMITS,
         '-e BUILD_PDF=1',
         `-v "${session.repoPath}:/repo"`,
         `-v "${session.outputPath}:/output"`,

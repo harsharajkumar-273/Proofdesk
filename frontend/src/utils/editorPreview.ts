@@ -589,6 +589,9 @@ export const getLanguageFromFilename = (filename: string): string => {
     powershell: 'powershell',
     json: 'json',
     xml: 'xml',
+    // PreTeXt sources are XML. Without this they fall through to plaintext,
+    // losing syntax highlighting and any XML-scoped editor providers.
+    ptx: 'xml',
     yaml: 'yaml',
     yml: 'yaml',
     toml: 'toml',

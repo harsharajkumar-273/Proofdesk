@@ -7,6 +7,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import buildExecutor from './services/buildExecutor.js';
+import { configureSqlitePragmas } from './services/db.js';
 import { attachCollaborationServer } from './services/collaborationServer.js';
 import localTestRepoService from './services/localTestRepoService.js';
 import { extractAccessToken } from './middleware/auth.js';
@@ -226,7 +227,7 @@ app.use((error: any, req: Request, res: Response, next: NextFunction) => {
   });
 });
 
-export const startServer = () => {
+export const startServer = async () => {
   const runtimeValidation = validateRuntimeConfig(process.env, {
     strict: process.env.NODE_ENV === 'production',
   });
@@ -234,6 +235,12 @@ export const startServer = () => {
   if (!runtimeValidation.ready && process.env.NODE_ENV === 'production') {
     throw new Error(`Runtime configuration invalid.\n${formatRuntimeValidation(runtimeValidation)}`);
   }
+
+  // Awaited before the server accepts connections. Applying the pragmas
+  // fire-and-forget would leave a window in which early queries run against a
+  // database still in rollback-journal mode — precisely the window where a
+  // "database is locked" error is most likely.
+  await configureSqlitePragmas();
 
   attachProcessMonitoring();
   ensureCollaborationServer();
@@ -282,5 +289,8 @@ export { app, server };
 const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isDirectRun && process.env.NODE_ENV !== 'test') {
-  startServer();
+  void startServer().catch((error: any) => {
+    console.error('Failed to start server:', error);
+    process.exitCode = 1;
+  });
 }

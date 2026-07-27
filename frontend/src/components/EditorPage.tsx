@@ -1,10 +1,9 @@
-import React, { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { loader } from '@monaco-editor/react';
 import {
   getSelectedRepo,
   setSelectedRepo,
-  getTeamSession,
   setTeamSession as saveTeamSessionToStorage,
 } from '../utils/workspaceStorage';
 import * as monacoRuntime from 'monaco-editor/esm/vs/editor/editor.api';
@@ -17,7 +16,6 @@ import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import {
   GitBranch, Search, FolderTree,
-  RefreshCw,
   AlertCircle,
   UploadCloud,
   History,
@@ -36,6 +34,7 @@ import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
 import EditorImportPane from './editor/EditorImportPane';
+import CommandPalette from './editor/CommandPalette';
 import { EditorHistoryPane } from './editor/EditorHistoryPane';
 import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
 import {
@@ -80,6 +79,25 @@ import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
 import { isPtxFile, validatePtxBuffer } from '../utils/pretexValidator';
+import {
+  DRAFT_SAVE_INTERVAL_MS,
+  applyDraftSaveError,
+  applyDraftSaveResult,
+  formatDraftSavedLabel,
+  initialDraftSaveState,
+  requestDraftSave,
+  shouldAttemptDraftSave,
+  type DraftSaveState,
+} from '../utils/draftSaveService';
+import type { PaletteCommand } from '../utils/commandPalette';
+import { PTX_SNIPPETS, indentSnippet, leadingWhitespace } from '../utils/ptxSnippets';
+import { findTagAtPosition, getTagDoc, formatTagDocMarkdown } from '../utils/ptxHoverDocs';
+import {
+  isSpellCheckableFile,
+  spellCheckBuffer,
+  type SpellChecker,
+} from '../utils/proseSpellCheck';
+import { loadSpellChecker } from '../utils/spellDictionary';
 import { parseBuildErrors } from '../utils/buildErrorParser';
 import { type PreviewSnapshotEntry } from '../utils/previewDiff';
 import { MonacoYjsCollaborationSession } from '../utils/yjsCollaboration';
@@ -196,6 +214,22 @@ interface Tab {
   language?: string;
 }
 
+/**
+ * Local CSS/JS from the workspace to inline into the WASM preview.
+ *
+ * Sourced from open tabs so the preview reflects unsaved edits — an asset the
+ * author is actively editing should render as edited, which is the point of a
+ * live preview. Assets are inlined rather than linked because a srcDoc iframe
+ * has no base URL for a relative href to resolve against.
+ *
+ * Defined at module scope so it is a stable reference and does not become a
+ * dependency of the preview effect, which already re-runs on `tabs`.
+ */
+const collectWorkspaceAssets = (openTabs: Tab[]): { path: string; content: string }[] =>
+  openTabs
+    .filter((tab) => tab.path.endsWith('.css') || tab.path.endsWith('.js'))
+    .map((tab) => ({ path: tab.path, content: tab.content }));
+
 interface EditorPageProps {
   onLogout: () => void;
 }
@@ -274,6 +308,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [compiledOutput, setCompiledOutput] = useState<string>('');
   const [repoCompilationResult, setRepoCompilationResult] = useState<CompilationResult | null>(null);
   
+  // Prose spell-check diagnostics for the active tab. Held in state rather
+  // than derived synchronously because the Hunspell dictionary is fetched
+  // lazily on first use.
+  const [spellDiagnostics, setSpellDiagnostics] = useState<Diagnostic[]>([]);
+
   const [buildSessionId, setBuildSessionId] = useState<string | null>(null);
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
   const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
@@ -284,7 +323,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
 
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [, setLastSavedAt] = useState<Date | null>(null);
   const [collaborationEnabled, setCollaborationEnabled] = useState<boolean>(Boolean(initialStoredTeamSessionRef.current));
   const [collaborationStatus, setCollaborationStatus] = useState<string>('');
   const [collaborators, setCollaborators] = useState<CollaborationParticipant[]>([]);
@@ -358,6 +397,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
+
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       const isMac = navigator.userAgent.indexOf('Mac OS X') !== -1;
@@ -365,6 +406,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (modifierPressed && e.key === '\\') {
         e.preventDefault();
         toggleSplitView();
+      }
+      // Cmd/Ctrl+K opens the command palette. Monaco treats Ctrl+K as a chord
+      // prefix, so it is also registered as an editor command in
+      // handleEditorDidMount for when focus is inside the editor.
+      if (modifierPressed && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCommandPaletteOpen((open) => !open);
       }
     };
 
@@ -390,6 +438,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
   const activeTab = tabs.find(t => t.id === activeTabId);
   const unsavedTabs = useMemo(() => tabs.filter((tab) => tab.hasUnsavedChanges), [tabs]);
+  const unsavedCountRef = useRef<number>(0);
+  unsavedCountRef.current = unsavedTabs.length;
   const reviewEntries = useMemo(
     () => Object.values(reviewMarkers).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
     [reviewMarkers]
@@ -441,13 +491,66 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       );
       if (tab) result.push({ ...err, filePath: tab.path, fileName: tab.name });
     }
+    // Spell-check diagnostics are produced asynchronously (the dictionary is
+    // fetched on first use), so they arrive via state rather than being
+    // recomputed synchronously here.
+    result.push(...spellDiagnostics);
     return result;
-  }, [tabs, buildErrors]);
+  }, [tabs, buildErrors, spellDiagnostics]);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const reviewDecorationIdsRef = useRef<string[]>([]);
   const mathValidationTimerRef = useRef<number | null>(null);
   const ptxValidationTimerRef = useRef<number | null>(null);
+  const spellCheckTimerRef = useRef<number | null>(null);
+  // Cached across renders so the 550 KB dictionary is fetched at most once
+  // per editor session.
+  const spellCheckerRef = useRef<SpellChecker | null>(null);
+
+  // Background draft auto-save. The backend commits the workspace to
+  // drafts/<username> using git plumbing, so this never switches the author's
+  // branch or disturbs their staged and unstaged state.
+  const [draftSave, setDraftSave] = useState<DraftSaveState>(initialDraftSaveState);
+  const draftSaveRef = useRef<DraftSaveState>(draftSave);
+  draftSaveRef.current = draftSave;
+
+  useEffect(() => {
+    const runDraftSave = async () => {
+      if (
+        !shouldAttemptDraftSave({
+          sessionId: buildSessionIdRef.current,
+          status: draftSaveRef.current.status,
+          unsavedCount: unsavedCountRef.current,
+        })
+      ) {
+        return;
+      }
+
+      const sessionId = buildSessionIdRef.current;
+      if (!sessionId) return;
+
+      setDraftSave((previous) => ({ ...previous, status: 'saving' }));
+      try {
+        const result = await requestDraftSave({ apiUrl: API_URL, sessionId });
+        setDraftSave((previous) => applyDraftSaveResult(previous, result));
+      } catch (error) {
+        // A failed draft save is background housekeeping — surface it in the
+        // status bar but never interrupt the author with a modal or a toast.
+        console.warn('[proofdesk] Draft auto-save failed:', error);
+        setDraftSave((previous) => applyDraftSaveError(previous, error));
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void runDraftSave();
+    }, DRAFT_SAVE_INTERVAL_MS);
+
+    return () => window.clearInterval(timer);
+  }, [API_URL]);
+  // Monaco language providers are registered globally, not per-editor, so the
+  // registration must be disposed if the editor remounts — otherwise every
+  // remount stacks another provider and hovers are duplicated.
+  const hoverProviderRef = useRef<Monaco.IDisposable | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
   
   const sidebarResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
@@ -867,7 +970,43 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     editor.onDidChangeCursorPosition((event) => {
       setSelectedReviewLine(event.position.lineNumber);
     });
+
+    // Cmd/Ctrl+K while the editor has focus. Registered here as well as on
+    // window because Monaco consumes Ctrl+K as a chord prefix and would
+    // otherwise swallow the shortcut.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, () => {
+      setCommandPaletteOpen((open) => !open);
+    });
+
+    // PreTeXt hover documentation. Registered against 'xml' because
+    // getLanguageFromFilename maps both .xml and .ptx to it, and guarded by
+    // the active tab so it cannot fire for unrelated XML files.
+    hoverProviderRef.current?.dispose();
+    hoverProviderRef.current = monaco.languages.registerHoverProvider('xml', {
+      provideHover: (model, position) => {
+        if (!isPtxFile(activeTabRef.current?.path)) return null;
+
+        const line = model.getLineContent(position.lineNumber);
+        const tag = findTagAtPosition(line, position.column);
+        if (!tag) return null;
+
+        const doc = getTagDoc(tag);
+        if (!doc) return null;
+
+        return {
+          contents: [{ value: formatTagDocMarkdown(doc), isTrusted: false }],
+        };
+      },
+    });
   };
+
+  useEffect(
+    () => () => {
+      hoverProviderRef.current?.dispose();
+      hoverProviderRef.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     const fetchUserData = async () => {
@@ -1059,7 +1198,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       const runWasmCompile = async () => {
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(tab.content);
+          const html = await compilePretextXmlWasm(tab.content, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
         } catch (error) {
           console.error('[WASM] Auto-compile failed:', error);
@@ -1170,6 +1309,94 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (ptxValidationTimerRef.current !== null) {
         window.clearTimeout(ptxValidationTimerRef.current);
         ptxValidationTimerRef.current = null;
+      }
+    };
+  }, [activeTab, editorReady]);
+
+  // Slice 3: prose spell checking.
+  //
+  // Mirrors the validator effects above but is asynchronous: the Hunspell
+  // dictionary is fetched from public/dictionaries/ on first use, so the
+  // debounce window is longer (600ms) and the results are written to state as
+  // well as to Monaco, since the Problems panel aggregates diagnostics
+  // synchronously and cannot await the dictionary.
+  useEffect(() => {
+    const monaco = monacoRef.current;
+    const editor = editorRef.current;
+    const model = editor?.getModel?.();
+    if (!monaco || !model) return;
+
+    if (!activeTab || !isSpellCheckableFile(activeTab.path)) {
+      monaco.editor.setModelMarkers(model, 'proofdesk-spell', []);
+      setSpellDiagnostics((prev) => (prev.length === 0 ? prev : []));
+      return;
+    }
+
+    if (spellCheckTimerRef.current !== null) {
+      window.clearTimeout(spellCheckTimerRef.current);
+    }
+
+    const content = activeTab.content;
+    const path = activeTab.path;
+    const name = activeTab.name;
+    let cancelled = false;
+
+    spellCheckTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        let checker = spellCheckerRef.current;
+        if (!checker) {
+          checker = await loadSpellChecker();
+          // A failed dictionary load disables spell checking silently rather
+          // than breaking the editor; loadSpellChecker already warned.
+          if (!checker) return;
+          spellCheckerRef.current = checker;
+        }
+
+        // The tab may have changed while the dictionary was downloading.
+        if (cancelled) return;
+        if (activeTabRef.current?.path !== path) return;
+
+        const latestEditor = editorRef.current;
+        const latestModel = latestEditor?.getModel?.();
+        const latestMonaco = monacoRef.current;
+        if (!latestModel || !latestMonaco) return;
+
+        const issues = spellCheckBuffer(content, checker);
+        latestMonaco.editor.setModelMarkers(
+          latestModel,
+          'proofdesk-spell',
+          issues.map((issue) => ({
+            severity: latestMonaco.MarkerSeverity.Warning,
+            message: issue.message,
+            source: issue.source,
+            startLineNumber: issue.startLineNumber,
+            startColumn: issue.startColumn,
+            endLineNumber: issue.endLineNumber,
+            endColumn: issue.endColumn,
+          })),
+        );
+
+        setSpellDiagnostics(
+          issues.map((issue) => ({
+            filePath: path,
+            fileName: name,
+            startLineNumber: issue.startLineNumber,
+            startColumn: issue.startColumn,
+            endLineNumber: issue.endLineNumber,
+            endColumn: issue.endColumn,
+            message: issue.message,
+            severity: 'warning' as const,
+            source: issue.source,
+          })),
+        );
+      })();
+    }, 600);
+
+    return () => {
+      cancelled = true;
+      if (spellCheckTimerRef.current !== null) {
+        window.clearTimeout(spellCheckTimerRef.current);
+        spellCheckTimerRef.current = null;
       }
     };
   }, [activeTab, editorReady]);
@@ -1710,6 +1937,124 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
   };
 
+  /**
+   * Inserts a PreTeXt snippet at the cursor, re-indented to match the current
+   * line so the block lines up with its siblings.
+   */
+  const insertSnippet = (snippetId: string) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+
+    const snippet = PTX_SNIPPETS.find((entry) => entry.id === snippetId);
+    if (!snippet) return;
+
+    const selection = editor.getSelection();
+    const model = editor.getModel();
+    if (!selection || !model) return;
+
+    const currentLine = model.getLineContent(selection.startLineNumber);
+    const body = indentSnippet(snippet.body, leadingWhitespace(currentLine));
+
+    const range = new monacoRuntime.Range(
+      selection.startLineNumber,
+      selection.startColumn,
+      selection.endLineNumber,
+      selection.endColumn,
+    );
+
+    editor.executeEdits('snippet', [
+      { range, text: body, forceMoveMarkers: true },
+    ]);
+    editor.focus();
+  };
+
+  /**
+   * Every action the command palette can run.
+   *
+   * Built from the same handlers the toolbar uses, so the palette cannot drift
+   * out of sync with what the buttons do. Commands that need context the user
+   * does not currently have are listed but disabled, which keeps the palette a
+   * complete index of the editor rather than a shifting subset.
+   */
+  const paletteCommands = useMemo<PaletteCommand[]>(() => {
+    const commands: PaletteCommand[] = [
+      {
+        id: 'build.compile-repository',
+        title: 'Compile Repository',
+        group: 'Build',
+        keywords: ['build', 'render', 'make'],
+        enabled: !compiling,
+        run: () => { void compileRepository(); },
+      },
+      {
+        id: 'build.compile-section',
+        title: 'Compile Current Section',
+        group: 'Build',
+        keywords: ['build', 'partial'],
+        enabled: !compiling && !!activeSectionXmlIdRef.current,
+        run: () => { void compileSectionById(); },
+      },
+      {
+        id: 'file.save-review',
+        title: 'Review and Save Changes',
+        group: 'File',
+        keywords: ['commit', 'stage', 'push'],
+        run: () => openSaveReview(),
+      },
+      {
+        id: 'layout.toggle-split',
+        title: 'Toggle Split View',
+        group: 'Layout',
+        hint: 'Ctrl+\\',
+        keywords: ['preview', 'pane'],
+        run: () => toggleSplitView(),
+      },
+      {
+        id: 'layout.toggle-sidebar',
+        title: 'Toggle Sidebar',
+        group: 'Layout',
+        keywords: ['explorer', 'panel'],
+        run: () => setSidebarOpen((open) => !open),
+      },
+    ];
+
+    const panes: Array<{ id: typeof activityBarTab; label: string }> = [
+      { id: 'explorer', label: 'Explorer' },
+      { id: 'search', label: 'Search' },
+      { id: 'git', label: 'Source Control' },
+      { id: 'problems', label: 'Problems' },
+      { id: 'import', label: 'Import PDF / LaTeX' },
+      { id: 'history', label: 'History' },
+    ];
+    for (const pane of panes) {
+      commands.push({
+        id: `view.${pane.id}`,
+        title: `Show ${pane.label}`,
+        group: 'View',
+        keywords: ['panel', 'sidebar', 'open'],
+        run: () => {
+          setActivityBarTab(pane.id);
+          setSidebarOpen(true);
+        },
+      });
+    }
+
+    for (const snippet of PTX_SNIPPETS) {
+      commands.push({
+        id: `snippet.${snippet.id}`,
+        title: `Insert ${snippet.title}`,
+        group: 'Snippet',
+        hint: snippet.description,
+        keywords: snippet.keywords,
+        enabled: !!activeTab,
+        run: () => insertSnippet(snippet.id),
+      });
+    }
+
+    return commands;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compiling, activeTab, activityBarTab]);
+
   const handleInsertImportedText = (text: string) => {
     const editor = editorRef.current;
     if (!editor) return;
@@ -2171,7 +2516,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       if (activeTab && (activeTab.path.endsWith('.xml') || activeTab.path.endsWith('.ptx'))) {
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(activeTab.content);
+          const html = await compilePretextXmlWasm(activeTab.content, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
         } catch (err) {
           console.error('[WASM] Switch compile failed:', err);
@@ -2179,6 +2524,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       }
     }
   };
+
 
   const compileRepository = async (repoData: Repository | null = repo) => {
     setSrcDocContent(null);
@@ -2190,7 +2536,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         setCompiling(true);
         try {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(activeTab.content);
+          const html = await compilePretextXmlWasm(activeTab.content, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
           setCompilationModeState('repository');
         } catch (err) {
@@ -2384,7 +2730,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       try {
         if (compilerRuntime === 'wasm' && (next.filePath.endsWith('.xml') || next.filePath.endsWith('.ptx'))) {
           const { compilePretextXmlWasm } = await import('../utils/wasmCompiler');
-          const html = await compilePretextXmlWasm(next.value);
+          const html = await compilePretextXmlWasm(next.value, collectWorkspaceAssets(tabs));
           setSrcDocContent(html);
           setLastSavedAt(new Date());
           rebuildInFlightRef.current = false;
@@ -2904,12 +3250,20 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         </div>
       </main>
 
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+        commands={paletteCommands}
+      />
+
       <EditorStatusBar
         compilationMode={compilationMode}
         autoCompile={autoCompile}
         repoCompilationResult={repoCompilationResult}
         openTabsCount={tabs.length}
         unsavedCount={unsavedTabs.length}
+        draftSaveLabel={formatDraftSavedLabel(draftSave)}
+        draftSaveFailed={draftSave.status === 'error'}
         userLogin={userData?.login}
         errorCount={allDiagnostics.filter((d) => d.severity === 'error').length}
         warningCount={allDiagnostics.filter((d) => d.severity === 'warning').length}

@@ -48,7 +48,7 @@ export default function createBuildRouter(): Router {
   // Sharing, cleanup, prewarming, caching
   router.post('/build/share/:sessionId', requireAccessToken, checkWorkspaceOwner, shareBuild);
   router.post('/build/cleanup', requireAccessToken, cleanupBuild);
-  router.post('/build/prewarm', prewarmBuild);
+  router.post('/build/prewarm', requireAccessToken, prewarmBuild);
   router.get('/build/cache-status', requireAccessToken, getBuildCacheStatus);
 
   // Legacy compile route
