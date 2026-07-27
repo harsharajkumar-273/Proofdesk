@@ -6,6 +6,7 @@ import {
   applyAwarenessUpdate,
   encodeAwarenessUpdate,
 } from 'y-protocols/awareness';
+import { captureAllCursorStates, restoreAllCursorStates } from './cursorReconciliation.js';
 
 const MESSAGE_DOC_UPDATE = 0;
 const MESSAGE_AWARENESS_UPDATE = 1;
@@ -169,11 +170,15 @@ export class MonacoYjsCollaborationSession {
       const payload = bytes.subarray(1);
 
       if (messageType === MESSAGE_DOC_UPDATE) {
+        const cursorStates = captureAllCursorStates(this.editor, this.model);
+
         Y.applyUpdate(this.doc, payload, this);
         if (!this.hasReceivedInitialState) {
           this.hasReceivedInitialState = true;
           this.ensureBinding();
           this.onStatus?.('Team room ready');
+        } else {
+          restoreAllCursorStates(this.editor, this.model, cursorStates);
         }
         return;
       }
