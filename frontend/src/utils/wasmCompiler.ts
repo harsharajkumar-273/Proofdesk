@@ -1,7 +1,10 @@
 import { loadPyodideRuntime } from './pyodideLoader';
 
 // Python parser script to compile PreTeXt XML structures to HTML
-const pythonCompilerScript = `
+// Exported so the escaping invariants below can be asserted in tests. The script runs inside
+// Pyodide, so a unit test cannot execute it directly; what it can do is fail the moment an
+// attribute is interpolated without going through esc().
+export const pythonCompilerScript = `
 import xml.etree.ElementTree as ET
 import re
 
@@ -27,6 +30,25 @@ def pretext_to_html(xml_content):
                 .replace('>', '&gt;')
                 .replace('"', '&quot;')
                 .replace("'", '&#39;'))
+
+    ALLOWED_URL_SCHEMES = ('http', 'https', 'mailto')
+
+    def safe_url(value):
+        # Escaping cannot help with this one. A javascript: URL contains no &, <, >
+        # or quote for esc() to touch, so it survives untouched and runs on click.
+        # The scheme has to be checked separately from the characters.
+        raw = str(value or '').strip()
+        if not raw:
+            return ''
+        # Browsers strip control characters and whitespace while reading a scheme,
+        # so a tab or newline spliced into the middle of one still resolves. Probe a
+        # stripped copy, but return the original so legitimate URLs are unaltered.
+        probe = ''.join(ch for ch in raw if ord(ch) > 0x20).lower()
+        head = probe.split('/')[0].split('?')[0].split('#')[0]
+        if ':' in head and head.split(':', 1)[0] not in ALLOWED_URL_SCHEMES:
+            return ''
+        # Relative paths and fragments have no scheme at all and are left alone.
+        return raw
 
     def title_of(node):
         # PreTeXt puts an environment's heading in a direct <title> child.
@@ -124,15 +146,15 @@ def pretext_to_html(xml_content):
         elif tag == 'item':
             return f"<li class='text-zinc-650 dark:text-zinc-300'>{inner_html}</li>{tail_html}"
         elif tag == 'url':
-            href = node.get('href', '')
+            href = esc(safe_url(node.get('href', '')))
             text = inner_html if inner_html else href
             return f"<a href='{href}' target='_blank' class='text-indigo-650 hover:underline dark:text-indigo-400 font-semibold'>{text}</a>{tail_html}"
         elif tag == 'xref':
-            ref = node.get('ref', '')
+            ref = esc(node.get('ref', ''))
             text = inner_html if inner_html else f"[{ref}]"
             return f"<a href='#{ref}' class='text-indigo-650 hover:underline dark:text-indigo-400 font-semibold'>{text}</a>{tail_html}"
         elif tag == 'image':
-            source = node.get('source', '')
+            source = esc(safe_url(node.get('source', '')))
             return f"<img src='{source}' class='mx-auto my-4 max-w-full rounded-lg shadow-sm border border-zinc-150 dark:border-zinc-800' />{tail_html}"
         elif tag == 'figure':
             return f"<figure class='my-6 p-4 border border-zinc-150 dark:border-zinc-800 rounded-xl bg-zinc-50/50 dark:bg-zinc-900/5'>{inner_html}</figure>{tail_html}"
