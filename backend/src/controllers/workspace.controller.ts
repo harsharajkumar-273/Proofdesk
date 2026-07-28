@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import buildExecutor from '../services/buildExecutor.js';
+import { InvalidRepoIdentifierError, assertValidRepoIdentifier } from '../utils/repoIdentifier.js';
 import {
   prepareWorkspace,
   getWorkspaceTree,
@@ -45,6 +46,19 @@ export const initWorkspace = async (req: Request, res: Response): Promise<any> =
 
   if (!owner || !repo) {
     return res.status(400).json({ error: 'owner and repo are required' });
+  }
+
+  // build.controller.ts already screens these before its own call to prepareWorkspace; this route
+  // did not, which left a path from request body to `git` with nothing in between (issue #100).
+  // Rejected here rather than deeper down so the caller gets a 400 describing the input instead of
+  // a 500 describing a subprocess.
+  try {
+    assertValidRepoIdentifier(owner, repo);
+  } catch (error: any) {
+    if (error instanceof InvalidRepoIdentifierError) {
+      return res.status(400).json({ error: error.message });
+    }
+    throw error;
   }
 
   try {

@@ -1,4 +1,5 @@
-import { exec, spawn } from 'child_process';
+import { exec, execFile, spawn } from 'child_process';
+import { assertValidRepoIdentifier } from '../utils/repoIdentifier.js';
 import { promisify } from 'util';
 import fs from 'fs/promises';
 import fsSync from 'fs';
@@ -26,6 +27,9 @@ import { pushBuildJob } from './buildQueue.js';
 import { traceAsync } from '../otel.js';
 
 const execAsync = promisify(exec);
+// execFile does not spawn a shell, so arguments are passed to the program as a vector rather than
+// being parsed as a command line. Used for every git invocation that carries caller-supplied text.
+const execFileAsync = promisify(execFile);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -921,7 +925,11 @@ class BuildExecutor {
   /* ─── Fast commit-hash check (no clone needed) ──────────────────────────── */
 
   async _getLatestCommit(owner: string, repo: string, token?: string | null): Promise<string | null> {
-    const url = `https://github.com/${owner}/${repo}.git`;
+    // Outside the try below on purpose. That block converts failures into `null`, which the caller
+    // reads as "could not reach the network, do a full build" — so validating inside it would turn
+    // a rejected name into a silent fall-through that still carries the bad value onward.
+    const { owner: safeOwner, repo: safeRepo } = assertValidRepoIdentifier(owner, repo);
+    const url = `https://github.com/${safeOwner}/${safeRepo}.git`;
     const env = token
       ? {
           ...process.env,
@@ -935,7 +943,10 @@ class BuildExecutor {
         }
       : { ...process.env, GIT_TERMINAL_PROMPT: '0' };
     try {
-      const { stdout } = await execAsync(`git ls-remote "${url}" HEAD`, { timeout: 3000, env });
+      const { stdout } = await execFileAsync('git', ['ls-remote', url, 'HEAD'], {
+        timeout: 3000,
+        env,
+      });
       return stdout.split('\t')[0]?.trim() || null;
     } catch {
       return null; // network error — fall through to full build
@@ -945,7 +956,8 @@ class BuildExecutor {
   /* ─── Clone (shallow for speed) ─────────────────────────────────────────── */
 
   async _clone(owner: string, repo: string, token: string | null | undefined, repoPath: string): Promise<void> {
-    const publicUrl = `https://github.com/${owner}/${repo}.git`;
+    const { owner: safeOwner, repo: safeRepo } = assertValidRepoIdentifier(owner, repo);
+    const publicUrl = `https://github.com/${safeOwner}/${safeRepo}.git`;
     const cloneEnv = token
       ? {
           ...process.env,
@@ -962,10 +974,18 @@ class BuildExecutor {
     // --depth=1 skips full history and is typically 5-10× faster than a full clone.
     // --single-branch skips all other branches.
     // --recurse-submodules --shallow-submodules also shallow-clones submodules.
-    const shallowCmd = `git clone --depth=1 --single-branch --recurse-submodules --shallow-submodules "${publicUrl}" "${repoPath}"`;
+    const shallowArgs = [
+      'clone',
+      '--depth=1',
+      '--single-branch',
+      '--recurse-submodules',
+      '--shallow-submodules',
+      publicUrl,
+      repoPath,
+    ];
 
     try {
-      const { stderr } = await execAsync(shallowCmd, opts);
+      const { stderr } = await execFileAsync('git', shallowArgs, opts);
       if (stderr) console.log('Clone stderr:', stderr);
     } catch (publicErr: any) {
       console.log('Public clone failed, retrying with auth...');
@@ -978,8 +998,9 @@ class BuildExecutor {
 
       const authHeader = `Authorization: Basic ${Buffer.from(`x-token:${token}`).toString('base64')}`;
       try {
-        await execAsync(
-          `git -c http.extraHeader="${authHeader}" clone --depth=1 --single-branch --recurse-submodules --shallow-submodules "${publicUrl}" "${repoPath}"`,
+        await execFileAsync(
+          'git',
+          ['-c', `http.extraHeader=${authHeader}`, ...shallowArgs],
           { timeout: 300000, maxBuffer: 10 * 1024 * 1024 }
         );
       } catch (authErr: any) {
@@ -989,7 +1010,7 @@ class BuildExecutor {
 
     // Confirm clone succeeded
     await fs.access(path.join(repoPath, '.git'));
-    console.log(`Cloned ${owner}/${repo} successfully`);
+    console.log(`Cloned ${safeOwner}/${safeRepo} successfully`);
   }
 
   /* ─── prepareRepository: cache check → dedup → clone ────────────────────── */
