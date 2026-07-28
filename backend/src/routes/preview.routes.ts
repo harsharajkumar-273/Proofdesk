@@ -5,7 +5,7 @@ import buildExecutor from '../services/buildExecutor.js';
 import { ensurePreviewBundle } from '../services/previewBundleService.js';
 import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
-import { extractAccessToken } from '../middleware/auth.js';
+import authSessionStore from '../services/authSessionStore.js';
 
 const getPreviewMimeType = (ext: string): string => {
   const mimeTypes: Record<string, string> = {
@@ -84,9 +84,9 @@ export const createPreviewRouter = (): Router => {
    * `req.params` is empty at mount level because `:sessionId` belongs to this route, so a check
    * placed there reads `sessionId` as undefined and waves everything through.
    *
-   * Authentication comes from the session cookie. `extractAccessToken` reads that before falling
-   * back to a bearer token, which is what makes this work at all — a browser cannot attach an
-   * Authorization header to an iframe navigation, and the preview is loaded in an iframe. The
+   * Authentication comes from the session cookie, which is also the only mechanism available to
+   * the caller that matters: a browser cannot attach an Authorization header to an iframe
+   * navigation, and the preview is loaded in an iframe. The
    * cookie is `SameSite=Lax`, and since cookies are scoped by host rather than origin, it is still
    * sent when the app and the API differ only by port or subdomain.
    *
@@ -109,13 +109,22 @@ export const createPreviewRouter = (): Router => {
       return res.status(400).send('Invalid session ID');
     }
 
-    const token = await extractAccessToken(req);
-    if (!token) {
+    // Only a real session cookie counts here, and a bearer token deliberately does not.
+    //
+    // `extractAccessToken` returns any bearer value it finds without checking it, setting
+    // `req.authSession` to null. On routes like /user that is harmless, because the token is
+    // forwarded to GitHub and a forged one fails there. This route never uses the token for
+    // anything, so presence would be the entire gate and `Authorization: Bearer anything` would
+    // walk straight through. Resolving the cookie directly means a request either carries a session
+    // this server issued or it does not.
+    const session = await authSessionStore.getSessionFromRequest(req);
+    const login = session?.user?.login;
+
+    if (!login) {
       return res.status(401).send('Authentication required');
     }
 
     const owner = buildExecutor.getSession(sessionId)?.creatorLogin;
-    const login = req.authSession?.user?.login;
 
     if (owner && owner !== login) {
       return res.status(403).send('Access denied');
