@@ -36,6 +36,7 @@ import BuildLogPanel from './editor/BuildLogPanel';
 import EditorImportPane from './editor/EditorImportPane';
 import CommandPalette from './editor/CommandPalette';
 import { EditorHistoryPane } from './editor/EditorHistoryPane';
+import EditorGraphPane from './editor/EditorGraphPane';
 import EditorRepoTabBar, { type RepoTabEntry } from './editor/EditorRepoTabBar';
 import {
   buildPreviewHref,
@@ -3190,6 +3191,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                     await openFileInTab(filePath);
                     showTeamNotice(`Restored ${filePath.split('/').pop()} successfully!`);
                   }}
+                />
+              )}
+
+              {activityBarTab === 'graph' && (
+                <EditorGraphPane
+                  activeFilePath={activeTab?.path}
                 />
               )}
             </div>
