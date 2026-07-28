@@ -285,6 +285,14 @@ const scheduleDocCleanup = (roomId: string, sharedDoc: SharedCollaborationDoc): 
       clearInterval(latest.snapshotSyncTimer);
       latest.snapshotSyncTimer = null;
     }
+    // The debounced persist is the one that outlives the document. Its callback closes over
+    // `latest`, so leaving it pending keeps the whole doc — and its Yjs state — reachable after the
+    // map entry is gone, and fires a write for a room nobody is in. `snapshotSyncTimer` above was
+    // already handled; this is the same argument for the other timer.
+    if (latest.persistTimer) {
+      clearTimeout(latest.persistTimer);
+      latest.persistTimer = null;
+    }
     docs.delete(roomId);
   }, DOC_RETENTION_MS);
   if (typeof timer.unref === 'function') {
