@@ -25,23 +25,90 @@ interface TokenCache {
 
 let cache: TokenCache | null = null;
 
+// In-flight load, shared by every concurrent caller.
+//
+// Without this, two requests arriving before the first read completes both see
+// `cache === null` and both issue their own `readFile`, ending up with two
+// *different* objects. Each then mutates its own copy and persists it, so
+// whichever write lands second silently drops the other's token.
+let loadPromise: Promise<TokenCache> | null = null;
+
+// Serializes writes. `persist` is called from more than one code path and each
+// call previously raced the others through `fs.writeFile` on the same path.
+let persistQueue: Promise<void> = Promise.resolve();
+
 const load = async (): Promise<TokenCache> => {
   if (cache) return cache;
-  try {
-    const raw = await fs.readFile(STORE_FILE(), 'utf-8');
-    cache = JSON.parse(raw) as TokenCache;
-  } catch {
-    cache = {};
+
+  if (!loadPromise) {
+    loadPromise = (async (): Promise<TokenCache> => {
+      try {
+        const raw = await fs.readFile(STORE_FILE(), 'utf-8');
+        const parsed = JSON.parse(raw) as unknown;
+        // A truncated or corrupted file parses to something that is not a
+        // token map; treat that as empty rather than handing back a bad shape.
+        cache = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as TokenCache)
+          : {};
+      } catch {
+        cache = {};
+      }
+      return cache;
+    })();
   }
-  return cache;
+
+  return loadPromise;
+};
+
+/**
+ * Writes the store by creating a temporary file and renaming it over the
+ * target.
+ *
+ * `fs.writeFile` truncates and then writes, so a concurrent reader — or a
+ * crash — can observe a partially written file. `load` reacts to a parse
+ * failure by resetting to `{}`, which turns a torn write into the silent loss
+ * of every token, so partial states must never become visible.
+ *
+ * `rename` is atomic within a filesystem, hence the temporary file living in
+ * the same directory as the target: a reader sees either the whole previous
+ * file or the whole new one. The name is randomised so two writers never
+ * collide on the temporary path itself, and the handle is flushed before the
+ * rename so the rename cannot expose an empty file after a crash.
+ */
+const writeAtomic = async (tokens: TokenCache): Promise<void> => {
+  const target = STORE_FILE();
+  await fs.mkdir(getProofdeskDataPath(), { recursive: true });
+
+  const tmp = `${target}.${process.pid}.${crypto.randomBytes(6).toString('hex')}.tmp`;
+  const payload = JSON.stringify(tokens, null, 2);
+
+  try {
+    const handle = await fs.open(tmp, 'w');
+    try {
+      await handle.writeFile(payload, 'utf-8');
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tmp, target);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw err;
+  }
 };
 
 const persist = async (tokens: TokenCache): Promise<void> => {
+  // Chain onto the queue so only one write runs at a time. The queue is
+  // advanced with a swallowed rejection so one failed write does not wedge
+  // every later one.
+  const run = persistQueue.then(() => writeAtomic(tokens));
+  persistQueue = run.catch(() => {});
+
   try {
-    const parentDir = getProofdeskDataPath();
-    await fs.mkdir(parentDir, { recursive: true });
-    await fs.writeFile(STORE_FILE(), JSON.stringify(tokens, null, 2), 'utf-8');
+    await run;
   } catch (err: any) {
+    // Preserves the original contract: persistence failures are logged, not
+    // thrown at the caller.
     console.error('[ShareTokenStore] persist error:', err.message);
   }
 };
