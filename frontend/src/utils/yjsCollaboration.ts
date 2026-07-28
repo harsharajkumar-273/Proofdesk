@@ -128,8 +128,7 @@ export class MonacoYjsCollaborationSession {
 
     this.awareness.setLocalState(null);
     this.destroyBinding();
-    this.ws?.close();
-    this.ws = null;
+    this.teardownSocket();
     this.publishParticipants();
   }
 
@@ -141,7 +140,46 @@ export class MonacoYjsCollaborationSession {
     this.doc.destroy();
   }
 
+  /**
+   * Detaches every handler from the current socket and closes it.
+   *
+   * `connectSocket` overwrites `this.ws` on each reconnect, but the previous
+   * socket keeps its four handlers, and each of those closures captures the
+   * provider, the editor, the model and the Yjs doc. Two things follow if the
+   * old socket is left attached:
+   *
+   *  - it is never garbage collected, so a flaky connection leaks one socket
+   *    and one closure set per reconnect attempt; and
+   *  - a socket that has not finished closing still delivers `onmessage`, so a
+   *    stale connection can call `Y.applyUpdate` on the shared document after a
+   *    replacement socket is already live, and its `onclose` can schedule a
+   *    further reconnect on top of the one already in flight.
+   *
+   * Nulling the handlers before closing also stops this teardown from
+   * re-entering `scheduleReconnect` through the close we ourselves trigger.
+   */
+  private teardownSocket() {
+    const ws = this.ws;
+    if (!ws) return;
+
+    ws.onopen = null;
+    ws.onmessage = null;
+    ws.onclose = null;
+    ws.onerror = null;
+
+    try {
+      ws.close();
+    } catch {
+      // Already closing or closed — nothing further to release.
+    }
+
+    this.ws = null;
+  }
+
   private connectSocket() {
+    // Retire the previous socket before a replacement takes its place.
+    this.teardownSocket();
+
     const socketUrl = new URL(this.wsUrl);
     socketUrl.searchParams.set('roomId', this.roomId);
     const ws = new WebSocket(socketUrl.toString());
