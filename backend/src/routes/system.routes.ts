@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { requireAccessToken } from '../middleware/auth.js';
+import { requireAccessToken, requireAdmin } from '../middleware/auth.js';
 import {
   getMonitoringContextFromRequest,
   readRecentMonitoringEvents,
@@ -76,7 +76,10 @@ export const createSystemRouter = (): Router => {
     });
   });
 
-  router.get('/monitoring/events', requireAccessToken, async (req: Request, res: Response) => {
+  // System-wide monitoring events carry backend and frontend stack traces,
+  // internal filesystem paths and request metadata for every user, so this is
+  // restricted to operators rather than to any authenticated caller.
+  router.get('/monitoring/events', requireAccessToken, requireAdmin, async (req: Request, res: Response) => {
     const limitQuery = req.query.limit;
     const limit = typeof limitQuery === 'string' || typeof limitQuery === 'number' ? Number(limitQuery) : undefined;
     const events = await readRecentMonitoringEvents({
