@@ -5,6 +5,7 @@ import buildExecutor from '../services/buildExecutor.js';
 import { ensurePreviewBundle } from '../services/previewBundleService.js';
 import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
+import { extractAccessToken } from '../middleware/auth.js';
 
 const getPreviewMimeType = (ext: string): string => {
   const mimeTypes: Record<string, string> = {
@@ -76,13 +77,56 @@ const versionLivePreviewAssets = (html: string, version?: string): string => {
 export const createPreviewRouter = (): Router => {
   const router = Router();
 
-  router.get('/:sessionId/*', async (req: Request<any>, res: Response): Promise<any> => {
+  /**
+   * Gate preview access on an authenticated session (issue #51).
+   *
+   * Applied on the route rather than at the `app.use('/preview', ...)` mount, which matters:
+   * `req.params` is empty at mount level because `:sessionId` belongs to this route, so a check
+   * placed there reads `sessionId` as undefined and waves everything through.
+   *
+   * Authentication comes from the session cookie. `extractAccessToken` reads that before falling
+   * back to a bearer token, which is what makes this work at all — a browser cannot attach an
+   * Authorization header to an iframe navigation, and the preview is loaded in an iframe. The
+   * cookie is `SameSite=Lax`, and since cookies are scoped by host rather than origin, it is still
+   * sent when the app and the API differ only by port or subdomain.
+   *
+   * On ownership: when a build session is on record and names a creator, only that user may read
+   * its preview. When no record exists the request is allowed through for any authenticated user,
+   * and that is a deliberate compromise rather than an oversight. Build sessions live in memory, so
+   * every preview on disk becomes an unowned orphan after a restart; failing closed there would
+   * break previews on every deploy. The reported hole — anyone on the internet reading a preview
+   * without logging in — is closed either way, and an orphan still requires guessing a 16-hex
+   * identifier.
+   */
+  const requirePreviewAccess = async (
+    req: Request<any>,
+    res: Response,
+    next: () => void
+  ): Promise<any> => {
     const { sessionId } = req.params;
-    const filePath = req.params[0] || 'overview.html';
 
     if (!/^[0-9a-f]{16}$/.test(sessionId)) {
       return res.status(400).send('Invalid session ID');
     }
+
+    const token = await extractAccessToken(req);
+    if (!token) {
+      return res.status(401).send('Authentication required');
+    }
+
+    const owner = buildExecutor.getSession(sessionId)?.creatorLogin;
+    const login = req.authSession?.user?.login;
+
+    if (owner && owner !== login) {
+      return res.status(403).send('Access denied');
+    }
+
+    return next();
+  };
+
+  router.get('/:sessionId/*', requirePreviewAccess, async (req: Request<any>, res: Response): Promise<any> => {
+    const { sessionId } = req.params;
+    const filePath = req.params[0] || 'overview.html';
 
     const activeSession = buildExecutor.getSession(sessionId);
     const outputPath = activeSession
