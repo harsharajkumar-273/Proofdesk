@@ -36,6 +36,7 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
   const [diffContent, setDiffContent] = useState<string>('');
   const [diffLoading, setDiffLoading] = useState<boolean>(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  const [visibleLineLimit, setVisibleLineLimit] = useState<number>(500);
   
   const [rollingBackFile, setRollingBackFile] = useState<string | null>(null);
 
@@ -73,6 +74,7 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
     setDiffLoading(true);
     setDiffError(null);
     setDiffContent('');
+    setVisibleLineLimit(500);
 
     try {
       const data = await requestJson<{ success: boolean; diff: string }>(
@@ -121,7 +123,7 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
     }
   };
 
-  // Render a parsed git unified diff line-by-line with simple coloration
+  // Render a parsed git unified diff line-by-line with truncation for large files
   const renderDiffLines = (rawDiff: string) => {
     if (!rawDiff.trim()) {
       return (
@@ -131,27 +133,54 @@ export const EditorHistoryPane: React.FC<EditorHistoryPaneProps> = ({
       );
     }
 
-    const lines = rawDiff.split('\n');
+    const allLines = rawDiff.split('\n');
+    const isTruncated = allLines.length > visibleLineLimit;
+    const linesToRender = isTruncated ? allLines.slice(0, visibleLineLimit) : allLines;
+
     return (
-      <pre className="font-mono text-xs overflow-x-auto p-4 bg-zinc-950 text-zinc-300 leading-normal select-text">
-        {lines.map((line, idx) => {
-          let lineClass = 'text-zinc-400'; // metadata header lines
-          if (line.startsWith('+') && !line.startsWith('+++')) {
-            lineClass = 'bg-emerald-950/45 text-emerald-400 border-l-2 border-emerald-500 pl-1';
-          } else if (line.startsWith('-') && !line.startsWith('---')) {
-            lineClass = 'bg-rose-950/45 text-rose-400 border-l-2 border-rose-505 pl-1';
-          } else if (line.startsWith('@@')) {
-            lineClass = 'text-indigo-400 font-semibold bg-indigo-950/20';
-          } else if (line.startsWith(' ') || !line.trim()) {
-            lineClass = 'text-zinc-300 pl-1.5';
-          }
-          return (
-            <div key={idx} className={`${lineClass} whitespace-pre`}>
-              {line}
+      <div className="flex flex-col min-h-full">
+        <pre className="font-mono text-xs overflow-x-auto p-4 bg-zinc-950 text-zinc-300 leading-normal select-text flex-1">
+          {linesToRender.map((line, idx) => {
+            let lineClass = 'text-zinc-400'; // metadata header lines
+            if (line.startsWith('+') && !line.startsWith('+++')) {
+              lineClass = 'bg-emerald-950/45 text-emerald-400 border-l-2 border-emerald-500 pl-1';
+            } else if (line.startsWith('-') && !line.startsWith('---')) {
+              lineClass = 'bg-rose-950/45 text-rose-400 border-l-2 border-rose-500 pl-1';
+            } else if (line.startsWith('@@')) {
+              lineClass = 'text-indigo-400 font-semibold bg-indigo-950/20';
+            } else if (line.startsWith(' ') || !line.trim()) {
+              lineClass = 'text-zinc-300 pl-1.5';
+            }
+            return (
+              <div key={idx} className={`${lineClass} whitespace-pre`}>
+                {line}
+              </div>
+            );
+          })}
+        </pre>
+
+        {isTruncated && (
+          <div className="p-3 bg-zinc-900 border-t border-zinc-800 flex items-center justify-between text-xs text-zinc-300 sticky bottom-0 z-10">
+            <span>
+              Showing initial <strong>{visibleLineLimit}</strong> of <strong>{allLines.length}</strong> lines (truncated for performance).
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setVisibleLineLimit((prev) => prev + 500)}
+                className="px-3 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-semibold rounded-lg text-xs transition-colors border border-zinc-700"
+              >
+                Show Next 500 Lines
+              </button>
+              <button
+                onClick={() => setVisibleLineLimit(allLines.length)}
+                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs transition-colors shadow-sm"
+              >
+                Show All ({allLines.length})
+              </button>
             </div>
-          );
-        })}
-      </pre>
+          </div>
+        )}
+      </div>
     );
   };
 
