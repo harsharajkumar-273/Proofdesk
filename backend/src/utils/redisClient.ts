@@ -106,13 +106,40 @@ export const getRedisSubscriber = async (): Promise<any> => {
 };
 
 /**
- * Drop every cached connection promise.
+ * Close one cached connection, if it produced a usable client.
+ *
+ * `close()` rather than `destroy()`: it lets commands already in flight finish before releasing the
+ * socket, which is what both a shutdown and a test teardown want.
+ *
+ * Every failure here is swallowed on purpose. A promise that rejected never had a socket to
+ * release, and a client closed twice objects to the second attempt — neither is a reason to leave
+ * the remaining connections open.
+ */
+export const closeConnection = async (pending: Promise<any> | null): Promise<void> => {
+  if (!pending) return;
+  try {
+    const client = await pending;
+    await client.close();
+  } catch {
+    // Nothing to release, or already released.
+  }
+};
+
+/**
+ * Drop every cached connection promise, closing the underlying clients first.
  *
  * Exists so a caller that knows the connections are stale — a test between cases, or a shutdown
  * path — can force the next call to reconnect rather than waiting for a failure to clear the slot.
+ *
+ * The slots are cleared before anything is closed, so a caller arriving mid-teardown starts a fresh
+ * connection instead of being handed one that is on its way out.
  */
-export const resetRedisClients = (): void => {
+export const resetRedisClients = async (): Promise<void> => {
+  const cached = [sharedClientPromise, publisherPromise, subscriberPromise];
+
   sharedClientPromise = null;
   publisherPromise = null;
   subscriberPromise = null;
+
+  await Promise.all(cached.map(closeConnection));
 };

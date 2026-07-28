@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 
 process.env.NODE_ENV = 'test';
 
-const { cacheConnection, resetRedisClients } = await import('../src/utils/redisClient.js');
+const { cacheConnection, closeConnection, resetRedisClients } = await import(
+  '../src/utils/redisClient.js'
+);
 
 /**
  * Regression tests for the permanently-broken client reported in issue #55.
@@ -31,8 +33,8 @@ describe('redis connection caching (issue #55)', () => {
     };
   };
 
-  beforeEach(() => {
-    resetRedisClients();
+  beforeEach(async () => {
+    await resetRedisClients();
   });
 
   it('caches a successful connection so the second caller reuses it', async () => {
@@ -148,9 +150,37 @@ describe('redis connection caching (issue #55)', () => {
     assert.equal(s.current, replacement, 'the late failure cleared a slot it no longer owned');
   });
 
-  it('resetRedisClients clears every cached connection', async () => {
-    // Calling it twice must be safe — a shutdown path may not know whether anything connected.
-    resetRedisClients();
-    resetRedisClients();
+  describe('closing cached connections', () => {
+    it('closes the underlying client rather than only dropping the reference', async () => {
+      // Clearing the slot alone leaves the socket open, so a reset would leak a connection per call.
+      let closed = 0;
+      await closeConnection(Promise.resolve({ close: async () => { closed += 1; } }));
+      assert.equal(closed, 1);
+    });
+
+    it('does nothing when the slot was empty', async () => {
+      await closeConnection(null);
+    });
+
+    it('ignores a slot whose connection never succeeded', async () => {
+      // A rejected attempt has no socket to release, and must not stop the other two closing.
+      await closeConnection(Promise.reject(new Error('never connected')));
+    });
+
+    it('ignores a client that objects to being closed twice', async () => {
+      await closeConnection(
+        Promise.resolve({
+          close: async () => {
+            throw new Error('already closed');
+          },
+        })
+      );
+    });
+
+    it('resetRedisClients is safe to call twice', async () => {
+      // A shutdown path may not know whether anything ever connected.
+      await resetRedisClients();
+      await resetRedisClients();
+    });
   });
 });
