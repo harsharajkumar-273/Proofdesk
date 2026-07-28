@@ -171,8 +171,17 @@ export const createAuthRouter = (): Router => {
   });
 
   router.post('/test-session', async (req: Request, res: Response): Promise<any> => {
-    const enabled = process.env.NODE_ENV !== 'production'
-      || String(process.env.ALLOW_TEST_SESSION_AUTH || '').toLowerCase() === 'true';
+    // This endpoint mints a fully authenticated session from a caller-supplied
+    // access token and a caller-supplied user object, with no verification. It
+    // must therefore be opt-in and never opt-out.
+    //
+    // It previously also enabled itself whenever NODE_ENV !== 'production'.
+    // NODE_ENV is unset by default, so that gate reads "enabled" for any
+    // deployment that does not explicitly set it — a bare `npm start`, a
+    // `docker run` of ./backend outside docker-compose.prod.yml, or a PaaS that
+    // does not inject it. A control that protects an authentication bypass has
+    // to fail closed, so enablement is now driven solely by the explicit flag.
+    const enabled = String(process.env.ALLOW_TEST_SESSION_AUTH || '').toLowerCase() === 'true';
 
     if (!enabled) {
       return res.status(404).json({ error: 'Not found' });
