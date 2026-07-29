@@ -77,7 +77,11 @@ export default class RepositoryCompiler {
   private sessions: Map<string, CompilerSession>;
 
   constructor() {
-    fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
+    // The workspace root used to be created here with fs.mkdirSync. A
+    // constructor cannot await, so the only way to keep that call was to keep
+    // it synchronous — it ran on the event loop at import time, before the
+    // directory was needed by anything. build() now creates it, which is the
+    // first point at which it is actually used.
     this.sessions = new Map();
   }
 
@@ -90,8 +94,9 @@ export default class RepositoryCompiler {
     const repoDir = path.join(sessionDir, 'repo');
     const outputDir = path.join(sessionDir, 'output');
 
-    fs.mkdirSync(repoDir, { recursive: true });
-    fs.mkdirSync(outputDir, { recursive: true });
+    await fs.promises.mkdir(WORKSPACE_ROOT, { recursive: true });
+    await fs.promises.mkdir(repoDir, { recursive: true });
+    await fs.promises.mkdir(outputDir, { recursive: true });
 
     // Validate owner/repo to prevent shell injection (only allow safe GitHub name chars)
     if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) {
@@ -116,7 +121,7 @@ export default class RepositoryCompiler {
       await ensureDockerImage();
       const { stdout, stderr } = await run(dockerCmd);
 
-      const artifacts = this.collectArtifacts(outputDir);
+      const artifacts = await this.collectArtifacts(outputDir);
       const entry = artifacts.find((a) => a.name === 'index.html') || artifacts[0];
 
       this.sessions.set(sessionId, { repoDir, outputDir });
@@ -174,16 +179,22 @@ export default class RepositoryCompiler {
     if (!resolved.startsWith(allowed + path.sep) && resolved !== allowed) {
       throw new Error('Path traversal attempt blocked');
     }
-    return fs.readFileSync(resolved);
+    return fs.promises.readFile(resolved);
   }
 
-  collectArtifacts(baseDir: string): ArtifactEntry[] {
+  // Now async, because the directory walk below is. The only caller is build(),
+  // which is already async; the return type gains a Promise and nothing outside
+  // this class consumes it.
+  async collectArtifacts(baseDir: string): Promise<ArtifactEntry[]> {
     const out: ArtifactEntry[] = [];
 
-    function walk(dir: string) {
-      for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
+    // Recursion is sequential rather than parallel on purpose: a build output
+    // tree is walked once and depth is small, so bounded ordering is worth more
+    // here than fanning out an unbounded number of concurrent readdir calls.
+    async function walk(dir: string) {
+      for (const f of await fs.promises.readdir(dir, { withFileTypes: true })) {
         const full = path.join(dir, f.name);
-        if (f.isDirectory()) walk(full);
+        if (f.isDirectory()) await walk(full);
         else {
           out.push({
             name: f.name,
@@ -194,7 +205,7 @@ export default class RepositoryCompiler {
       }
     }
 
-    walk(baseDir);
+    await walk(baseDir);
 
     return out.sort((a, b) =>
       a.name === 'index.html' ? -1 :
@@ -203,10 +214,10 @@ export default class RepositoryCompiler {
     );
   }
 
-  cleanup(sessionId: string): void {
+  async cleanup(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
-    fs.rmSync(path.dirname(session.repoDir), { recursive: true, force: true });
+    await fs.promises.rm(path.dirname(session.repoDir), { recursive: true, force: true });
     this.sessions.delete(sessionId);
   }
 }
