@@ -34,6 +34,15 @@ interface GitHubRelease {
   assets?: GitHubAsset[];
 }
 
+/**
+ * Whether a host is GitHub itself, and may therefore be sent the API token.
+ *
+ * The dot matters. A bare `hostname.endsWith('github.com')` also accepts `evilgithub.com`, which
+ * would hand the credential to anyone who can get a redirect pointed at a lookalike domain.
+ */
+export const isGitHubHost = (hostname: string): boolean =>
+  hostname === 'github.com' || hostname.endsWith('.github.com');
+
 class GitHubCacheStore {
   private token: string;
   private cacheRepo: string;
@@ -266,20 +275,38 @@ class GitHubCacheStore {
     const follow = (url: string, redirects = 5): Promise<void> =>
       new Promise((resolve, reject) => {
         if (redirects === 0) return reject(new Error('Too many redirects'));
-        const mod = url.startsWith('https') ? https : http;
+
+        let target: URL;
+        try {
+          target = new URL(url);
+        } catch {
+          return reject(new Error(`Invalid redirect target: ${url}`));
+        }
+
+        const headers: Record<string, string> = {
+          'User-Agent': 'proofdesk-cache/1.0',
+          'Accept': 'application/octet-stream',
+        };
+        // Only GitHub itself gets the token. A release asset redirects to a pre-signed S3 URL,
+        // where the extra Authorization header does two bad things at once: it hands our GitHub
+        // credential to a host that has no business seeing it, and it makes S3 reject the request
+        // as a signature mismatch, which is why cache restore has been failing.
+        if (isGitHubHost(target.hostname)) {
+          headers['Authorization'] = `token ${this.token}`;
+        }
+
+        const mod = target.protocol === 'https:' ? https : http;
         mod.get(
-          url,
-          {
-            headers: {
-              'Authorization': `token ${this.token}`,
-              'User-Agent': 'proofdesk-cache/1.0',
-              'Accept': 'application/octet-stream',
-            },
-          },
+          target,
+          { headers },
           (res) => {
             if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
               res.resume();
-              return follow(res.headers.location, redirects - 1).then(resolve, reject);
+              // A Location header is allowed to be relative (RFC 9110), and passing one straight
+              // back in would leave it without a scheme or host. Resolve it against the URL that
+              // produced it.
+              const next = new URL(res.headers.location, target).toString();
+              return follow(next, redirects - 1).then(resolve, reject);
             }
             if (res.statusCode !== 200) {
               res.resume();
