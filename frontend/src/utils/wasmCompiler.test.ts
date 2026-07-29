@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { compilePretextXmlWasm } from './wasmCompiler';
+import { compilePretextXmlWasm, pythonCompilerScript } from './wasmCompiler';
 import { loadPyodideRuntime } from './pyodideLoader';
 
 // Mock pyodide load runtime function
@@ -206,5 +206,106 @@ describe('WASM preview: local workspace assets (issue #16)', () => {
     const html = await compilePretextXmlWasm(XML, [{ path: 'empty.css', content: '' }]);
     expect(html).toContain('data-proofdesk-asset="empty.css"');
     expect(html).toContain('<article>Body</article>');
+  });
+});
+
+
+/**
+ * Regression tests for the stored XSS reported in issue #99.
+ *
+ * The vulnerable code is Python running inside Pyodide. The mock above returns canned strings
+ * rather than executing it — there is no interpreter in a Vitest process to execute it with — so
+ * these assert the invariants of the generated script instead. They go red the moment an attribute
+ * is interpolated without being escaped, which is the shape of the original bug.
+ *
+ * The behaviour itself was verified by extracting the script and running it under CPython, which
+ * works because it only uses `xml.etree.ElementTree` and `re` from the standard library. Before the
+ * fix, `<url href="x' onclick='...">` produced `<a href='x' onclick='...' target='_blank' ...>` —
+ * a live event handler. After it, the quote arrives as `&#39;` and stays inside the value.
+ */
+describe('PreTeXt compiler attribute escaping (issue #99)', () => {
+  /** The line where an attribute is read off the XML node, ignoring indentation. */
+  const assignmentFor = (attribute: string): string => {
+    const line = pythonCompilerScript
+      .split('\n')
+      .find((candidate) => candidate.includes(`node.get('${attribute}'`));
+    expect(line, `no line reads the ${attribute} attribute`).toBeDefined();
+    return (line as string).trim();
+  };
+
+  describe('the escaping helpers exist', () => {
+    it('defines esc()', () => {
+      expect(pythonCompilerScript).toContain('def esc(value):');
+    });
+
+    it('replaces the ampersand before the other characters', () => {
+      // Otherwise `&lt;` becomes a way to smuggle `<` back in after the fact.
+      const escBody = pythonCompilerScript.slice(pythonCompilerScript.indexOf('def esc(value):'));
+      expect(escBody.indexOf("replace('&'")).toBeGreaterThan(-1);
+      expect(escBody.indexOf("replace('&'")).toBeLessThan(escBody.indexOf("replace('<'"));
+    });
+
+    it("escapes the single quote, which is what the generated attributes are quoted with", () => {
+      expect(pythonCompilerScript).toContain("&#39;");
+    });
+
+    it('defines safe_url()', () => {
+      expect(pythonCompilerScript).toContain('def safe_url(value):');
+    });
+
+    it('allows only http, https and mailto', () => {
+      expect(pythonCompilerScript).toContain("ALLOWED_URL_SCHEMES = ('http', 'https', 'mailto')");
+    });
+
+    it('lowercases the scheme before comparing it', () => {
+      // Without this, `JaVaScRiPt:` walks straight through the allow-list.
+      const body = pythonCompilerScript.slice(pythonCompilerScript.indexOf('def safe_url(value):'));
+      expect(body).toContain('.lower()');
+    });
+
+    it('ignores control characters while reading the scheme', () => {
+      // Browsers strip them, so `java\tscript:` still resolves; the probe must strip them too.
+      const body = pythonCompilerScript.slice(pythonCompilerScript.indexOf('def safe_url(value):'));
+      expect(body).toContain('ord(ch) > 0x20');
+    });
+
+    it('returns an empty string for a rejected scheme rather than the original', () => {
+      const body = pythonCompilerScript.slice(pythonCompilerScript.indexOf('def safe_url(value):'));
+      expect(body).toContain("return ''");
+    });
+  });
+
+  describe('every attribute reaching the HTML is escaped at the point it is read', () => {
+    it('escapes href on <url> and checks its scheme', () => {
+      expect(assignmentFor('href')).toBe("href = esc(safe_url(node.get('href', '')))");
+    });
+
+    it('escapes source on <image> and checks its scheme', () => {
+      expect(assignmentFor('source')).toBe("source = esc(safe_url(node.get('source', '')))");
+    });
+
+    it('escapes ref on <xref>', () => {
+      // Emitted as `#{ref}`, so it is always a fragment and cannot carry a scheme of its own.
+      expect(assignmentFor('ref')).toBe("ref = esc(node.get('ref', ''))");
+    });
+
+    it('still escapes the name on theorem-like and exercise environments', () => {
+      // These were already escaped before this change. Pinned so they stay that way.
+      const escapedHeadings = pythonCompilerScript.match(/esc\(heading\)/g) ?? [];
+      expect(escapedHeadings.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('nothing bypasses the escaping', () => {
+    it('never reads an attribute straight into an f-string', () => {
+      // `f"<a href='{node.get(\'href\', \'\')}'"` would sidestep every assertion above.
+      expect(pythonCompilerScript).not.toMatch(/\{node\.get\(/);
+    });
+
+    it('emits the attributes from the escaped locals', () => {
+      expect(pythonCompilerScript).toContain("<a href='{href}'");
+      expect(pythonCompilerScript).toContain("<img src='{source}'");
+      expect(pythonCompilerScript).toContain("<a href='#{ref}'");
+    });
   });
 });
