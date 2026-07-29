@@ -56,6 +56,8 @@ model BuildLog {
   stderr     String?
   durationMs Int?
   createdAt  DateTime         @default(now())
+
+  @@index([sessionId])
 }
 
 model ReviewMarker {
@@ -67,6 +69,8 @@ model ReviewMarker {
   severity  String           // "error" | "warning" | "info"
   message   String
   createdAt DateTime         @default(now())
+
+  @@index([sessionId])
 }
 
 model Comment {
@@ -80,4 +84,6 @@ model Comment {
   resolved  Boolean          @default(false)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
+
+  @@index([sessionId])
 }
