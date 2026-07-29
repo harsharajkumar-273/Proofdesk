@@ -11,11 +11,30 @@ import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformServic
 import { buildFailurePayload } from '../utils/buildDiagnostics.js';
 import { getMonitoringContextFromRequest, recordMonitoringEvent } from '../services/monitoringService.js';
 
+const toBoolean = (value: unknown): boolean => String(value || '').toLowerCase() === 'true';
+
+// True while the process is running a test suite or serving the local demo
+// repository, neither of which should be throttled.
+//
+// `POST /build/init` allows 3 requests per 10 minutes, and the limiter buckets
+// by access token or client IP. A test suite runs every case against the same
+// token from the same address, so the fourth build case onward receives 429
+// regardless of what it is asserting — the limiter is measuring the suite, not
+// a caller worth restricting.
+const rateLimitingDisabled = (): boolean =>
+  process.env.NODE_ENV === 'test' || toBoolean(process.env.ENABLE_LOCAL_TEST_MODE);
+
 // rate limiter helper for build initialization
 const createRateLimiter = ({ windowMs, maxRequests }: { windowMs: number; maxRequests: number }) => {
   const buckets = new Map<string, number[]>();
 
   return (key: string) => {
+    // Checked per call rather than once at module load so the limiter follows
+    // the environment even if it is set after this module is imported.
+    if (rateLimitingDisabled()) {
+      return true;
+    }
+
     const now = Date.now();
     const cutoff = now - windowMs;
     const timestamps = (buckets.get(key) || []).filter((t) => t > cutoff);
