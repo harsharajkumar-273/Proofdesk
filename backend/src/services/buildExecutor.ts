@@ -50,9 +50,43 @@ class ArtifactLRUCache {
   private _map: Map<string, CacheValue>;
   private _bytes: number;
 
+  // sessionId → the keys that session owns.
+  //
+  // invalidateSession() used to scan every entry to find the handful belonging
+  // to one session — up to MAX_ARTIFACT_CACHE_ENTRIES comparisons per teardown,
+  // and it runs on every session cleanup, every cache-entry expiry sweep and
+  // every workspace replacement. This index turns that into a direct lookup.
+  //
+  // It has to be maintained everywhere the map is, which is the reason for the
+  // two helpers below: a key removed from _map but left here would make a later
+  // invalidateSession() try to delete a key that no longer exists, and worse,
+  // a key added here but never removed would keep its session's set growing.
+  private _bySession: Map<string, Set<string>>;
+
   constructor() {
     this._map = new Map(); // key → { buf, size, sessionId }
     this._bytes = 0;
+    this._bySession = new Map();
+  }
+
+  private _index(key: string, sessionId: string): void {
+    let keys = this._bySession.get(sessionId);
+    if (!keys) {
+      keys = new Set();
+      this._bySession.set(sessionId, keys);
+    }
+    keys.add(key);
+  }
+
+  private _unindex(key: string, sessionId: string): void {
+    const keys = this._bySession.get(sessionId);
+    if (!keys) return;
+    keys.delete(key);
+    // Drop the empty set so _bySession does not accumulate one entry per
+    // session the process has ever seen.
+    if (keys.size === 0) {
+      this._bySession.delete(sessionId);
+    }
   }
 
   get(key: string): Buffer | undefined {
@@ -65,26 +99,35 @@ class ArtifactLRUCache {
   }
 
   set(key: string, buf: Buffer, sessionId: string): void {
-    if (this._map.has(key)) {
-      const existing = this._map.get(key);
-      if (existing) {
-        this._bytes -= existing.size;
-      }
+    const existing = this._map.get(key);
+    if (existing) {
+      this._bytes -= existing.size;
+      // Unindexed against the session it was previously stored under, which is
+      // not necessarily the one now being written.
+      this._unindex(key, existing.sessionId);
       this._map.delete(key);
     }
+
     const size = buf.length;
     this._map.set(key, { buf, size, sessionId });
+    this._index(key, sessionId);
     this._bytes += size;
     this._evict();
   }
 
   invalidateSession(sessionId: string): void {
-    for (const [key, entry] of this._map) {
-      if (entry.sessionId === sessionId) {
+    const keys = this._bySession.get(sessionId);
+    if (!keys) return;
+
+    for (const key of keys) {
+      const entry = this._map.get(key);
+      if (entry) {
         this._bytes -= entry.size;
         this._map.delete(key);
       }
     }
+
+    this._bySession.delete(sessionId);
   }
 
   private _evict(): void {
@@ -97,6 +140,8 @@ class ArtifactLRUCache {
       const entry = this._map.get(oldestKey);
       if (entry) {
         this._bytes -= entry.size;
+        // Eviction removes the key from the map, so it must leave the index too.
+        this._unindex(oldestKey, entry.sessionId);
       }
       this._map.delete(oldestKey);
     }
