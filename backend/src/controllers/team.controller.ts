@@ -2,14 +2,24 @@ import { Request, Response } from 'express';
 import teamSessionStore, { normalizeTeamSessionCode, isValidTeamRepo } from '../services/teamSessions.js';
 
 export const createTeamSession = async (req: Request, res: Response): Promise<any> => {
-  const { repo, createdBy } = req.body;
+  const { repo } = req.body;
 
   if (!isValidTeamRepo(repo)) {
     return res.status(400).json({ error: 'Valid repo object with owner, name, and fullName is required' });
   }
 
+  // Host identity comes from the authenticated session, never from the request
+  // body. See the matching handler in system.routes.ts.
+  const sessionUser = req.authSession?.user;
+  if (!sessionUser?.login) {
+    return res.status(403).json({ error: 'An authenticated user session is required to host a team session' });
+  }
+
   try {
-    const session = await teamSessionStore.createSession({ repo, createdBy });
+    const session = await teamSessionStore.createSession({
+      repo,
+      createdBy: { login: sessionUser.login, name: sessionUser.name || sessionUser.login },
+    });
     res.json(session);
   } catch (error: any) {
     console.error('[TeamSession] create error:', error.message);
