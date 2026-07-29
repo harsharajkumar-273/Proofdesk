@@ -13,18 +13,44 @@ export interface TeamSessionData {
   createdAt?: number;
 }
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0;
+
+/**
+ * Validates a parsed value as a Repository, returning null if it isn't one.
+ *
+ * The previous checks tested truthiness rather than type — `!parsed?.owner`
+ * rejects '' and undefined but accepts `true`, `42` or `{}`. Anything stored
+ * under those keys was then handed back typed as a Repository, and the first
+ * consumer to call a string method on it threw. sessionStorage is writable by
+ * any script on the origin and survives reloads, so a single bad value wedged
+ * the app on every subsequent load until storage was cleared by hand.
+ */
+const parseRepository = (value: unknown): Repository | null => {
+  if (!value || typeof value !== 'object') return null;
+
+  const candidate = value as Record<string, unknown>;
+  if (
+    !isNonEmptyString(candidate.owner) ||
+    !isNonEmptyString(candidate.name) ||
+    !isNonEmptyString(candidate.fullName)
+  ) {
+    return null;
+  }
+
+  return {
+    owner: candidate.owner,
+    name: candidate.name,
+    fullName: candidate.fullName,
+    defaultBranch: isNonEmptyString(candidate.defaultBranch) ? candidate.defaultBranch : 'main',
+  };
+};
+
 export const getSelectedRepo = (): Repository | null => {
   try {
     const raw = sessionStorage.getItem('selectedRepo');
     if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.owner || !parsed?.name || !parsed?.fullName) return null;
-    return {
-      owner: parsed.owner,
-      name: parsed.name,
-      fullName: parsed.fullName,
-      defaultBranch: parsed.defaultBranch || 'main',
-    };
+    return parseRepository(JSON.parse(raw));
   } catch {
     return null;
   }
@@ -42,19 +68,27 @@ export const getTeamSession = (): TeamSessionData | null => {
   try {
     const raw = sessionStorage.getItem('teamSession');
     if (!raw) return null;
+
     const parsed = JSON.parse(raw);
-    if (!parsed?.code || !parsed?.repo?.fullName) return null;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    const candidate = parsed as Record<string, unknown>;
+    if (!isNonEmptyString(candidate.code)) return null;
+
+    // The nested repo went through even less checking than the outer object:
+    // only repo.fullName was tested, while repo.owner and repo.name were copied
+    // out unexamined. Reusing parseRepository holds all three to one standard.
+    const repo = parseRepository(candidate.repo);
+    if (!repo) return null;
+
     return {
-      code: parsed.code,
-      repo: {
-        owner: parsed.repo.owner,
-        name: parsed.repo.name,
-        fullName: parsed.repo.fullName,
-        defaultBranch: parsed.repo.defaultBranch || 'main',
-      },
-      hostName: parsed.hostName,
-      hostLogin: parsed.hostLogin,
-      createdAt: parsed.createdAt,
+      code: candidate.code,
+      repo,
+      hostName: isNonEmptyString(candidate.hostName) ? candidate.hostName : undefined,
+      hostLogin: isNonEmptyString(candidate.hostLogin) ? candidate.hostLogin : undefined,
+      createdAt: typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt)
+        ? candidate.createdAt
+        : undefined,
     };
   } catch {
     return null;
