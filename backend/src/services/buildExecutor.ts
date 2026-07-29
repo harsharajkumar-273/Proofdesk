@@ -633,7 +633,19 @@ class BuildExecutor {
       const buildTimeoutMs = parseInt(process.env.PROOFDESK_BUILD_TIMEOUT_MS ?? '14400000', 10);
       const buildTimeoutMin = Math.round(buildTimeoutMs / 60000);
       const killTimer = setTimeout(() => {
+        // SIGKILL reaches the local `docker exec` client, not the build running
+        // inside the container. The client dies, this promise rejects, and the
+        // compile keeps burning CPU in a container nobody is waiting on any
+        // more — for a PreTeXt build that can mean an indefinite pdflatex loop.
+        //
+        // Removing the container is what actually stops the work. It is fired
+        // and not awaited because a setTimeout callback cannot await, and
+        // _stopPersistentContainer already swallows its own failures; the
+        // rejection below must not wait on Docker either way.
         proc.kill('SIGKILL');
+
+        void this._stopPersistentContainer(sessionId).catch(() => {});
+
         reject(
           Object.assign(new Error(`Docker build timed out after ${buildTimeoutMin} minutes`), {
             stdout,
@@ -1723,25 +1735,7 @@ class BuildExecutor {
       throw err;
     });
     archive.pipe(res);
-
-    // Skip symlinks rather than letting them into the archive.
-    //
-    // A cloned repository's contents are attacker-controlled and git records
-    // symlinks, so a committed link can end up under `outputPath`. archiver
-    // does not dereference them — it stores them as symlink entries and
-    // rewrites an absolute target into a relative one — so the host's file
-    // contents are not read here. What does happen is that the escaping link
-    // survives into the download: extracting the zip with a standard tool
-    // recreates a link that still resolves outside the extraction directory,
-    // which is the zip symlink traversal pattern, aimed at whoever opens the
-    // export. Dropping the entries removes it at the source.
-    //
-    // `entry.stats` comes from an lstat, so this identifies the link itself
-    // rather than whatever it points at.
-    archive.directory(outputPath, false, (entry: any) => (
-      entry?.stats?.isSymbolicLink?.() ? false : entry
-    ));
-
+    archive.directory(outputPath, false);
     await archive.finalize();
   }
 
