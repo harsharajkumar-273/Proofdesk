@@ -374,7 +374,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
   const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
-  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history'>('explorer');
+  // 'graph' is a member because the render branch at the bottom of this file
+  // compares against it. Without it that comparison is between types with no
+  // overlap, which tsc -b reports as TS2367 and treats as an error — failing
+  // `npm run build`, and with it the frontend stage of docker/Dockerfile.nginx.
+  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history' | 'graph'>('explorer');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
