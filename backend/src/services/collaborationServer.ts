@@ -131,6 +131,17 @@ const ensureRedisSubscription = async (): Promise<void> => {
   if (!isRedisSharedStateEnabled()) return;
   if (redisSubscriptionPromise) return redisSubscriptionPromise;
 
+  // Failures are not cached.
+  //
+  // The memo above exists so the subscription is established once, but it used
+  // to retain a rejected promise just as readily as a fulfilled one. If
+  // getRedisSubscriber() or pSubscribe() failed even once — Redis not yet up
+  // during a rolling restart, for instance — every later call returned that
+  // same rejection without retrying, and the only call site (line 369) is
+  // `void ensureRedisSubscription()`, which discards it. Cross-instance sync
+  // then never establishes and nothing reports why.
+  //
+  // Clearing the memo on failure lets the next connection attempt retry.
   redisSubscriptionPromise = (async () => {
     const subscriber = await getRedisSubscriber();
     await subscriber.pSubscribe(`${REDIS_CHANNEL_PREFIX}*`, (message: string, channel: string) => {
@@ -156,7 +167,11 @@ const ensureRedisSubscription = async (): Promise<void> => {
         console.error('[Collab] Failed to process Redis room update:', error.message);
       }
     });
-  })();
+  })().catch((error: any) => {
+    redisSubscriptionPromise = null;
+    console.error('[Collab] Redis subscription failed, will retry on next attempt:', error?.message);
+    throw error;
+  });
 
   return redisSubscriptionPromise;
 };
