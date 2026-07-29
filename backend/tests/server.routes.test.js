@@ -425,7 +425,9 @@ describe('active backend routes', () => {
   });
 
   it('rewrites nested preview asset paths for knowls and shared CSS', async () => {
-    const knowlResponse = await request(app).get(`/preview/${previewSessionId}/knowl/sample.html`);
+    const knowlResponse = await request(app)
+      .get(`/preview/${previewSessionId}/knowl/sample.html`)
+      .set('Cookie', await previewCookie());
     assert.equal(knowlResponse.status, 200);
     assert.match(knowlResponse.text, /src="\/preview\/aaaaaaaaaaaaaaaa\/images\/important\.svg"/);
     assert.match(knowlResponse.text, /href="\/preview\/aaaaaaaaaaaaaaaa\/figure-images\/sample\.png"/);
@@ -433,13 +435,17 @@ describe('active backend routes', () => {
     assert.ok(knowlResponse.text.includes("replaceDelimitedCommands(tex, ['syseq','spalignsys'], convertSpAlign)"));
     assert.match(knowlResponse.text, /inlineMath:\[\[/);
 
-    const cssResponse = await request(app).get(`/preview/${previewSessionId}/css/ila.css`);
+    const cssResponse = await request(app)
+      .get(`/preview/${previewSessionId}/css/ila.css`)
+      .set('Cookie', await previewCookie());
     assert.equal(cssResponse.status, 200);
     assert.match(cssResponse.text, /url\("\/preview\/aaaaaaaaaaaaaaaa\/fonts\/CharterBT-Roman\.woff"\)/);
   });
 
   it('injects the MathBox loader cleanup into preview HTML', async () => {
-    const response = await request(app).get(`/preview/${previewSessionId}/demo.html`);
+    const response = await request(app)
+      .get(`/preview/${previewSessionId}/demo.html`)
+      .set('Cookie', await previewCookie());
     assert.equal(response.status, 200);
     assert.match(response.text, /id="mathbox-loader-preview-fix"/);
     assert.match(response.text, /proofdesk-loader-hidden/);
@@ -447,10 +453,51 @@ describe('active backend routes', () => {
   });
 
   it('cache-busts local live preview JavaScript and CSS references', async () => {
-    const response = await request(app).get(`/preview/${previewSessionId}/demo.html?t=live-123`);
+    const response = await request(app)
+      .get(`/preview/${previewSessionId}/demo.html?t=live-123`)
+      .set('Cookie', await previewCookie());
     assert.equal(response.status, 200);
     assert.match(response.text, /href="styles\.css\?proofdeskLive=live-123"/);
     assert.match(response.text, /src="js\/demo\.js\?proofdeskLive=live-123"/);
+  });
+
+  /** A session cookie from the local demo login — the only credential previews accept. */
+  const previewCookie = async () => {
+    const auth = await request(app).get('/auth/local-test');
+    return auth.headers['set-cookie'];
+  };
+
+  it('refuses a preview request carrying an unverified bearer token', async () => {
+    // A bearer value is never validated on this path, so accepting one would make the header
+    // itself the credential. Only a session this server issued may pass.
+    const response = await request(app)
+      .get(`/preview/${previewSessionId}/demo.html`)
+      .set('Authorization', 'Bearer not-a-real-token');
+    assert.equal(response.status, 401);
+  });
+
+  it('refuses a preview request with no credentials (issue #51)', async () => {
+    // The reported hole: anyone who knew a session id could read the compiled output.
+    const response = await request(app).get(`/preview/${previewSessionId}/demo.html`);
+    assert.equal(response.status, 401);
+  });
+
+  it('still rejects a malformed session id before asking for credentials', async () => {
+    const response = await request(app).get('/preview/not-a-session/demo.html');
+    assert.equal(response.status, 400);
+  });
+
+  it('accepts a preview request carrying the session cookie', async () => {
+    // A browser cannot put an Authorization header on an iframe navigation, so the cookie path is
+    // the one that actually matters in the product.
+    const auth = await request(app).get('/auth/local-test');
+    const cookie = auth.headers['set-cookie'];
+    assert.ok(cookie, 'the local demo login did not set a session cookie');
+
+    const response = await request(app)
+      .get(`/preview/${previewSessionId}/demo.html`)
+      .set('Cookie', cookie);
+    assert.equal(response.status, 200);
   });
 
   it('serves the Prometheus metrics data', async () => {
