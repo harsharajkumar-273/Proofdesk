@@ -7,7 +7,7 @@ const sharedIgnoredSpecs = ['tests/e2e/ui-sanity.spec.ts'];
 
 const backendCommand = hasLiveGitHubEnv
   ? 'FRONTEND_URL=http://127.0.0.1:4173 PORT=4002 ALLOW_TEST_SESSION_AUTH=true npm run dev --prefix backend'
-  : 'ENABLE_LOCAL_TEST_MODE=true LOCAL_TEST_TOKEN=local-test LOCAL_TEST_REPO_OWNER=demo LOCAL_TEST_REPO_NAME=course-demo LOCAL_TEST_REPO_PATH=./test-repo/course-demo FRONTEND_URL=http://127.0.0.1:4173 PORT=4002 npm run dev --prefix backend';
+  : 'ENABLE_LOCAL_TEST_MODE=true LOCAL_TEST_TOKEN=local-test LOCAL_TEST_REPO_OWNER=demo LOCAL_TEST_REPO_NAME=course-demo LOCAL_TEST_REPO_PATH=./test-repo/course-demo FRONTEND_URL=http://127.0.0.1:4173 PORT=4002 ALLOW_TEST_SESSION_AUTH=true npm run dev --prefix backend';
 
 const frontendCommand = hasLiveGitHubEnv
   ? 'VITE_BACKEND_URL=http://127.0.0.1:4002 npm run build --prefix frontend && npm run preview --prefix frontend -- --host 127.0.0.1 --port 4173'
