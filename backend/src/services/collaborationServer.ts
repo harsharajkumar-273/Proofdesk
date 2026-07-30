@@ -11,6 +11,7 @@ import {
 } from 'y-protocols/awareness';
 import authSessionStore from './authSessionStore.js';
 import buildExecutor from './buildExecutor.js';
+import teamSessionStore, { normalizeTeamSessionCode } from './teamSessions.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
 import { websocketActiveConnections } from './metricsService.js';
 import {
@@ -263,6 +264,9 @@ class SharedCollaborationDoc {
   }
 }
 
+// Room IDs produced by the client take the form `team:<code>:<path>`.
+const TEAM_ROOM_PREFIX = 'team:';
+
 const isValidRoomId = (roomId: any): boolean =>
   typeof roomId === 'string' && roomId.length > 0 && roomId.length <= 1024;
 
@@ -435,15 +439,56 @@ export const attachCollaborationServer = (): WebSocketServer => {
         return;
       }
 
-      const session = buildExecutor.getSession(roomId as string);
-      if (!session) {
-        connection.close(1008, 'invalid session');
-        return;
-      }
+      // Room IDs are team-session keys, not build-session IDs.
+      //
+      // buildCollaborationRoomId() composes `team:<code>:<path>`, and it is the
+      // only producer of room IDs in the client. Looking that string up in
+      // buildExecutor's map — which is keyed by 16-hex build IDs from
+      // crypto.randomBytes(8) — could never match, so every connection was
+      // closed as 'invalid session', including the room creator's.
+      //
+      // Authorisation belongs against the team session, which is also where the
+      // room's identity actually lives.
+      if (typeof roomId === 'string' && roomId.startsWith(TEAM_ROOM_PREFIX)) {
+        // Take the segment between the first two colons; the trailing file path
+        // may itself contain colons, so only the first split point matters.
+        const code = normalizeTeamSessionCode(roomId.slice(TEAM_ROOM_PREFIX.length).split(':')[0]);
 
-      if (!session.creatorLogin || session.creatorLogin !== login) {
-        connection.close(1008, 'access denied');
-        return;
+        if (!code) {
+          connection.close(1008, 'invalid session');
+          return;
+        }
+
+        const teamSession = await teamSessionStore.getSession(code);
+        if (!teamSession) {
+          connection.close(1008, 'invalid session');
+          return;
+        }
+
+        // Possession of a valid, unexpired invite code is the boundary.
+        //
+        // TeamSession records code, repo, hostName, hostLogin and timestamps —
+        // there is no joiner list, so there is no per-user membership to test
+        // against. Restricting to hostLogin instead would deny every invited
+        // collaborator, which is the entire purpose of a team session.
+        //
+        // This is weaker than per-user membership and stronger than the nothing
+        // that preceded #147: an authenticated caller must still hold a code
+        // that resolves to a live session, so the guessed-room-ID attack from
+        // #140 stays closed. Tracking joiners would allow a tighter check and
+        // is worth doing separately.
+      } else {
+        // Any other room ID shape is treated as a build session, as before.
+        const session = buildExecutor.getSession(roomId as string);
+        if (!session) {
+          connection.close(1008, 'invalid session');
+          return;
+        }
+
+        if (!session.creatorLogin || session.creatorLogin !== login) {
+          connection.close(1008, 'access denied');
+          return;
+        }
       }
 
       sharedDoc = getOrCreateDoc(roomId!);
