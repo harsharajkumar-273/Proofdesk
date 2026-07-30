@@ -139,7 +139,11 @@ export const initBuild = async (req: Request, res: Response): Promise<any> => {
   const token = req.accessToken;
   const { owner, repo, preferSeed, defaultBranch, sessionId, xmlId } = req.body;
 
-  const rateLimitKey = token || req.ip!;
+  // req.ip can be undefined on an unusual transport, and an empty key would
+  // merge every such caller into one bucket. Falling back to a constant is
+  // still a shared bucket, but a named one rather than an accidental collision
+  // with the token-keyed entries.
+  const rateLimitKey = token || req.ip || 'unknown-ip';
   if (!buildInitRateAllowed(rateLimitKey)) {
     return res.status(429).json({
       error: 'Build rate limit exceeded. Please wait a few minutes before starting another build.',

@@ -33,6 +33,10 @@ services:
       FRONTEND_URL: ${FRONTEND_URL}
       GITHUB_PERSONAL_TOKEN: ${GITHUB_PERSONAL_TOKEN:-}
       ENABLE_LOCAL_TEST_MODE: "false"
+      # One reverse proxy (the nginx service) sits in front of the backend, so
+      # Express should honour exactly one hop of X-Forwarded-For when deriving
+      # req.ip. Anything higher would trust addresses the client can write.
+      PROOFDESK_TRUST_PROXY_HOPS: "1"
       PROOFDESK_SESSION_SECRET: ${PROOFDESK_SESSION_SECRET}
       PROOFDESK_DATA_DIR: /var/lib/proofdesk
       PROOFDESK_TERMINAL_MODE: restricted
