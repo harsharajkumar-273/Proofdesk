@@ -41,6 +41,27 @@ let processMonitoringAttached = false;
 
 // Middleware
 app.use(helmet({ contentSecurityPolicy: false }));
+// How many reverse proxies sit in front of this server.
+//
+// Express derives req.ip from the socket unless told otherwise, so behind the
+// nginx service in docker-compose.prod.yml every request appears to originate
+// from the proxy. The rate limiter keys unauthenticated callers on req.ip, so
+// all of them share a single bucket and legitimate users lock each other out.
+//
+// Deliberately a hop count and not `true`. With `trust proxy` set to true
+// Express trusts the entire X-Forwarded-For chain and takes the left-most
+// entry, which the client writes — that is precisely the spoofing this setting
+// is meant to prevent, and it would let any caller bypass rate limiting by
+// inventing a header. A count means only the addresses appended by that many
+// trusted hops are honoured.
+//
+// Defaults to 0, preserving current behaviour, so a deployment without a proxy
+// is not silently made spoofable. docker-compose.prod.yml sets it to 1.
+const trustProxyHops = Number.parseInt(process.env.PROOFDESK_TRUST_PROXY_HOPS ?? '0', 10);
+if (Number.isFinite(trustProxyHops) && trustProxyHops > 0) {
+  app.set('trust proxy', trustProxyHops);
+}
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/assets/mathjax', express.static(MATHJAX_ASSET_DIR, {
