@@ -81,6 +81,25 @@ export const isMathPixConfigured = (): boolean => {
 };
 
 /**
+ * Escape the five XML predefined entities.
+ *
+ * Imported text is attacker-influenced: it comes from a PDF or Markdown file the
+ * user uploads, and MathPix returns whatever the document contained. Raw `<`, `>`
+ * and `&` in that text produced invalid XML at best, and at worst survived into
+ * the editor preview as live markup.
+ *
+ * `&` is replaced first, so the ampersands introduced by the later replacements
+ * are not themselves re-escaped into `&amp;lt;`.
+ */
+const escapeXml = (text: string): string =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+
+/**
  * Replace LaTeX math delimiters with PreTeXt equivalents:
  * - \[ equation \] -> <me>equation</me>
  * - $$ equation $$ -> <me>equation</me>
@@ -89,7 +108,15 @@ export const isMathPixConfigured = (): boolean => {
  *   currency like "$10 and $20" or "$5,$10" is left alone)
  */
 export const replaceMathDelimiters = (text: string): string => {
-  let result = text;
+  // Escaped up front, before any tag is emitted below.
+  //
+  // Ordering is the whole difficulty here. This function *generates* <me> and
+  // <m> markup, so escaping its output would turn that markup into literal
+  // &lt;me&gt; text and destroy every equation. Escaping the input first means
+  // the angle brackets that survive to the replacements are ours, not the
+  // document's — the user's `<script>` becomes `&lt;script&gt;` and stays inert,
+  // while our `<m>` is added afterwards and passes through untouched.
+  let result = escapeXml(text);
   
   // 1. Display equations \[ ... \]
   result = result.replace(/\\\[([\s\S]*?)\\\]/g, (_, eq) => {
@@ -175,7 +202,11 @@ export const parseMarkdownToPretext = (markdown: string): string => {
         // End of code block
         inCodeBlock = false;
         output.push('<program><input>');
-        output.push(codeBlockLines.join('\n'));
+        // Escaped directly: code blocks deliberately skip replaceMathDelimiters,
+        // since a `$` or `\[` inside code is code rather than mathematics. That
+        // means they miss the escaping that happens there, and code is the most
+        // likely place for a literal `<` or `&` to appear.
+        output.push(escapeXml(codeBlockLines.join('\n')));
         output.push('</input></program>');
         codeBlockLines = [];
       } else {
