@@ -1848,6 +1848,15 @@ class BuildExecutor {
       const repoKey = session ? `${session.owner}/${session.repo}` : sessionId;
       console.log(`[BuildCache] Keeping ${repoKey} directory (still in cache)`);
       this.sessions.delete(sessionId);
+      // Released here as well as on the path below. This branch returns early
+      // to preserve the on-disk directory, but the log buffer and the build
+      // promise are not the directory and nothing else ever removes them —
+      // `buildLogs` is only deleted further down, past this return. Since this
+      // is the cache-hit branch, it is the one a long-running server takes most
+      // often, so leaving it out strands one buffer of up to 2000 log lines per
+      // rebuild.
+      this.buildLogs.delete(sessionId);
+      this.buildPromises.delete(sessionId);
       return;
     }
 
