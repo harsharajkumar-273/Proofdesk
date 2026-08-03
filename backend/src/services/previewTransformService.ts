@@ -13,9 +13,20 @@ export const PREVIEW_SHARED_ROOT_DIRS = [
 const PREVIEW_SKIP_URL_PATTERN = /^(?:[a-zA-Z][a-zA-Z\d+.-]*:|\/|#|\?|\.\.?\/)/;
 const MATHJAX_ASSET_URL = '/assets/mathjax/tex-svg.js';
 
+// The negative lookahead makes this pass idempotent.
+//
+// Preview HTML is rewritten once when the bundle is written and again when the
+// file is served, so this runs twice over the same markup. Without the
+// lookahead the second pass matches `="/preview/<id>/images/x.svg"` — already
+// rewritten — and prefixes the session base a second time, producing
+// `/preview/<id>/preview/<id>/images/x.svg`, which 404s.
+//
+// rewriteCssUrls below already guards against exactly this with its
+// `url.startsWith(sessionBase)` check; this function was the one left without
+// an equivalent.
 const rewriteAbsolutePreviewUrls = (content: string, sessionBase: string): string =>
   content
-    .replace(/(href|src|action|poster)="\//g, `$1="${sessionBase}`)
+    .replace(/(href|src|action|poster)="\/(?!preview\/)/g, `$1="${sessionBase}`)
     .replace(/url\(\//g, `url(${sessionBase}`)
     .replace(/url\('\//g, `url('${sessionBase}`)
     .replace(/url\("\//g, `url("${sessionBase}`)
