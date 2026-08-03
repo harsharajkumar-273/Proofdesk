@@ -116,11 +116,34 @@ const ensureSessionHydrated = async (sessionId: string) => {
 export const pushBuildJob = async (sessionId: string, options: { xmlId?: string | null; traceParent?: string | null } = {}): Promise<boolean> => {
   if (isRedisSharedStateEnabled() && buildQueue) {
     logger.info(`Pushing build job to Redis queue for session ${sessionId}`, { sessionId, options });
-    await buildQueue.add('compile', { sessionId, options }, {
-      removeOnComplete: true,
-      removeOnFail: true,
-    });
-    return true;
+
+    try {
+      await buildQueue.add('compile', { sessionId, options }, {
+        removeOnComplete: true,
+        removeOnFail: true,
+      });
+      return true;
+    } catch (error) {
+      // Fall through to the local queue rather than failing the request.
+      //
+      // A dropped Redis connection made buildQueue.add() reject, and nothing
+      // caught it — the caller saw a 500 and the build simply did not happen,
+      // even though this process is perfectly capable of running it itself.
+      //
+      // The in-process queue below is the same code path a deployment without
+      // Redis uses all the time, so falling back to it degrades throughput
+      // rather than correctness: builds stop being shared across instances and
+      // run locally instead.
+      logger.error(
+        `Redis build queue unavailable for session ${sessionId}; falling back to the in-process queue`,
+        error,
+      );
+
+      localQueue.add(sessionId, options).catch((err) => {
+        logger.error(`Local in-process queue job failed for session ${sessionId}`, err);
+      });
+      return true;
+    }
   } else {
     logger.info(`Pushing build job to in-process local queue for session ${sessionId}`, { sessionId, options });
     localQueue.add(sessionId, options).catch((err) => {
