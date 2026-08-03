@@ -9,8 +9,8 @@
     "start": "node --import tsx src/server.ts",
     "build": "npx tsx src/scripts/prepareDbSchema.ts && npx prisma generate && tsc",
     "test": "NODE_ENV=test node --import tsx --test ./tests/**/*.test.js",
-    "verify:env": "node --import tsx src/scripts/validateRuntimeConfig.js",
-    "verify:env:strict": "node --import tsx src/scripts/validateRuntimeConfig.js --strict"
+    "verify:env": "node --import tsx src/scripts/validateRuntimeConfig.ts",
+    "verify:env:strict": "node --import tsx src/scripts/validateRuntimeConfig.ts --strict"
   },
   "dependencies": {
     "@octokit/rest": "^22.0.1",
