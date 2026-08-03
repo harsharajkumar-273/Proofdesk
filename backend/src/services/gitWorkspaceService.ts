@@ -39,13 +39,35 @@ export interface GitStatusResult {
   files: GitStatusFile[];
 }
 
-const withGitAuthConfig = (args: string[], token: string | null | undefined, needsRemote: boolean = false): string[] => {
+/**
+ * Builds the environment that carries the auth header to git.
+ *
+ * The token used to travel as `-c http.extraHeader=...` in git's argv, where
+ * any process on the host can read it — `ps aux`, `/proc/<pid>/cmdline`, or any
+ * monitoring agent — for as long as the git process lives. Base64 is an
+ * encoding, not a protection: `x-token:<token>` decodes trivially.
+ *
+ * git reads the same configuration from GIT_CONFIG_KEY_<n> / GIT_CONFIG_VALUE_<n>
+ * when GIT_CONFIG_COUNT is set (git 2.31+). Environment variables of a running
+ * process are readable only by the same user or root on Linux, where argv is
+ * world-readable — so this moves the token from something every local user can
+ * see to something only the owner can.
+ *
+ * Returns an empty object when there is nothing to authenticate, so callers can
+ * spread it unconditionally.
+ */
+const gitAuthEnv = (token: string | null | undefined, needsRemote: boolean = false): NodeJS.ProcessEnv => {
   if (!token || !needsRemote) {
-    return args;
+    return {};
   }
 
   const authHeader = `Authorization: Basic ${Buffer.from(`x-token:${token}`).toString('base64')}`;
-  return ['-c', `http.extraHeader=${authHeader}`, ...args];
+
+  return {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'http.extraHeader',
+    GIT_CONFIG_VALUE_0: authHeader,
+  };
 };
 
 const runGit = async (cwd: string, args: string[], options: GitOptions = {}): Promise<GitResult> => {
@@ -57,15 +79,17 @@ const runGit = async (cwd: string, args: string[], options: GitOptions = {}): Pr
     env = {},
   } = options;
 
-  const finalArgs = withGitAuthConfig(args, token, needsRemote);
-
   try {
-    const { stdout, stderr } = await execFileAsync('git', finalArgs, {
+    const { stdout, stderr } = await execFileAsync('git', args, {
       cwd,
       maxBuffer,
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: '0',
+        // Spread before `env` so an explicit caller override still wins, and
+        // after process.env so a stale GIT_CONFIG_COUNT inherited from the
+        // parent cannot silently change how many entries git reads.
+        ...gitAuthEnv(token, needsRemote),
         ...env,
       },
     });
