@@ -87,9 +87,27 @@ export const checkWorkspaceOwner = (req: Request, res: Response, next: NextFunct
   const login = req.authSession?.user?.login;
   if (!login || !sessionId) return next();
   const session = buildExecutor.getSession(sessionId as string);
-  if (!session) return next();
+
+  // An unresolvable session is refused rather than waved through.
+  //
+  // This previously fell through to next(), which meant the ownership check was
+  // skipped entirely whenever the session could not be found — and that is not
+  // an exotic state. buildExecutor holds sessions in an in-memory Map behind a
+  // TTL cleanup timer, so every expiry and every process restart empties it.
+  // After a restart, no session ID resolves, and all thirty routes guarded by
+  // this middleware would run with no ownership check at all.
+  //
+  // 404 rather than 440: 440 is an IIS-specific code with no meaning to
+  // standard clients, and 404 is already what these handlers return for a
+  // missing session, so this stays consistent with the existing contract and
+  // does not reveal whether the ID ever existed.
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
   if (session.creatorLogin && session.creatorLogin !== login) {
     return res.status(403).json({ error: 'Access denied' });
   }
+
   next();
 };
