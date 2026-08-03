@@ -37,7 +37,18 @@ export default function createWorkspaceRouter(): Router {
   router.post('/workspace/init', requireAccessToken, initWorkspace);
 
   // Session metadata
-  router.get('/workspace/:sessionId/meta', getWorkspaceMeta);
+  //
+  // requireAccessToken only, deliberately. The endpoint returns the repository
+  // owner and name for any session ID that resolves, so leaving it open let an
+  // unauthenticated caller probe 16-hex IDs and read private repository names.
+  //
+  // checkWorkspaceOwner is not applied: it answers 403 unless the caller is
+  // session.creatorLogin, and the sole consumer is ReviewPage, which reads this
+  // only to show a repository name in its header. Restricting to the creator
+  // would deny review to everyone the share flow exists to serve. The residual
+  // exposure is a repository name to an authenticated caller who already holds
+  // the session ID.
+  router.get('/workspace/:sessionId/meta', requireAccessToken, getWorkspaceMeta);
 
   // File tree and file management
   router.get('/workspace/:sessionId/tree', requireAccessToken, checkWorkspaceOwner, getWorkspaceFileTree);
