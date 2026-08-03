@@ -5,6 +5,7 @@ import { getProofdeskDataPath } from '../utils/dataPaths.js';
 
 const SESSION_COOKIE_NAME = 'proofdesk_session';
 const OAUTH_STATE_COOKIE_NAME = 'proofdesk_oauth_state';
+const OAUTH_VERIFIER_COOKIE_NAME = 'proofdesk_oauth_verifier';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 const SESSION_MAX_AGE_SECONDS = Math.floor(SESSION_TTL_MS / 1000);
@@ -374,6 +375,44 @@ class AuthSessionStore {
       })
     );
     return state;
+  }
+
+  /**
+   * Issues a PKCE code verifier (RFC 7636 §4.1) and stores it for the callback.
+   *
+   * The state cookie proves the callback belongs to a flow this server started.
+   * It does not prove the caller is the party that started it — anyone holding
+   * an intercepted authorization code can redeem it, because the exchange needs
+   * only the code and the client credentials. The verifier closes that: the
+   * challenge goes out with the authorization request, the verifier stays in an
+   * httpOnly cookie, and the token exchange fails without it.
+   *
+   * 32 random bytes base64url-encode to 43 characters — the minimum RFC 7636
+   * permits — using only unreserved characters, so no escaping is needed.
+   */
+  createPkceVerifier(res: any, cookieName: string = OAUTH_VERIFIER_COOKIE_NAME) {
+    const secure = process.env.PROOFDESK_SECURE_COOKIES === 'true';
+    const verifier = crypto.randomBytes(32).toString('base64url');
+    res.append(
+      'Set-Cookie',
+      toCookieHeader(cookieName, verifier, {
+        maxAge: OAUTH_STATE_TTL_SECONDS,
+        path: '/',
+        httpOnly: true,
+        sameSite: 'Lax',
+        secure,
+      })
+    );
+    return verifier;
+  }
+
+  readPkceVerifier(req: any, cookieName: string = OAUTH_VERIFIER_COOKIE_NAME) {
+    const cookies = parseCookies(req.headers.cookie || '');
+    return cookies[cookieName] || null;
+  }
+
+  clearPkceVerifier(res: any, cookieName: string = OAUTH_VERIFIER_COOKIE_NAME) {
+    return this.clearOAuthState(res, cookieName);
   }
 
   readOAuthState(req: any, cookieName: string = OAUTH_STATE_COOKIE_NAME) {

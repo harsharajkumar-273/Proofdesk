@@ -5,6 +5,7 @@ import localTestRepoService from '../services/localTestRepoService.js';
 import userRepository from '../repositories/user.repository.js';
 import {
   buildGitHubAuthUrl,
+  deriveCodeChallenge,
   getAuthenticatedGitHubUser,
   getFrontendUrl,
 } from '../services/githubIdentity.js';
@@ -28,7 +29,13 @@ export const createAuthRouter = (): Router => {
     }
 
     const state = authSessionStore.createOAuthState(res);
-    const authUrl = buildGitHubAuthUrl({ clientId: clientId!, redirectUri: redirectUri!, state });
+    const codeVerifier = authSessionStore.createPkceVerifier(res);
+    const authUrl = buildGitHubAuthUrl({
+      clientId: clientId!,
+      redirectUri: redirectUri!,
+      state,
+      codeChallenge: deriveCodeChallenge(codeVerifier),
+    });
     console.log('Redirecting to GitHub OAuth');
     res.redirect(authUrl);
   });
@@ -56,10 +63,19 @@ export const createAuthRouter = (): Router => {
     }
 
     const expectedState = authSessionStore.readOAuthState(req);
+    const codeVerifier = authSessionStore.readPkceVerifier(req);
     authSessionStore.clearOAuthState(res);
+    authSessionStore.clearPkceVerifier(res);
 
     if (!state || !expectedState || state !== expectedState) {
       return res.redirect(`${getFrontendUrl()}?error=auth_state_mismatch`);
+    }
+
+    // Without the verifier the exchange cannot be completed, and continuing
+    // without it would silently fall back to the unprotected flow this change
+    // exists to remove.
+    if (!codeVerifier) {
+      return res.redirect(`${getFrontendUrl()}?error=auth_verifier_missing`);
     }
 
     try {
@@ -70,6 +86,7 @@ export const createAuthRouter = (): Router => {
           client_secret: process.env.GITHUB_CLIENT_SECRET,
           code,
           redirect_uri: process.env.GITHUB_REDIRECT_URI,
+          code_verifier: codeVerifier,
         },
         {
           headers: {
