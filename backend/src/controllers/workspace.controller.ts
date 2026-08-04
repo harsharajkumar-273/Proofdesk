@@ -30,9 +30,36 @@ import {
   rollbackWorkspaceFileToCommit,
 } from '../services/gitWorkspaceService.js';
 
+// GitHub owner and repository names: alphanumerics, hyphen, underscore, dot.
+const REPO_SEGMENT_PATTERN = /^[A-Za-z0-9_.-]+$/;
+
 export const getDemoWorkspace = (req: Request, res: Response): any => {
   const firstRepo = (process.env.PREWARM_REPOS || 'QBobWatson/ila').split(',')[0].trim();
-  const [owner, repo] = firstRepo.split('/');
+  const segments = firstRepo.split('/');
+
+  // PREWARM_REPOS is operator-supplied and its contents are echoed back on this
+  // route, which carries no authentication — so anything that is not a plain
+  // owner/repo pair is refused rather than reflected.
+  //
+  // Previously `firstRepo.split('/')` was destructured straight into the
+  // response. An entry like `owner/repo?token=xyz` put the query string into
+  // `repo` and returned it to any anonymous caller; an entry with no slash left
+  // `repo` undefined and built the cache key `owner/undefined`; extra path
+  // segments were silently dropped by the two-element destructure.
+  //
+  // The rejected value is deliberately not logged. If it contains a credential,
+  // writing it to the log would move the problem rather than fix it.
+  if (segments.length !== 2 || !segments.every((segment) => REPO_SEGMENT_PATTERN.test(segment))) {
+    console.error(
+      '[Demo] PREWARM_REPOS does not begin with a valid owner/repo pair; refusing to serve demo metadata'
+    );
+    return res.status(503).json({
+      error: 'Demo build not ready yet — try again in a few minutes.',
+      building: true,
+    });
+  }
+
+  const [owner, repo] = segments;
   const cached = buildExecutor.getBuildCacheEntry(`${owner}/${repo}`);
   if (!cached) {
     return res.status(503).json({ error: 'Demo build not ready yet — try again in a few minutes.', building: true });
