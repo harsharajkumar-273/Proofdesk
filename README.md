@@ -29,7 +29,7 @@
 * **The Bottleneck (Why web compilers lag)**:  
   Traditional online LaTeX and documentation editors require sending raw source code to a remote backend server on every keypress or build invocation. Network latency, server queueing, and heavy container creation cause severe compilation delays (often 2–5 seconds per build) and consume massive cloud infrastructure bandwidth.
 * **The Low-Level Fix (How we solved it)**:  
-  Proofdesk shifts compilation logic directly into the browser by compiling Python and PreTeXt toolchains into **WebAssembly (Pyodide)**. PreTeXt XML and LaTeX documents are parsed in-browser, generating HTML/SVG DOM trees in under **300ms** without sending a single byte over the network. For heavy PDF renders requiring `pdflatex`, builds are offloaded to asynchronous **BullMQ Redis task queues** executing within sandboxed, resource-bounded **Docker containers** via WebSocket pseudo-terminals (`node-pty`).
+  Proofdesk shifts compilation logic directly into the browser by compiling Python and PreTeXt toolchains into **WebAssembly (Pyodide)**. PreTeXt XML and LaTeX documents are parsed in-browser, generating HTML/SVG DOM trees in under **300ms** without sending a single byte over the network. For heavy PDF renders requiring `pdflatex`, builds are offloaded to asynchronous **BullMQ Redis task queues** executing within sandboxed, resource-bounded **Docker containers**, with build output streamed back over **Server-Sent Events**.
 
 ---
 
@@ -53,9 +53,9 @@ const htmlResult = pyodide.runPython(`
 self.postMessage({ type: 'RENDER_COMPLETE', payload: htmlResult });
 ```
 
-### 2. Isolated Ephemeral Docker Sandboxes + `node-pty` WebSocket Terminals
+### 2. Isolated Ephemeral Docker Sandboxes + Server-Sent Event Log Streaming
 - **Resource Boundary Constraints**: Heavy PDF compilation requests (`pdflatex`) are dispatched via BullMQ to worker nodes. Workers instantiate ephemeral Docker containers with strict security limits (`--memory=512m`, `--cpus=1.0`, `--pids-limit=64`, `--read-only`, `--user=sandbox`).
-- **Real-Time Pseudo-Terminal Streaming**: `node-pty` binds the container's stdout/stderr stream directly to a WebSocket channel, streaming live compilation output to the Monaco Editor terminal widget.
+- **Real-Time Log Streaming**: the container's stdout/stderr is relayed over a Server-Sent Event stream at `GET /build/logs/:sessionId`, which the editor consumes with `EventSource` to show live compilation output.
 
 ### 3. Lock-Free CRDT Document Collaboration (Y.js)
 - **Shared Type Data Bindings**: Binds Monaco Editor document models directly to Y.js `Y.Text` Conflict-free Replicated Data Types.
@@ -81,8 +81,8 @@ flowchart TD
     subgraph ServerSandbox [Server-Side Docker Sandbox]
         Decision -->|Full PDF Build| Queue[BullMQ Redis Task Queue]
         Queue -->|Worker Dispatch| Docker[Isolated Docker Container 512MB RAM]
-        Docker -->|pdflatex Compilation| PTY[node-pty WebSocket Terminal Stream]
-        PTY -->|1,140ms Latency| PDF[Rendered PDF Stream]
+        Docker -->|pdflatex Compilation| SSE[Server-Sent Event Log Stream]
+        SSE -->|1,140ms Latency| PDF[Rendered PDF Stream]
     end
 ```
 
@@ -106,7 +106,7 @@ Benchmarked across 500 multi-page technical document builds:
 1. **In-Browser WebAssembly Compilation (Pyodide)**:  
    Executes Python-based PreTeXt compiler toolchains directly inside the browser's WebAssembly sandbox. Eliminates server roundtrips, reducing feedback latency from 1.1s to **300ms**.
 2. **Secure Sandboxed Docker Worker Runtimes**:  
-   Heavy server-side builds execute inside ephemeral, resource-capped Docker containers (`--memory=512m`, `--pids-limit=64`, `--read-only`). Terminal logs stream to client browsers in real time via `node-pty` WebSockets.
+   Heavy server-side builds execute inside ephemeral, resource-capped Docker containers (`--memory=512m`, `--pids-limit=64`, `--read-only`). Build logs stream to client browsers in real time over Server-Sent Events.
 3. **Lock-Free CRDT Real-Time Collaboration (Y.js)**:  
    Enables multi-user concurrent editing without text locking or merge conflicts. Changes synchronize in sub-10ms deltas across WebSocket channels.
 4. **Monaco Editor & Custom PreTeXt AST Tooling**:  
