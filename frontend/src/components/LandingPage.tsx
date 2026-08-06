@@ -406,11 +406,22 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
             <span>© 2026</span>
           </div>
           <div className="flex items-center gap-6">
-            <a href="https://github.com/harsharajkumar/proofdesk" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
-              <Github className="w-4 h-4" /> GitHub
+            {/* A visible focus ring on every footer link.
+                 Keyboard users previously had only the browser default, which
+                 is nearly invisible against these muted greys. Matches the
+                 convention already used in EditorImportPane. */}
+            <a
+              href="https://github.com/harsharajkumar/proofdesk"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="View Proofdesk on GitHub (opens in a new tab)"
+              className="flex items-center gap-1.5 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950 rounded-sm"
+            >
+              <Github className="w-4 h-4" aria-hidden="true" /> GitHub
+              <span className="sr-only">(opens in a new tab)</span>
             </a>
-            <Link to="/terms" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">Terms</Link>
-            <Link to="/privacy" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">Privacy</Link>
+            <Link to="/terms" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950 rounded-sm">Terms</Link>
+            <Link to="/privacy" className="hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950 rounded-sm">Privacy</Link>
           </div>
         </div>
       </footer>
