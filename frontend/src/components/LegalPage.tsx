@@ -55,9 +55,9 @@ const LegalPage: React.FC<LegalPageProps> = ({ title, lastUpdated, sections }) =
       <div className="max-w-4xl mx-auto flex items-center justify-between text-sm text-zinc-400">
         <span>© 2026 {PRODUCT_NAME}</span>
         <div className="flex gap-5">
-          <Link to="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">Terms</Link>
-          <Link to="/privacy" className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">Privacy</Link>
-          <Link to="/" className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors">Home</Link>
+          <Link to="/terms" className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950 rounded-sm">Terms</Link>
+          <Link to="/privacy" className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950 rounded-sm">Privacy</Link>
+          <Link to="/" className="hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-950 rounded-sm">Home</Link>
         </div>
       </div>
     </footer>
