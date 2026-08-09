@@ -124,9 +124,28 @@ export const createPreviewRouter = (): Router => {
       return res.status(401).send('Authentication required');
     }
 
-    const owner = buildExecutor.getSession(sessionId)?.creatorLogin;
+    const buildSession = buildExecutor.getSession(sessionId);
 
-    if (owner && owner !== login) {
+    // An unresolvable session is refused rather than waved through.
+    //
+    // The previous form read `getSession(sessionId)?.creatorLogin` and guarded
+    // on `owner &&`, so a falsy owner never reached the comparison and fell
+    // through to next(). That is not an exotic state: buildExecutor holds
+    // sessions in an in-memory Map behind a TTL cleanup timer, so every expiry
+    // and every process restart empties it, after which no session ID resolves.
+    //
+    // It leaked rather than merely failing open, because the handler below does
+    // not need the in-memory session to serve files -- it falls back to reading
+    // from disk. The documents were still there; this check was the only thing
+    // standing between them and any other authenticated user.
+    //
+    // 404 rather than 403, matching checkWorkspaceOwner in middleware/auth.ts:
+    // it does not reveal whether the ID ever existed.
+    if (!buildSession) {
+      return res.status(404).send('Session not found');
+    }
+
+    if (buildSession.creatorLogin && buildSession.creatorLogin !== login) {
       return res.status(403).send('Access denied');
     }
 
