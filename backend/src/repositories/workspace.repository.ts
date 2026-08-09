@@ -159,16 +159,36 @@ export class WorkspaceRepository {
     });
   }
 
-  async resolveComment(commentId: string, resolved: boolean) {
+  /**
+   * Resolve or unresolve a comment, scoped to its session.
+   *
+   * sessionId is required rather than optional. Keying on commentId alone
+   * meant any comment could be addressed by ID from any session -- harmless
+   * while nothing calls this, and an IDOR the moment a route is added, with
+   * nothing in the signature to suggest a check was ever intended.
+   *
+   * Scoping by session rather than author is deliberate: any route reaching
+   * here is already behind checkWorkspaceOwner, so the session is the
+   * boundary that has actually been authorised. Whether a workspace owner may
+   * resolve someone else's comment is a separate product decision, and adding
+   * an author filter here would answer it by accident.
+   *
+   * Filtering in the where clause rather than fetching and comparing: a
+   * post-fetch check leaks whether the comment exists, and Prisma throws
+   * P2025 when nothing matches, which maps cleanly to a 404 covering both
+   * "no such comment" and "not in this session".
+   */
+  async resolveComment(commentId: string, sessionId: string, resolved: boolean) {
     return prisma.comment.update({
-      where: { id: commentId },
+      where: { id: commentId, sessionId },
       data: { resolved },
     });
   }
 
-  async deleteComment(commentId: string) {
+  /** Delete a comment, scoped to its session. See resolveComment. */
+  async deleteComment(commentId: string, sessionId: string) {
     return prisma.comment.delete({
-      where: { id: commentId },
+      where: { id: commentId, sessionId },
     });
   }
 }
