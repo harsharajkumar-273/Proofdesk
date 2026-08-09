@@ -8,23 +8,23 @@ This document outlines the high-level architecture of Proofdesk, a collaborative
 
 ```mermaid
 graph TD
-    Client[Web Client (React/Next.js)] -->|HTTPS| API[API Gateway]
+    Client["Web Client (React/Next.js)"] -->|HTTPS| API["API Gateway"]
     
     subgraph Backend Services
-        API --> Auth[Auth Service]
-        API --> Prover[Theorem Prover Engine]
-        API --> Collab[Collaboration Service (WebSockets)]
-        API --> Review[Review Management]
+        API --> Auth["Auth Service"]
+        API --> Prover["Theorem Prover Engine"]
+        API --> Collab["Collaboration Service (WebSockets)"]
+        API --> Review["Review Management"]
     end
     
     subgraph Data Layer
-        Auth --> DB[(PostgreSQL)]
-        Prover --> Redis[(Redis Cache)]
+        Auth --> DB[("PostgreSQL")]
+        Prover --> Redis[("Redis Cache")]
         Review --> DB
         Collab --> Redis
     end
     
-    Prover -->|RPC| Workers[Proof Worker Nodes]
+    Prover -->|RPC| Workers["Proof Worker Nodes"]
 ```
 
 ## 2. Core Components
