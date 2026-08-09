@@ -2,7 +2,13 @@ import { Request, Response } from 'express';
 import teamSessionStore, { normalizeTeamSessionCode, isValidTeamRepo } from '../services/teamSessions.js';
 
 export const createTeamSession = async (req: Request, res: Response): Promise<any> => {
-  const { repo } = req.body;
+  // `|| {}` rather than a bare destructure. express.json() leaves req.body
+  // undefined when the Content-Type is not JSON, and destructuring undefined
+  // throws a TypeError before the validation below can return a clean 400.
+  // Carried over from the duplicate handler in system.routes.ts, which had
+  // this guard where the controller did not -- removing that handler without
+  // porting it would have turned a 400 into a 500.
+  const { repo } = req.body || {};
 
   if (!isValidTeamRepo(repo)) {
     return res.status(400).json({ error: 'Valid repo object with owner, name, and fullName is required' });

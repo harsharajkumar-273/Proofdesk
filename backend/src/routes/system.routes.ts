@@ -6,7 +6,6 @@ import {
   recordMonitoringEvent,
 } from '../services/monitoringService.js';
 import teamSessionStore, {
-  isValidTeamRepo,
   normalizeTeamSessionCode,
 } from '../services/teamSessions.js';
 import { getReadinessPayload } from '../utils/runtimeConfig.js';
@@ -89,30 +88,6 @@ export const createSystemRouter = (): Router => {
     res.json({
       events,
     });
-  });
-
-  router.post('/team-sessions/create', requireAccessToken, async (req: Request, res: Response): Promise<any> => {
-    const { repo } = req.body || {};
-
-    if (!isValidTeamRepo(repo)) {
-      return res.status(400).json({ error: 'Valid repository details are required' });
-    }
-
-    // The host identity is taken from the authenticated session, never from the
-    // request body. A `createdBy` sent by the client is ignored: it is the one
-    // field that decides which name and login every joining participant sees
-    // attributed to this room, so accepting it from the caller lets any
-    // authenticated user host a session under someone else's identity.
-    const sessionUser = req.authSession?.user;
-    if (!sessionUser?.login) {
-      return res.status(403).json({ error: 'An authenticated user session is required to host a team session' });
-    }
-
-    const session = await teamSessionStore.createSession({
-      repo,
-      createdBy: { login: sessionUser.login, name: sessionUser.name || sessionUser.login },
-    });
-    res.json(session);
   });
 
   router.post('/team-sessions/join', async (req: Request, res: Response): Promise<any> => {
