@@ -17,13 +17,13 @@
 ---
 
 > ### 🚀 HERO PERFORMANCE TARGETS
-> * **Compilation Feedback Latency**: **72% reduction** (from **1.1s** server roundtrips down to **300ms** in-browser WASM)
+> * **Compilation Feedback Latency**: **72% reduction** (from **1.1s** server roundtrips down to **300ms** in-browser WASM) — design target, not yet measured (see note below)
 > * **Server Compute Offloading**: **0 server network roundtrips** during WASM PreTeXt/XML document rendering
-> * **Docker Sandbox Security Isolation**: Strict resource caps (**512MB RAM**, **64 PIDs**, read-only root FS, **0 root access**)
-> * **Real-Time Collaboration**: Sub-**10ms** state synchronization via **Y.js CRDT** over WebSockets
+> * **Docker Sandbox Security Isolation**: Resource caps of **512MB RAM** and **64 PIDs** are enforced on every build container today (`--memory 512m --pids-limit 64`, see `buildExecutor.ts`/`repositoryCompiler.ts`); a read-only root filesystem and a non-root container user are not yet implemented.
+> * **Real-Time Collaboration**: **Measured** at an average of **0.43ms** (p50 0.29ms, p95 1.19ms) one-way Y.js sync latency over localhost — see the real numbers below.
 
 > ### ⚠️ A note on the numbers in this README
-> The latency figures throughout this page (300ms WASM compile, 1,140ms Docker path, 8.2ms CRDT sync, the "500 multi-page technical document builds" table below) come from informal, manual testing during development — browser DevTools timing and server request logs — not from a committed, automated benchmark suite. They're still **design targets**, not verified measurements. Real, runnable benchmarks now exist in [`benchmarks/`](benchmarks/) — a Playwright-driven compile-latency test (WASM vs. Docker) and a CRDT sync-latency script — but haven't been run yet. See [`benchmarks/README.md`](benchmarks/README.md) to reproduce them; once run, the numbers above get replaced with real output. (Same treatment [PulseStream](https://github.com/harsharajkumar-273/PulseStream) went through — its `benchmarks/load_test.js` has already been run and its README updated with real measured numbers.)
+> The WASM-compile and Docker-build latency figures on this page (300ms WASM compile, 1,140ms Docker path, the "500 multi-page technical document builds" table below) are still **design targets, not verified measurements** — informal manual testing during development, not a committed benchmark run. The CRDT sync-latency figure **has** now been measured for real (see [`benchmarks/crdt_sync_latency.mjs`](benchmarks/crdt_sync_latency.mjs); 30/30 rounds, results below). The compile-latency benchmark ([`benchmarks/compile_latency.spec.ts`](benchmarks/compile_latency.spec.ts), a Playwright test comparing WASM vs. Docker) is written and ready to run via `npx playwright test -c playwright.benchmark.config.ts`, but running it requires building the `docker/` PreTeXt-compiler image (`docker-compose up --build -d`), and that attempt hit a corrupted local Docker Desktop data store (a host-machine issue — Docker's containerd content store had missing blobs after an earlier out-of-disk-space failure, so even `docker images` fails) rather than anything in this repo. It hasn't produced numbers yet for that reason; see [`benchmarks/README.md`](benchmarks/README.md) to reproduce it once Docker is healthy again.
 
 ---
 
@@ -57,7 +57,7 @@ self.postMessage({ type: 'RENDER_COMPLETE', payload: htmlResult });
 ```
 
 ### 2. Isolated Ephemeral Docker Sandboxes + Server-Sent Event Log Streaming
-- **Resource Boundary Constraints**: Heavy PDF compilation requests (`pdflatex`) are dispatched via BullMQ to worker nodes. Workers instantiate ephemeral Docker containers with strict security limits (`--memory=512m`, `--cpus=1.0`, `--pids-limit=64`, `--read-only`, `--user=sandbox`).
+- **Resource Boundary Constraints**: Heavy PDF compilation requests (`pdflatex`) are dispatched via BullMQ to worker nodes. Workers instantiate ephemeral Docker containers with `--memory=512m --pids-limit=64` applied to every invocation. There is no `--cpus`, `--read-only`, or non-root `--user` flag yet — those would be a reasonable next hardening step, not something currently shipped.
 - **Real-Time Log Streaming**: the container's stdout/stderr is relayed over a Server-Sent Event stream at `GET /build/logs/:sessionId`, which the editor consumes with `EventSource` to show live compilation output.
 
 ### 3. Lock-Free CRDT Document Collaboration (Y.js)
@@ -91,16 +91,16 @@ flowchart TD
 
 ---
 
-## 📊 Performance Figures (Design Targets, Not Yet Benchmarked)
+## 📊 Performance Figures
 
-| Execution Path | Target Pipeline | Target Latency | Network Bandwidth | Security Boundary |
-| :--- | :--- | :--- | :--- | :--- |
-| **In-Browser WASM** | **Pyodide PreTeXt/XML** | **300ms** | **0 KB (Local Execution)**| In-Browser WebAssembly Sandbox |
-| Server Docker Worker | `pdflatex` PDF Stream | 1,140ms | WebSocket Output Stream | Container (512MB RAM, 64 PIDs) |
-| Standard Server API | Synchronous Express POST | 3,450ms | Full Payload POST/GET | Shared Server Instance (High Risk) |
-| **CRDT Document Sync** | **Y.js WebSockets** | **8.2ms** | **< 1 KB delta patches** | Encrypted TLS WebSockets |
+| Execution Path | Pipeline | Latency | Network Bandwidth | Security Boundary | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **In-Browser WASM** | **Pyodide PreTeXt/XML** | **300ms** | **0 KB (Local Execution)**| In-Browser WebAssembly Sandbox | Design target |
+| Server Docker Worker | `pdflatex` PDF Stream | 1,140ms | WebSocket Output Stream | Container (512MB RAM, 64 PIDs) | Design target |
+| Standard Server API | Synchronous Express POST | 3,450ms | Full Payload POST/GET | Shared Server Instance (High Risk) | Design target |
+| **CRDT Document Sync** | **Y.js WebSockets** | **avg 0.43ms · p50 0.29ms · p95 1.19ms** | **< 1 KB delta patches** | Session-authenticated WebSocket | **Measured** (30/30 rounds, localhost) |
 
-These are targets, not measured results — see the disclaimer near the top of this README. Two real, runnable benchmarks now live in [`benchmarks/`](benchmarks/): a Playwright test that drives the actual editor UI and times real WASM and Docker builds (`compile_latency.spec.ts`), and a script that measures real Y.js sync latency over the collaboration WebSocket (`crdt_sync_latency.mjs`). Neither has been run yet — see [`benchmarks/README.md`](benchmarks/README.md) for how to run them and commit real numbers, the same way [PulseStream's `benchmarks/load_test.js`](https://github.com/harsharajkumar-273/PulseStream/blob/main/benchmarks/load_test.js) results were committed.
+The CRDT row is a real measurement from [`benchmarks/crdt_sync_latency.mjs`](benchmarks/crdt_sync_latency.mjs) (`node benchmarks/crdt_sync_latency.mjs --rounds 30`), run against the local dev backend — one-way latency from client A's edit to client B's document reflecting it, over localhost with no network hop, which is why it's sub-millisecond rather than the originally-guessed 8.2ms. The other three rows are still unverified design targets; [`benchmarks/compile_latency.spec.ts`](benchmarks/compile_latency.spec.ts) exists to measure the WASM/Docker rows for real but hasn't produced numbers yet — see the disclaimer near the top of this README for why.
 
 ---
 
@@ -108,8 +108,8 @@ These are targets, not measured results — see the disclaimer near the top of t
 
 1. **In-Browser WebAssembly Compilation (Pyodide)**:  
    Executes Python-based PreTeXt compiler toolchains directly inside the browser's WebAssembly sandbox, eliminating server roundtrips for fast-preview builds.
-2. **Secure Sandboxed Docker Worker Runtimes**:  
-   Heavy server-side builds execute inside ephemeral, resource-capped Docker containers (`--memory=512m`, `--pids-limit=64`, `--read-only`). Build logs stream to client browsers in real time over Server-Sent Events.
+2. **Sandboxed Docker Worker Runtimes**:  
+   Heavy server-side builds execute inside ephemeral, resource-capped Docker containers (`--memory=512m`, `--pids-limit=64`). Build logs stream to client browsers in real time over Server-Sent Events.
 3. **Lock-Free CRDT Real-Time Collaboration (Y.js)**:  
    Enables multi-user concurrent editing without text locking or merge conflicts, synchronizing changes as compact binary deltas across WebSocket channels.
 4. **Monaco Editor & Custom PreTeXt AST Tooling**:  
@@ -117,31 +117,28 @@ These are targets, not measured results — see the disclaimer near the top of t
 
 ---
 
-## 🚀 Quick Start (< 1 Minute)
+## 🚀 Quick Start
 
-### Option A: Run via Docker Compose (Recommended)
 ```bash
 # Clone repository
 git clone https://github.com/harsharajkumar-273/proofdesk.git
 cd proofdesk
 
-# Launch frontend, backend API, Redis queue, and Docker worker pool
-docker-compose up --build
-```
-Open **`http://localhost:5173`** in your browser.
+# (Optional) start Redis for the BullMQ build queue — the backend falls back
+# to an in-process queue if this isn't running.
+docker-compose up -d redis
 
-### Option B: Local Development Setup
-```bash
-# 1. Install and launch frontend
-cd frontend
+# Install dependencies
 npm install
+cd backend && npm install && npx prisma db push --schema=prisma/schema.sqlite.prisma && cd ..
+cd frontend && npm install && cd ..
+
+# From the repo root, launch frontend + backend together
 npm run dev
-
-# 2. Launch backend API & worker (in a separate terminal)
-cd ../backend
-npm install
-npm run start
 ```
+Open **`http://localhost:3000`** in your browser (backend API on port 4000).
+
+`docker-compose up --build` on its own only starts the Redis and `ila-live` PreTeXt-builder services defined in `docker-compose.yml` — it does not start the frontend or backend. `docker-compose.prod.yml` is the one that builds and runs the full stack (nginx + backend + Redis) as containers, and is meant for deployment rather than day-to-day local development.
 
 ---
 
@@ -153,7 +150,7 @@ We actively welcome contributions to Proofdesk! Check out these open issues:
 - [ ] **[Issue #2] Automated Sandbox Pruner**: Build a background daemon service to prune dangling Docker PTY sockets and inactive worker containers.
 - [ ] **[Issue #3] Offline Web Worker Caching**: Cache Pyodide WASM binaries in IndexedDB using Service Workers for complete offline editing capability.
 - [ ] **[Issue #4] Export Engine Expansion**: Add direct EPUB, HTML5 single-page, and Jupyter Notebook export targets to the WASM builder.
-- [x] **[Issue #5] Reproducible Benchmark Harness**: ~~Add a script that spins up the Docker worker pool and WASM compiler, runs a batch of real PreTeXt/LaTeX documents through both paths, and reports actual p50/p95 latency~~ — done: see [`benchmarks/`](benchmarks/) (Playwright compile-latency test + CRDT sync-latency script). Remaining: actually run them and paste the real numbers into this README, replacing the design-target figures above.
+- [x] **[Issue #5] Reproducible Benchmark Harness**: ~~Add a script that spins up the Docker worker pool and WASM compiler, runs a batch of real PreTeXt/LaTeX documents through both paths, and reports actual p50/p95 latency~~ — done: see [`benchmarks/`](benchmarks/) (Playwright compile-latency test + CRDT sync-latency script). CRDT sync latency has been run for real (see the Performance Figures table). Compile latency (WASM vs. Docker) is still outstanding — it needs a working local Docker install to build the PreTeXt compiler image.
 
 ---
 
