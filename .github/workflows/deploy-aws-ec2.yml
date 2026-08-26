@@ -174,7 +174,7 @@ jobs:
         run: |
           ssh -i ~/.ssh/proofdesk_deploy_key "${AWS_EC2_USER}@${AWS_EC2_HOST}" "
             DOMAIN=${{ secrets.DOMAIN || 'proofdesk.duckdns.org' }}
-            EMAIL=harsharajkumar273@gmail.com
+            EMAIL=${{ secrets.CERTBOT_EMAIL }}
 
             CERT=/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem
 
