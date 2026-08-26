@@ -16,7 +16,7 @@ describe('EditorHistoryPane Component (#14)', () => {
   });
 
   it('renders revision timeline with commits', async () => {
-    (editorApi.requestJson as any).mockResolvedValueOnce({
+    vi.mocked(editorApi.requestJson).mockResolvedValueOnce({
       success: true,
       commits: [
         {
@@ -44,7 +44,7 @@ describe('EditorHistoryPane Component (#14)', () => {
   });
 
   it('truncates large diff files exceeding 500 lines and displays expansion controls', async () => {
-    (editorApi.requestJson as any)
+    vi.mocked(editorApi.requestJson)
       .mockResolvedValueOnce({
         success: true,
         commits: [

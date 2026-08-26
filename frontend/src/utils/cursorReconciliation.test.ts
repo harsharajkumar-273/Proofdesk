@@ -46,11 +46,11 @@ describe('Cursor State Reconciliation (#9)', () => {
 
     const mockEditor = {
       getSelections: vi.fn().mockReturnValue([mockSelection]),
-    } as any;
+    } as unknown as Parameters<typeof captureAllCursorStates>[0];
 
     const mockModel = {
       getOffsetAt: vi.fn((pos) => (pos.column === 5 ? 4 : 9)),
-    } as any;
+    } as unknown as Parameters<typeof captureAllCursorStates>[1];
 
     const captured = captureAllCursorStates(mockEditor, mockModel);
     expect(captured).toHaveLength(1);
@@ -62,12 +62,12 @@ describe('Cursor State Reconciliation (#9)', () => {
   it('restores reconciled selections to Monaco editor', () => {
     const mockEditor = {
       setSelections: vi.fn(),
-    } as any;
+    } as unknown as Parameters<typeof restoreAllCursorStates>[0];
 
     const mockModel = {
       getValueLength: vi.fn().mockReturnValue(100),
       getPositionAt: vi.fn((offset) => ({ lineNumber: 1, column: offset + 1 })),
-    } as any;
+    } as unknown as Parameters<typeof restoreAllCursorStates>[1];
 
     const savedStates = [
       {

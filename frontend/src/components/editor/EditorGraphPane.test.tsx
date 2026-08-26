@@ -18,7 +18,7 @@ beforeEach(() => {
     arc: vi.fn(),
     fill: vi.fn(),
     fillText: vi.fn(),
-  }) as any;
+  }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
 });
 
 describe('EditorGraphPane Component (#13)', () => {

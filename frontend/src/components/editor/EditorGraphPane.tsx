@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { Network, ZoomIn, ZoomOut, RotateCcw, Filter, Layers } from 'lucide-react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import { Network, ZoomIn, ZoomOut, RotateCcw, Layers } from 'lucide-react';
 
 export interface GraphNode {
   id: string;
@@ -116,7 +116,6 @@ export const EditorGraphPane: React.FC<EditorGraphPaneProps> = ({
 
     // Cluster sections under chapter nodes
     const chapters = rawGraphData.nodes.filter((n) => n.type === 'chapter');
-    const chapterMap = new Map(chapters.map((c) => [c.id, c]));
 
     const clusterNodes: GraphNode[] = chapters.map((c) => {
       const children = rawGraphData.nodes.filter((n) => n.group === c.id && n.id !== c.id);
