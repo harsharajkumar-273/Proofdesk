@@ -23,7 +23,7 @@
 > * **Real-Time Collaboration**: Sub-**10ms** state synchronization via **Y.js CRDT** over WebSockets
 
 > ### ⚠️ A note on the numbers in this README
-> The latency figures throughout this page (300ms WASM compile, 1,140ms Docker path, 8.2ms CRDT sync, the "500 multi-page technical document builds" table below) come from informal, manual testing during development — browser DevTools timing and server request logs — not from a committed, automated benchmark suite. There's no reproducible benchmark script in this repo yet, so treat the specific millisecond figures as **design targets**, not verified measurements. (A sibling project, [PulseStream](https://github.com/harsharajkumar-273/PulseStream), has a real `benchmarks/load_test.js` script for exactly this reason — the same treatment hasn't been built for Proofdesk yet.)
+> The latency figures throughout this page (300ms WASM compile, 1,140ms Docker path, 8.2ms CRDT sync, the "500 multi-page technical document builds" table below) come from informal, manual testing during development — browser DevTools timing and server request logs — not from a committed, automated benchmark suite. They're still **design targets**, not verified measurements. Real, runnable benchmarks now exist in [`benchmarks/`](benchmarks/) — a Playwright-driven compile-latency test (WASM vs. Docker) and a CRDT sync-latency script — but haven't been run yet. See [`benchmarks/README.md`](benchmarks/README.md) to reproduce them; once run, the numbers above get replaced with real output. (Same treatment [PulseStream](https://github.com/harsharajkumar-273/PulseStream) went through — its `benchmarks/load_test.js` has already been run and its README updated with real measured numbers.)
 
 ---
 
@@ -100,7 +100,7 @@ flowchart TD
 | Standard Server API | Synchronous Express POST | 3,450ms | Full Payload POST/GET | Shared Server Instance (High Risk) |
 | **CRDT Document Sync** | **Y.js WebSockets** | **8.2ms** | **< 1 KB delta patches** | Encrypted TLS WebSockets |
 
-These are targets, not measured results — see the disclaimer near the top of this README. No automated benchmark harness (e.g. a script that spins up the Docker worker pool and PDF-compiles a batch of real documents, timing each path) exists in this repo yet. Adding one — similar in spirit to [PulseStream's `benchmarks/load_test.js`](https://github.com/harsharajkumar-273/PulseStream/blob/main/benchmarks/load_test.js) — is on the roadmap; until then, the numbers above should be read as engineering targets the architecture was designed around, not verified, reproducible measurements.
+These are targets, not measured results — see the disclaimer near the top of this README. Two real, runnable benchmarks now live in [`benchmarks/`](benchmarks/): a Playwright test that drives the actual editor UI and times real WASM and Docker builds (`compile_latency.spec.ts`), and a script that measures real Y.js sync latency over the collaboration WebSocket (`crdt_sync_latency.mjs`). Neither has been run yet — see [`benchmarks/README.md`](benchmarks/README.md) for how to run them and commit real numbers, the same way [PulseStream's `benchmarks/load_test.js`](https://github.com/harsharajkumar-273/PulseStream/blob/main/benchmarks/load_test.js) results were committed.
 
 ---
 
@@ -153,7 +153,7 @@ We actively welcome contributions to Proofdesk! Check out these open issues:
 - [ ] **[Issue #2] Automated Sandbox Pruner**: Build a background daemon service to prune dangling Docker PTY sockets and inactive worker containers.
 - [ ] **[Issue #3] Offline Web Worker Caching**: Cache Pyodide WASM binaries in IndexedDB using Service Workers for complete offline editing capability.
 - [ ] **[Issue #4] Export Engine Expansion**: Add direct EPUB, HTML5 single-page, and Jupyter Notebook export targets to the WASM builder.
-- [ ] **[Issue #5] Reproducible Benchmark Harness**: Add a script that spins up the Docker worker pool and WASM compiler, runs a batch of real PreTeXt/LaTeX documents through both paths, and reports actual p50/p95 latency — replacing the design-target figures above with measured ones.
+- [x] **[Issue #5] Reproducible Benchmark Harness**: ~~Add a script that spins up the Docker worker pool and WASM compiler, runs a batch of real PreTeXt/LaTeX documents through both paths, and reports actual p50/p95 latency~~ — done: see [`benchmarks/`](benchmarks/) (Playwright compile-latency test + CRDT sync-latency script). Remaining: actually run them and paste the real numbers into this README, replacing the design-target figures above.
 
 ---
 
