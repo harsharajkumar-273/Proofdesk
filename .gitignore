@@ -27,6 +27,11 @@ frontend/.env.*.local
 backend/.proofdesk-data/
 .tmp/
 
+# Local SQLite database
+backend/dev.db
+backend/dev.db-shm
+backend/dev.db-wal
+
 # Accidental local Docker command artifacts
 docker/--rm/
 docker/-v/
