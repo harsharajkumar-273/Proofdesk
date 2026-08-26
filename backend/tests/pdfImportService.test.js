@@ -89,7 +89,9 @@ describe('PDF/LaTeX Ingestion Service', () => {
       const md = 'Here is code:\n\n```python\nprint("Hello World")\n```';
       const result = parseMarkdownToPretext(md);
       assert.ok(result.includes('<program><input>'));
-      assert.ok(result.includes('print("Hello World")'));
+      // Code block content is XML-escaped (it has to be valid XML), so the
+      // quotes come out as &quot; rather than literal ".
+      assert.ok(result.includes('print(&quot;Hello World&quot;)'));
       assert.ok(result.includes('</input></program>'));
     });
 

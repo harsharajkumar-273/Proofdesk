@@ -16,6 +16,7 @@ process.env.PROOFDESK_SESSION_SECRET = 'proofdesk-test-session-secret';
 process.env.PROOFDESK_DATA_DIR = path.resolve(process.cwd(), '../.tmp/proofdesk-backend-tests');
 
 const authSessionStore = (await import('../src/services/authSessionStore.js')).default;
+const buildExecutor = (await import('../src/services/buildExecutor.js')).default;
 const { getProofdeskDataPath } = await import('../src/utils/dataPaths.js');
 const { getReadinessPayload } = await import('../src/utils/runtimeConfig.js');
 const { app } = await import('../src/server.js');
@@ -197,6 +198,20 @@ before(async () => {
     '.lesson-section h2 {\n  margin-top: 0;\n  color: #1d4ed8;\n}\n',
     'utf-8'
   );
+  // requirePreviewAccess (preview.routes.ts) now 404s any session id that
+  // buildExecutor doesn't recognize, closing a real access-control hole
+  // (issue #51) where an unresolvable id used to fall through and serve the
+  // file anyway. previewSessionId is a synthetic id used only to exercise
+  // the file-serving/rewriting logic, so it needs a matching in-memory
+  // session registered for these preview requests to reach the handler at
+  // all. No creatorLogin, so any authenticated login is accepted.
+  buildExecutor.setSession(previewSessionId, {
+    owner: 'demo',
+    repo: 'course-demo',
+    repoPath: path.resolve(getProofdeskDataPath(previewSessionId, 'repo')),
+    outputPath: previewOutputDir,
+  });
+
   await fs.writeFile(
     path.join(previewOutputDir, 'interactive.js'),
     "badge.textContent = 'Local preview ready';\n",
@@ -287,16 +302,25 @@ describe('active backend routes', () => {
     assert.equal(postResponse.status, 202);
     assert.ok(postResponse.body.requestId);
 
-    const getResponse = await request(app)
-      .get('/monitoring/events?limit=5')
-      .set('Authorization', 'Bearer local-test');
+    // /monitoring/events is admin-gated (requireAdmin): a bearer token alone
+    // carries no verified identity (req.authSession stays null on that path),
+    // so it needs a real cookie-backed session, and that session's login
+    // needs to be on the allow-list.
+    const originalAdminLogins = process.env.PROOFDESK_ADMIN_LOGINS;
+    process.env.PROOFDESK_ADMIN_LOGINS = 'local-tester';
+    try {
+      const cookie = await previewCookie();
+      const getResponse = await request(app).get('/monitoring/events?limit=5').set('Cookie', cookie);
 
-    assert.equal(getResponse.status, 200);
-    const matchingEvent = getResponse.body.events.find((entry) => entry.message === uniqueMessage);
-    assert.ok(matchingEvent);
-    assert.equal(matchingEvent.source, 'frontend');
-    assert.equal(matchingEvent.metadata.metadata.accessToken, '[redacted]');
-    assert.equal(matchingEvent.metadata.metadata.nested.clientSecret, '[redacted]');
+      assert.equal(getResponse.status, 200);
+      const matchingEvent = getResponse.body.events.find((entry) => entry.message === uniqueMessage);
+      assert.ok(matchingEvent);
+      assert.equal(matchingEvent.source, 'frontend');
+      assert.equal(matchingEvent.metadata.metadata.accessToken, '[redacted]');
+      assert.equal(matchingEvent.metadata.metadata.nested.clientSecret, '[redacted]');
+    } finally {
+      process.env.PROOFDESK_ADMIN_LOGINS = originalAdminLogins;
+    }
   });
 
   it('allows the backend preview origin for local demo assets', async () => {
@@ -501,7 +525,9 @@ describe('active backend routes', () => {
   });
 
   it('serves the Prometheus metrics data', async () => {
-    const response = await request(app).get('/metrics');
+    // /metrics now requires an authenticated request (requireAccessToken)
+    // rather than being world-readable.
+    const response = await request(app).get('/metrics').set('Authorization', 'Bearer local-test');
     assert.equal(response.status, 200);
     assert.match(response.text, /http_request_duration_seconds/);
     assert.match(response.text, /websocket_active_connections/);
