@@ -34,6 +34,43 @@ function arg(name, fallback) {
 
 const ROUNDS = Number(arg('rounds', 30));
 const BASE_WS_URL = process.env.COLLAB_WS_URL || 'ws://localhost:4000/collab/ws';
+const BASE_HTTP_URL = process.env.COLLAB_HTTP_URL || 'http://localhost:4000';
+
+// The collab WebSocket now requires an authenticated session
+// (collaborationServer.ts closes with 1008 'authenticated session is
+// required' otherwise) - closes the same access hole the preview and
+// monitoring routes were hardened against. Local-test mode gives us a
+// session cookie the same way the backend test suite does, via
+// GET /auth/local-test.
+const fetchSessionCookie = async () => {
+  const response = await fetch(`${BASE_HTTP_URL}/auth/local-test`, { redirect: 'manual' });
+  const cookie = response.headers.get('set-cookie');
+  if (!cookie) {
+    throw new Error(
+      'No session cookie from /auth/local-test - is the backend running with ENABLE_LOCAL_TEST_MODE=true?'
+    );
+  }
+  return cookie.split(';')[0];
+};
+
+// Room IDs that aren't a team:<code>:<path> key are checked against
+// buildExecutor's session map, and the connecting session's login must match
+// the session's creatorLogin (fixed for issue #140 - guessable room IDs used
+// to grant access to anyone with any valid login). A room id benchmark-<n>
+// was never a real session, so it needs a real one created via the same
+// local-demo build path the backend test suite uses.
+const createBuildSessionRoomId = async (sessionCookie) => {
+  const response = await fetch(`${BASE_HTTP_URL}/build/init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Cookie: sessionCookie },
+    body: JSON.stringify({ owner: 'demo', repo: 'course-demo' }),
+  });
+  const body = await response.json();
+  if (!response.ok || !body.sessionId) {
+    throw new Error(`Failed to create a build session for the benchmark room: ${JSON.stringify(body)}`);
+  }
+  return body.sessionId;
+};
 
 const encodeMessage = (type, payload) => {
   const output = new Uint8Array(payload.length + 1);
@@ -42,11 +79,13 @@ const encodeMessage = (type, payload) => {
   return output;
 };
 
-const createClient = (label, roomId, initialContent = '') => {
+const createClient = (label, roomId, sessionCookie, initialContent = '') => {
   const doc = new Y.Doc();
   const text = doc.getText('monaco');
   const awareness = new Awareness(doc);
-  const ws = new WebSocket(`${BASE_WS_URL}?roomId=${encodeURIComponent(roomId)}`);
+  const ws = new WebSocket(`${BASE_WS_URL}?roomId=${encodeURIComponent(roomId)}`, {
+    headers: { Cookie: sessionCookie },
+  });
   const listeners = new Set();
 
   return new Promise((resolve, reject) => {
@@ -121,12 +160,13 @@ function percentile(sortedMs, p) {
   return sortedMs[Math.max(0, idx)];
 }
 
-async function measureOneRound(roomId, seq) {
+async function measureOneRound(seq, sessionCookie) {
+  const roomId = await createBuildSessionRoomId(sessionCookie);
   let clientA;
   let clientB;
   try {
-    clientA = await createClient('client-a', roomId, `seed-${seq}`);
-    clientB = await createClient('client-b', roomId);
+    clientA = await createClient('client-a', roomId, sessionCookie, `seed-${seq}`);
+    clientB = await createClient('client-b', roomId, sessionCookie);
 
     const latencyMs = await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('sync timed out')), 5000);
@@ -146,11 +186,11 @@ async function measureOneRound(roomId, seq) {
 }
 
 async function main() {
+  const sessionCookie = await fetchSessionCookie();
   const samples = [];
   for (let i = 0; i < ROUNDS; i++) {
-    const roomId = `bench-${Date.now()}-${i}`;
     try {
-      const latencyMs = await measureOneRound(roomId, i);
+      const latencyMs = await measureOneRound(i, sessionCookie);
       samples.push(latencyMs);
       process.stdout.write(`round ${i + 1}/${ROUNDS}: ${latencyMs.toFixed(2)}ms\n`);
     } catch (err) {
