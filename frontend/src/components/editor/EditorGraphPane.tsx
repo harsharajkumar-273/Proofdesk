@@ -96,6 +96,11 @@ export const EditorGraphPane: React.FC<EditorGraphPaneProps> = ({
   const [panOffset, setPanOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const isDraggingRef = useRef<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const didDragRef = useRef<boolean>(false);
+  // Mirrors the force-simulation's live node positions so the click handler
+  // (outside the render-loop effect) can hit-test against where nodes are
+  // actually drawn, not just their pre-simulation prop positions.
+  const simNodesRef = useRef<Array<GraphNode & { x: number; y: number }>>([]);
 
   // Load or generate graph data
   const rawGraphData = useMemo(() => {
@@ -176,6 +181,7 @@ export const EditorGraphPane: React.FC<EditorGraphPaneProps> = ({
     });
 
     const nodeMap = new Map(simNodes.map((n) => [n.id, n]));
+    simNodesRef.current = simNodes;
 
     let animFrameId: number;
     let alpha = 1;
@@ -278,14 +284,27 @@ export const EditorGraphPane: React.FC<EditorGraphPaneProps> = ({
     };
   }, [filteredNodes, processedGraphData.links, zoomLevel, panOffset, selectedNode]);
 
+  // Select the graph node matching activeFilePath (e.g. the file open in the
+  // editor) whenever it changes, so switching tabs highlights it here too.
+  // Only acts on an actual match - an unmatched path (the demo graph's ids
+  // aren't file paths) leaves the current selection alone rather than
+  // clearing it out from under a manual click.
+  useEffect(() => {
+    if (!activeFilePath) return;
+    const match = processedGraphData.nodes.find((n) => n.id === activeFilePath);
+    if (match) setSelectedNode(match);
+  }, [activeFilePath, processedGraphData.nodes]);
+
   // Drag pan handlers
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     isDraggingRef.current = true;
+    didDragRef.current = false;
     dragStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isDraggingRef.current) return;
+    didDragRef.current = true;
     setPanOffset({
       x: e.clientX - dragStartRef.current.x,
       y: e.clientY - dragStartRef.current.y,
@@ -294,6 +313,38 @@ export const EditorGraphPane: React.FC<EditorGraphPaneProps> = ({
 
   const handleMouseUp = () => {
     isDraggingRef.current = false;
+  };
+
+  // Click-to-select: hit-test the click point (inverse-transformed through
+  // the current pan/zoom) against the live simulation positions. Skipped
+  // when the mouse actually moved between down/up (a pan drag), so panning
+  // never fires a spurious node selection.
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (didDragRef.current) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = (e.clientX - rect.left - panOffset.x) / zoomLevel;
+    const clickY = (e.clientY - rect.top - panOffset.y) / zoomLevel;
+
+    let closest: (GraphNode & { x: number; y: number }) | null = null;
+    let closestDist = Infinity;
+    for (const node of simNodesRef.current) {
+      const dx = node.x - clickX;
+      const dy = node.y - clickY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const hitRadius = (node.type === 'chapter' ? 12 : node.childCount ? 10 : 7) + 4;
+      if (dist <= hitRadius && dist < closestDist) {
+        closest = node;
+        closestDist = dist;
+      }
+    }
+
+    if (closest) {
+      setSelectedNode(closest);
+      onNodeClick?.(closest);
+    }
   };
 
   return (
@@ -374,6 +425,7 @@ export const EditorGraphPane: React.FC<EditorGraphPaneProps> = ({
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onClick={handleCanvasClick}
           className="w-full h-full block"
         />
       </div>
