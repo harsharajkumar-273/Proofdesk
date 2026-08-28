@@ -10,6 +10,15 @@ import { expect, test } from '@playwright/test';
  * "WASM Sandbox" / "docker" mode selector in the editor UI) so it measures
  * the real build pipeline end-to-end through the browser, not a mocked one.
  *
+ * The two paths are exercised differently because the app's compileRepository
+ * only takes the WASM branch for an actual PreTeXt file (course.xml) - the
+ * WASM test edits that, click-to-build, no priming needed (the WASM path
+ * reads the live editor buffer directly). The Docker/BullMQ test edits
+ * interactive.js instead, which never takes the WASM branch regardless of
+ * engine selection, and needs one unmeasured priming build first to put the
+ * app in the mode where editing debounce-syncs to the server at all - see
+ * primeRepositoryBuildMode's comment for why.
+ *
  * Requires the full stack running locally, e.g.:
  *   docker-compose up --build -d      # ila-live builder + redis
  *   npx playwright test -c playwright.benchmark.config.ts
@@ -120,18 +129,53 @@ function summarize(label: string, samplesMs: number[]) {
 }
 
 /**
- * One build-and-time cycle: nudges interactive.js so the build isn't served
- * from cache, clicks Build Preview, and times until the preview iframe
- * actually renders new content.
+ * Clicking "Build Preview" is what flips EditorPage's compilationMode to
+ * 'repository' (initializeBuildSession -> setCompilationModeState) -
+ * that's the ONLY thing that switches it, and it's a precondition, not a
+ * side effect of editing. Opening a non-PreTeXt file (interactive.js) for
+ * the first time sets mode to 'file' instead (openFileInTab), and
+ * applyEditorValueChange's debounced auto-rebuild - the only path that
+ * ever POSTs edited content to /build/update - hard-returns for any mode
+ * other than 'repository'. So editing-then-clicking-build (the original
+ * shape of this helper) builds for real, but from whatever content the
+ * server already had: the click carries no content of its own, and the
+ * edit's sync got skipped because mode was still 'file' when it fired.
+ * The result: a real, successful build of stale content, silently never
+ * containing the marker - a hang, not a slow build.
+ *
+ * The working sequence (matches tests/e2e/local-demo.spec.ts's "updates
+ * the preview in live-edit mode" test, which this mirrors) is build FIRST
+ * to establish repository mode, THEN edit and let the debounce sync it.
+ */
+const primeRepositoryBuildMode = async (page: import('@playwright/test').Page) => {
+  await page.locator('[data-file-path="interactive.js"]').click();
+  await waitForEditorTestHook(page);
+  await page.getByRole('button', { name: /build preview|building/i }).first().click();
+  await expect(page.locator('iframe[title="Build Preview"]')).toBeVisible({ timeout: 150_000 });
+};
+
+/**
+ * One edit-and-time cycle for the Docker/BullMQ path: nudges
+ * interactive.js's content (repository mode must already be primed - see
+ * primeRepositoryBuildMode) and times until the debounced auto-rebuild
+ * lands the new content in the preview iframe. This is a real user-facing
+ * latency (edit -> updated preview), just not one gated behind a second
+ * manual build click - the app only asks for that click once, to open the
+ * file for editing.
+ *
+ * interactive.js is not a PreTeXt file (isPretextXmlFile in
+ * EditorPage.tsx's compileRepository/runQueuedRebuild checks .xml/.ptx),
+ * so this always takes the server build path regardless of which engine
+ * is selected - which is exactly why it's only used for the Docker test.
+ * See buildXmlOnceAndTime for the WASM path, which needs an actual
+ * PreTeXt file to ever take the WASM branch.
  */
 const buildOnceAndTime = async (
   page: import('@playwright/test').Page,
   runIndex: number
 ): Promise<number> => {
-  await page.locator('[data-file-path="interactive.js"]').click();
-  await waitForEditorTestHook(page);
-
   const marker = `bench-run-${runIndex}-${Date.now()}`;
+  const start = Date.now();
   await page.evaluate((markerText) => {
     const nextValue = `
 const badge = document.getElementById('demo-badge');
@@ -143,25 +187,80 @@ if (badge) {
     testWindow.__mraSetActiveEditorValue?.(nextValue);
   }, marker);
 
+  // The docker/ image's pretex-cache and vagrant-build named volumes cache
+  // LaTeX-to-SVG equation renders and compiled JS/CSS bundles across builds
+  // (see docker-compose.yml) - by far the biggest factor in build time.
+  // Freshly created volumes (first-ever `docker-compose up`, or after a
+  // `docker volume prune`) start empty, so run 0 pays for a real cold
+  // compile and can take well over a minute; runs 1+ hit the now-warm cache
+  // and are much faster. Give run 0 real headroom; keep later runs tighter
+  // so a genuine hang still fails fast.
+  const previewFrame = page.frameLocator('iframe[title="Build Preview"]');
+  await expect(previewFrame.getByText(marker)).toBeVisible({
+    timeout: runIndex === 0 ? 150_000 : 60_000,
+  });
+  const elapsed = Date.now() - start;
+
+  return elapsed;
+};
+
+/**
+ * One edit-and-time cycle for the real in-browser WASM path. Unlike
+ * interactive.js, course.xml IS a PreTeXt file, so compileRepository's
+ * WASM branch (compilerRuntime === 'wasm' && isPretextXmlFile(path))
+ * actually triggers - it reads tabs.find(activeTabId).content directly,
+ * no server round-trip, so edit-then-click (no priming needed) is the
+ * correct order here, unlike the Docker/interactive.js path above.
+ */
+const buildXmlOnceAndTime = async (
+  page: import('@playwright/test').Page,
+  runIndex: number
+): Promise<number> => {
+  await page.locator('[data-file-path="course.xml"]').click();
+  await waitForEditorTestHook(page);
+
+  const marker = `bench-run-${runIndex}-${Date.now()}`;
+  await page.evaluate((markerText) => {
+    const nextValue = `<course title="Linear Algebra Demo" subtitle="A seeded repository for local product testing">
+  <section title="Vectors">
+    <paragraph>${markerText}</paragraph>
+    <paragraph>Edit this XML file to test full preview rebuilds without GitHub.</paragraph>
+    <item>Represent vectors as ordered lists of numbers.</item>
+    <item>Use the preview to confirm text updates appear after rebuild.</item>
+  </section>
+  <section title="Matrices">
+    <paragraph>Matrices organize coefficients so we can describe systems and transformations.</paragraph>
+    <item>Use styles.css to test quick asset updates.</item>
+    <item>Use interactive.js to test JavaScript live preview updates.</item>
+  </section>
+</course>`;
+    const testWindow = window as Window & { __mraSetActiveEditorValue?: (value: string) => void };
+    testWindow.__mraSetActiveEditorValue?.(nextValue);
+  }, marker);
+
   const start = Date.now();
   await page.getByRole('button', { name: /build preview|building/i }).first().click();
 
   const previewFrame = page.frameLocator('iframe[title="Build Preview"]');
-  await expect(previewFrame.getByText(marker)).toBeVisible({ timeout: 60_000 });
+  await expect(previewFrame.getByText(marker)).toBeVisible({
+    timeout: runIndex === 0 ? 150_000 : 60_000,
+  });
   const elapsed = Date.now() - start;
 
   return elapsed;
 };
 
 test('WASM compile latency (Pyodide, in-browser)', async ({ page }) => {
-  test.setTimeout(RUNS_PER_MODE * 70_000);
+  // Run 0's own expect() above budgets up to 150s (cold cache); runs 1+
+  // budget 70s each. Add 30s of headroom for workspace setup/navigation.
+  test.setTimeout(150_000 + (RUNS_PER_MODE - 1) * 70_000 + 30_000);
   await enableEditorTestMode(page);
   await openLocalDemoWorkspace(page);
   await page.locator('select[title*="WASM Sandbox"]').selectOption('wasm');
 
   const samples: number[] = [];
   for (let i = 0; i < RUNS_PER_MODE; i++) {
-    samples.push(await buildOnceAndTime(page, i));
+    samples.push(await buildXmlOnceAndTime(page, i));
   }
 
   const result = summarize('wasm', samples);
@@ -173,10 +272,15 @@ test('WASM compile latency (Pyodide, in-browser)', async ({ page }) => {
 });
 
 test('Docker/BullMQ compile latency (server-side sandbox)', async ({ page }) => {
-  test.setTimeout(RUNS_PER_MODE * 70_000);
+  // primeRepositoryBuildMode's own build budgets up to 150s (cold cache);
+  // run 0's edit-and-wait budgets another 150s (still-cold cache for the
+  // first debounced rebuild); runs 1+ budget 70s each. Add 30s of headroom
+  // for workspace setup/navigation.
+  test.setTimeout(150_000 + 150_000 + (RUNS_PER_MODE - 1) * 70_000 + 30_000);
   await enableEditorTestMode(page);
   await openLocalDemoWorkspace(page);
   await page.locator('select[title*="WASM Sandbox"]').selectOption('docker');
+  await primeRepositoryBuildMode(page);
 
   const samples: number[] = [];
   for (let i = 0; i < RUNS_PER_MODE; i++) {
