@@ -524,6 +524,26 @@ describe('active backend routes', () => {
     assert.equal(response.status, 200);
   });
 
+  it('requires authentication to explain a build error', async () => {
+    const response = await request(app).post('/build/explain-error').send({ log: 'boom' });
+    assert.equal(response.status, 401);
+  });
+
+  it('reports the AI explainer as unavailable when no API key is configured', async () => {
+    const previousKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const response = await request(app)
+        .post('/build/explain-error')
+        .set('Authorization', 'Bearer local-test')
+        .send({ log: 'boom' });
+      assert.equal(response.status, 503);
+      assert.equal(response.body.code, 'ai_not_configured');
+    } finally {
+      if (previousKey !== undefined) process.env.ANTHROPIC_API_KEY = previousKey;
+    }
+  });
+
   it('serves the Prometheus metrics data', async () => {
     // /metrics now requires an authenticated request (requireAccessToken)
     // rather than being world-readable.

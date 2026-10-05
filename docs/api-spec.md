@@ -565,6 +565,48 @@ Response:
 }
 ```
 
+### `POST /build/explain-error`
+
+Asks Claude to explain a failed build log in plain English. Optional: only available when the server has `ANTHROPIC_API_KEY` set.
+
+Auth required: yes. Limited to 10 requests per 10 minutes per signed-in user.
+
+Credentials (GitHub/Anthropic/AWS tokens, URL credentials, bearer tokens, `key=value` secrets) are redacted from the log before it is sent, and long logs are shortened to the first 2,000 characters plus the tail.
+
+Request:
+
+```json
+{
+  "log": "chapters/ch1.xml:42: parser error : Opening and ending tag mismatch ..."
+}
+```
+
+Response:
+
+```json
+{
+  "explanation": {
+    "summary": "A tag is not closed.",
+    "likelyCause": "The <theorem> on line 40 is missing its closing tag.",
+    "fixSteps": ["Open chapters/ch1.xml", "Add </theorem> after the proof"],
+    "location": "chapters/ch1.xml:42",
+    "confidence": "high"
+  }
+}
+```
+
+`location` is an empty string when the log names no file. `confidence` is `high`, `medium` or `low`.
+
+Errors (each has a machine-readable `code`):
+
+- `400` `invalid_log` when `log` is missing, blank, or not a string
+- `401` when not authenticated
+- `413` `log_too_large` when `log` exceeds 200,000 characters
+- `422` `ai_declined` when the model declined or returned an unusable answer
+- `429` `rate_limited` when the per-user limit is exceeded
+- `502` `ai_failed` for any other upstream failure
+- `503` `ai_not_configured` when no API key is configured, or `ai_busy` when the AI service is overloaded
+
 ## Legacy single-file compile route
 
 ### `POST /compile`
