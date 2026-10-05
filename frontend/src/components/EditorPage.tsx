@@ -57,10 +57,7 @@ import {
   getOrCreateCollabClientId,
   getParticipantInitials,
   getParticipantName,
-  readStoredTeamSession,
   syncCollaborativePreview,
-  type CollaborationParticipant,
-  type TeamSessionData,
 } from '../utils/editorCollaboration';
 import {
   getReviewMarkerLabel,
@@ -78,6 +75,7 @@ import {
 } from '../utils/editorWorkspace';
 import { useEditorLayout } from '../hooks/useEditorLayout';
 import { usePdfExport } from '../hooks/usePdfExport';
+import { useTeamSession } from '../hooks/useTeamSession';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
@@ -295,7 +293,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
-  const initialStoredTeamSessionRef = useRef<TeamSessionData | null>(readStoredTeamSession());
   
   const [repo, setRepo] = useState<Repository | null>(null);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -322,14 +319,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
 
   const [, setLastSavedAt] = useState<Date | null>(null);
-  const [collaborationEnabled, setCollaborationEnabled] = useState<boolean>(Boolean(initialStoredTeamSessionRef.current));
-  const [collaborationStatus, setCollaborationStatus] = useState<string>('');
-  const [collaborators, setCollaborators] = useState<CollaborationParticipant[]>([]);
   const [editorReady, setEditorReady] = useState<boolean>(false);
   const [collaborationRetryKey, setCollaborationRetryKey] = useState<number>(0);
-  const [teamSession, setTeamSession] = useState<TeamSessionData | null>(initialStoredTeamSessionRef.current);
-  const [teamSessionBusy, setTeamSessionBusy] = useState<boolean>(false);
-  const [teamSessionNotice, setTeamSessionNotice] = useState<string>('');
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
   const [recentFiles, setRecentFiles] = useState<RecentFileEntry[]>([]);
   const [reviewMarkers, setReviewMarkers] = useState<Record<string, ReviewMarkerEntry>>({});
@@ -548,13 +539,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const hoverProviderRef = useRef<Monaco.IDisposable | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
   
-  const persistTeamSession = (nextSession: TeamSessionData | null) => {
-    setTeamSession(nextSession);
-    if (typeof window === 'undefined') return;
-
-    saveTeamSessionToStorage(nextSession);
-  };
-
   const saveCurrentSnapshot = () => {
     if (!repo) return;
     workspaceSnapshots.current.set(repo.fullName, {
@@ -645,13 +629,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     }
 
     setOpenRepoKeys(newKeys);
-  };
-
-  const showTeamNotice = (message: string) => {
-    setTeamSessionNotice(message);
-    window.setTimeout(() => {
-      setTeamSessionNotice((current) => current === message ? '' : current);
-    }, 2500);
   };
 
   const jsonHeaders = (headers: HeadersInit = {}, includeJson = false): HeadersInit => ({
@@ -768,6 +745,31 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
+  const {
+    initialSession: initialTeamSession,
+    teamSession,
+    collaborationEnabled,
+    setCollaborationEnabled,
+    collaborationStatus,
+    setCollaborationStatus,
+    collaborators,
+    setCollaborators,
+    teamSessionBusy,
+    teamSessionNotice,
+    persistTeamSession,
+    showTeamNotice,
+    copyTeamInviteCode,
+    createTeamSession,
+    switchToSoloMode,
+    switchToTeamMode,
+  } = useTeamSession<Repository>({
+    repo,
+    user: userData,
+    request: apiRequest,
+    onCreateError: (error) => showNoticeFromError(error, 'Failed to create invite code'),
+    onCreated: () => setWorkspaceNotice(null),
+  });
+
   const handleWorkspaceNoticeAction = () => {
     if (!workspaceNotice?.actionType) return;
 
@@ -785,73 +787,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     if (workspaceNotice.actionType === 'open-preview') {
       void jumpToRelatedPreview();
     }
-  };
-
-  const copyTeamInviteCode = async () => {
-    if (!teamSession?.code) return;
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(teamSession.code);
-        showTeamNotice('Invite code copied');
-        return;
-      }
-    } catch (error) {
-      console.error('Failed to copy invite code:', error);
-    }
-
-    window.prompt('Copy this invite code', teamSession.code);
-  };
-
-  const createTeamSession = async () => {
-    if (!repo || teamSessionBusy) return;
-
-    setTeamSessionBusy(true);
-    setCollaborationStatus('Generating invite code…');
-
-    try {
-      const data = await apiRequest<TeamSessionData>('/team-sessions/create', {
-        method: 'POST',
-        body: JSON.stringify({
-          repo,
-          createdBy: {
-            login: userData?.login,
-            name: userData?.name,
-          }
-        })
-      }, 'Failed to create team session');
-
-      persistTeamSession(data);
-      setCollaborationEnabled(true);
-      setCollaborationStatus('Invite code ready');
-      showTeamNotice(`Team code ${data.code} is ready`);
-      setWorkspaceNotice(null);
-    } catch (error) {
-      console.error('Create team session error:', error);
-      setCollaborationEnabled(false);
-      showNoticeFromError(error, 'Failed to create invite code');
-      setCollaborationStatus(error instanceof Error ? error.message : 'Failed to create invite code');
-    } finally {
-      setTeamSessionBusy(false);
-    }
-  };
-
-  const switchToSoloMode = () => {
-    persistTeamSession(null);
-    setCollaborationEnabled(false);
-    setCollaborationStatus('');
-    setCollaborators([]);
-    showTeamNotice('Solo mode enabled');
-  };
-
-  const switchToTeamMode = () => {
-    setCollaborationEnabled(true);
-    if (teamSession?.code) {
-      setCollaborationStatus('Team room ready');
-      return;
-    }
-
-    void createTeamSession();
   };
 
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
@@ -1013,7 +948,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             throw new Error('Failed to prepare the repository workspace');
           }
 
-          if (initialStoredTeamSessionRef.current?.repo?.fullName && initialStoredTeamSessionRef.current.repo.fullName !== parsed.fullName) {
+          if (initialTeamSession?.repo?.fullName && initialTeamSession.repo.fullName !== parsed.fullName) {
             persistTeamSession(null);
             setCollaborationEnabled(false);
           }
