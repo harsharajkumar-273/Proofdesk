@@ -76,6 +76,7 @@ import {
   type ReviewMarkerStatus,
   type ReviewThreadEntry,
 } from '../utils/editorWorkspace';
+import { useEditorLayout } from '../hooks/useEditorLayout';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
@@ -289,9 +290,6 @@ type EditorTestWindow = Window & {
   };
 };
 
-const isCompactEditorViewport = () =>
-  typeof window !== 'undefined' && window.innerWidth < 768;
-
 const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -371,9 +369,18 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const activeTabIdRef = useRef<string | null>(activeTabId);
   const activeSectionXmlIdRef = useRef<string | null>(null);
   
-  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
-  const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
+  const {
+    isCompactViewport,
+    sidebarOpen,
+    setSidebarOpen,
+    sidebarWidth,
+    editorWidth,
+    setEditorWidth,
+    splitView,
+    toggleSplitView,
+    handleSidebarResizeStart,
+    handleEditorResizeStart,
+  } = useEditorLayout();
   // 'graph' is a member because the render branch at the bottom of this file
   // compares against it. Without it that comparison is between types with no
   // overlap, which tsc -b reports as TS2367 and treats as an error — failing
@@ -384,23 +391,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
   const [showRepoSwitcher, setShowRepoSwitcher] = useState<boolean>(false);
   
-  const [sidebarWidth, setSidebarWidth] = useState<number>(280);
-  const [editorWidth, setEditorWidth] = useState<number>(60);
-  
-  const [splitView, setSplitView] = useState<boolean>(() => {
-    const stored = localStorage.getItem('proofdesk_split_view');
-    return stored !== null ? stored === 'true' : true;
-  });
-
   const [compilerRuntime, setCompilerRuntime] = useState<'docker' | 'wasm'>('wasm');
-
-  const toggleSplitView = () => {
-    setSplitView((prev) => {
-      const next = !prev;
-      localStorage.setItem('proofdesk_split_view', String(next));
-      return next;
-    });
-  };
 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
 
@@ -425,7 +416,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, []);
+  }, [toggleSplitView]);
 
   const [compilationMode, setCompilationMode] = useState<'repository' | 'file'>('repository');
   const [autoCompile, setAutoCompile] = useState<boolean>(true);
@@ -557,18 +548,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   // remount stacks another provider and hovers are duplicated.
   const hoverProviderRef = useRef<Monaco.IDisposable | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
-  
-  const sidebarResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
-    isResizing: false,
-    startX: 0,
-    startWidth: 280
-  });
-  
-  const editorResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
-    isResizing: false,
-    startX: 0,
-    startWidth: 60
-  });
   
   const persistTeamSession = (nextSession: TeamSessionData | null) => {
     setTeamSession(nextSession);
@@ -869,59 +848,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     void createTeamSession();
   };
 
-  const handleSidebarResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    sidebarResizeRef.current = {
-      isResizing: true,
-      startX: e.clientX,
-      startWidth: sidebarWidth
-    };
-    
-    document.addEventListener('mousemove', handleSidebarResize);
-    document.addEventListener('mouseup', handleSidebarResizeStop);
-  };
-
-  const handleSidebarResize = (e: MouseEvent) => {
-    if (!sidebarResizeRef.current.isResizing) return;
-    
-    const delta = e.clientX - sidebarResizeRef.current.startX;
-    const newWidth = Math.max(200, Math.min(500, sidebarResizeRef.current.startWidth + delta));
-    setSidebarWidth(newWidth);
-  };
-
-  const handleSidebarResizeStop = () => {
-    sidebarResizeRef.current.isResizing = false;
-    document.removeEventListener('mousemove', handleSidebarResize);
-    document.removeEventListener('mouseup', handleSidebarResizeStop);
-  };
-
-  const handleEditorResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    editorResizeRef.current = {
-      isResizing: true,
-      startX: e.clientX,
-      startWidth: editorWidth
-    };
-    
-    document.addEventListener('mousemove', handleEditorResize);
-    document.addEventListener('mouseup', handleEditorResizeStop);
-  };
-
-  const handleEditorResize = (e: MouseEvent) => {
-    if (!editorResizeRef.current.isResizing) return;
-    
-    const containerWidth = window.innerWidth - (sidebarOpen ? sidebarWidth + 12 : 0);
-    const delta = ((e.clientX - editorResizeRef.current.startX) / containerWidth) * 100;
-    const newWidth = Math.max(30, Math.min(70, editorResizeRef.current.startWidth + delta));
-    setEditorWidth(newWidth);
-  };
-
-  const handleEditorResizeStop = () => {
-    editorResizeRef.current.isResizing = false;
-    document.removeEventListener('mousemove', handleEditorResize);
-    document.removeEventListener('mouseup', handleEditorResizeStop);
-  };
-
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
@@ -1027,23 +953,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     void fetchUserData();
     // Load the signed-in user once when the editor shell mounts.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const handleViewportResize = () => {
-      const nextIsCompact = isCompactEditorViewport();
-      setIsCompactViewport(nextIsCompact);
-
-      if (nextIsCompact && !wasCompactViewportRef.current) {
-        setSidebarOpen(false);
-      }
-
-      wasCompactViewportRef.current = nextIsCompact;
-    };
-
-    handleViewportResize();
-    window.addEventListener('resize', handleViewportResize);
-    return () => window.removeEventListener('resize', handleViewportResize);
   }, []);
 
   const fetchUserRepos = async () => {
