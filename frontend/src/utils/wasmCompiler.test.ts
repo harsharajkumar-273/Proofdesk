@@ -31,7 +31,7 @@ describe('WebAssembly PreTeXt Compiler Runtime', () => {
       return '';
     }),
     globals: {
-      set: vi.fn((key: string, val: any) => {
+      set: vi.fn((key: string, val: unknown) => {
         mockGlobals[key] = val;
       }),
       get: vi.fn((key: string) => mockGlobals[key]),
@@ -101,7 +101,7 @@ describe('WASM preview: local workspace assets (issue #16)', () => {
       script === 'pretext_to_html(xml_to_compile)' ? '<article>Body</article>' : '',
     ),
     globals: {
-      set: vi.fn((key: string, val: any) => { mockGlobals[key] = val; }),
+      set: vi.fn((key: string, val: unknown) => { mockGlobals[key] = val; }),
       get: vi.fn((key: string) => mockGlobals[key]),
     },
   };

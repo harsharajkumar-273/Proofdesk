@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useId } from 'react';
 import { CheckCircle2, FileText, X } from 'lucide-react';
 import { type TabChangeSummary } from '../utils/editorDiff';
 
@@ -17,17 +17,33 @@ const SaveReviewDialog: React.FC<SaveReviewDialogProps> = ({
   onClose,
   onConfirm,
 }) => {
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isSaving) onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, isSaving, onClose]);
+
   if (!isOpen) return null;
 
   const totalChangedLines = changes.reduce((sum, change) => sum + change.changedLines, 0);
 
   return (
     <div className="editor-review-modal fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 px-4">
-      <div className="w-full max-w-3xl rounded-3xl border border-blue-100 bg-white shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-3xl rounded-3xl border border-blue-100 bg-white shadow-2xl"
+      >
         <div className="flex items-start justify-between border-b border-blue-100 px-6 py-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-600">Review Before Saving</p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Confirm the changes going back to GitHub</h2>
+            <h2 id={titleId} className="mt-2 text-2xl font-semibold text-slate-900">Confirm the changes going back to GitHub</h2>
             <p className="mt-2 text-sm text-slate-600">
               {changes.length} file{changes.length === 1 ? '' : 's'} changed, about {totalChangedLines} edited line
               {totalChangedLines === 1 ? '' : 's'}.
@@ -37,6 +53,7 @@ const SaveReviewDialog: React.FC<SaveReviewDialogProps> = ({
             onClick={onClose}
             className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-900"
             title="Close review"
+            aria-label="Close review"
           >
             <X className="h-5 w-5" />
           </button>

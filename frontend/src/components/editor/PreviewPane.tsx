@@ -291,6 +291,7 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 onClick={compileRepository}
                 className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
                 title="Rebuild"
+                aria-label="Rebuild preview"
               >
                 <RefreshCw className={`h-4 w-4 ${compiling ? 'animate-spin' : ''}`} />
               </button>

@@ -176,6 +176,7 @@ const FileRow: React.FC<{
         <button
           onClick={onSelect}
           title="View diff"
+          aria-label="View diff"
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 3, color: isSelected ? C.blue : C.textFaint, flexShrink: 0 }}
         >
           <FileDiff className="h-3.5 w-3.5" />

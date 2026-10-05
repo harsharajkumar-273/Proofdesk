@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useId, useRef } from 'react';
 import { X } from 'lucide-react';
 
 interface FileOperationDialogProps {
@@ -23,6 +23,7 @@ const FileOperationDialog: React.FC<FileOperationDialogProps> = ({
   const [value, setValue] = useState(defaultValue);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
     if (isOpen && inputRef.current) {
@@ -35,6 +36,15 @@ const FileOperationDialog: React.FC<FileOperationDialogProps> = ({
     setValue(defaultValue);
     setError(null);
   }, [defaultValue, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen, onClose]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,11 +70,17 @@ const FileOperationDialog: React.FC<FileOperationDialogProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-[#1e2139] border border-[#2a3f5f] rounded-lg p-6 w-96">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-[#1e2139] border border-[#2a3f5f] rounded-lg p-6 w-96"
+      >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">{title}</h3>
+          <h3 id={titleId} className="text-lg font-semibold text-white">{title}</h3>
           <button
             onClick={onClose}
+            aria-label="Close dialog"
             className="text-gray-400 hover:text-white"
           >
             <X className="w-5 h-5" />

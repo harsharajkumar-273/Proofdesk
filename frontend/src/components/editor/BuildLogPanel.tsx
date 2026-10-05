@@ -125,6 +125,7 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
             onClick={onClose}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
             title="Close"
+            aria-label="Close build log"
           >
             <X className="w-4 h-4" />
           </button>

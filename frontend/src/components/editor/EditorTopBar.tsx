@@ -115,6 +115,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
         onClick={navigateToRepoInput}
         className="flex-shrink-0 p-2 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg transition-all active:scale-95"
         title="Back to Dashboard"
+        aria-label="Back to Dashboard"
       >
         <ArrowLeft className="w-4 h-4" />
       </button>
