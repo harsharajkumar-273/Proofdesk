@@ -65,6 +65,7 @@ const EditorRepoTabBar: React.FC<EditorRepoTabBarProps> = ({
       onClick={onOpenNew}
       className="flex-shrink-0 px-2 h-full text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
       title="Open another repository"
+      aria-label="Open another repository"
     >
       <Plus className="w-3.5 h-3.5" />
     </button>

@@ -57,10 +57,7 @@ import {
   getOrCreateCollabClientId,
   getParticipantInitials,
   getParticipantName,
-  readStoredTeamSession,
   syncCollaborativePreview,
-  type CollaborationParticipant,
-  type TeamSessionData,
 } from '../utils/editorCollaboration';
 import {
   getReviewMarkerLabel,
@@ -76,6 +73,9 @@ import {
   type ReviewMarkerStatus,
   type ReviewThreadEntry,
 } from '../utils/editorWorkspace';
+import { useEditorLayout } from '../hooks/useEditorLayout';
+import { usePdfExport } from '../hooks/usePdfExport';
+import { useTeamSession } from '../hooks/useTeamSession';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
@@ -289,14 +289,10 @@ type EditorTestWindow = Window & {
   };
 };
 
-const isCompactEditorViewport = () =>
-  typeof window !== 'undefined' && window.innerWidth < 768;
-
 const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const API_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
-  const initialStoredTeamSessionRef = useRef<TeamSessionData | null>(readStoredTeamSession());
   
   const [repo, setRepo] = useState<Repository | null>(null);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
@@ -318,21 +314,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
   const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
   const [buildErrors, setBuildErrors] = useState<Diagnostic[]>([]);
-  const [pdfBuilding, setPdfBuilding] = useState<boolean>(false);
-  const pdfPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
 
   const [, setLastSavedAt] = useState<Date | null>(null);
-  const [collaborationEnabled, setCollaborationEnabled] = useState<boolean>(Boolean(initialStoredTeamSessionRef.current));
-  const [collaborationStatus, setCollaborationStatus] = useState<string>('');
-  const [collaborators, setCollaborators] = useState<CollaborationParticipant[]>([]);
   const [editorReady, setEditorReady] = useState<boolean>(false);
   const [collaborationRetryKey, setCollaborationRetryKey] = useState<number>(0);
-  const [teamSession, setTeamSession] = useState<TeamSessionData | null>(initialStoredTeamSessionRef.current);
-  const [teamSessionBusy, setTeamSessionBusy] = useState<boolean>(false);
-  const [teamSessionNotice, setTeamSessionNotice] = useState<string>('');
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
   const [recentFiles, setRecentFiles] = useState<RecentFileEntry[]>([]);
   const [reviewMarkers, setReviewMarkers] = useState<Record<string, ReviewMarkerEntry>>({});
@@ -371,9 +359,18 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const activeTabIdRef = useRef<string | null>(activeTabId);
   const activeSectionXmlIdRef = useRef<string | null>(null);
   
-  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() => isCompactEditorViewport());
-  const [sidebarOpen, setSidebarOpen] = useState<boolean>(() => !isCompactEditorViewport());
-  const wasCompactViewportRef = useRef<boolean>(isCompactViewport);
+  const {
+    isCompactViewport,
+    sidebarOpen,
+    setSidebarOpen,
+    sidebarWidth,
+    editorWidth,
+    setEditorWidth,
+    splitView,
+    toggleSplitView,
+    handleSidebarResizeStart,
+    handleEditorResizeStart,
+  } = useEditorLayout();
   // 'graph' is a member because the render branch at the bottom of this file
   // compares against it. Without it that comparison is between types with no
   // overlap, which tsc -b reports as TS2367 and treats as an error — failing
@@ -384,23 +381,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
   const [showRepoSwitcher, setShowRepoSwitcher] = useState<boolean>(false);
   
-  const [sidebarWidth, setSidebarWidth] = useState<number>(280);
-  const [editorWidth, setEditorWidth] = useState<number>(60);
-  
-  const [splitView, setSplitView] = useState<boolean>(() => {
-    const stored = localStorage.getItem('proofdesk_split_view');
-    return stored !== null ? stored === 'true' : true;
-  });
-
   const [compilerRuntime, setCompilerRuntime] = useState<'docker' | 'wasm'>('wasm');
-
-  const toggleSplitView = () => {
-    setSplitView((prev) => {
-      const next = !prev;
-      localStorage.setItem('proofdesk_split_view', String(next));
-      return next;
-    });
-  };
 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState<boolean>(false);
 
@@ -425,7 +406,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, []);
+  }, [toggleSplitView]);
 
   const [compilationMode, setCompilationMode] = useState<'repository' | 'file'>('repository');
   const [autoCompile, setAutoCompile] = useState<boolean>(true);
@@ -558,25 +539,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const hoverProviderRef = useRef<Monaco.IDisposable | null>(null);
   const rebuildTimer = useRef<EditorTimer>(null);
   
-  const sidebarResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
-    isResizing: false,
-    startX: 0,
-    startWidth: 280
-  });
-  
-  const editorResizeRef = useRef<{ isResizing: boolean; startX: number; startWidth: number }>({
-    isResizing: false,
-    startX: 0,
-    startWidth: 60
-  });
-  
-  const persistTeamSession = (nextSession: TeamSessionData | null) => {
-    setTeamSession(nextSession);
-    if (typeof window === 'undefined') return;
-
-    saveTeamSessionToStorage(nextSession);
-  };
-
   const saveCurrentSnapshot = () => {
     if (!repo) return;
     workspaceSnapshots.current.set(repo.fullName, {
@@ -669,13 +631,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     setOpenRepoKeys(newKeys);
   };
 
-  const showTeamNotice = (message: string) => {
-    setTeamSessionNotice(message);
-    window.setTimeout(() => {
-      setTeamSessionNotice((current) => current === message ? '' : current);
-    }, 2500);
-  };
-
   const jsonHeaders = (headers: HeadersInit = {}, includeJson = false): HeadersInit => ({
     ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
     ...headers,
@@ -687,6 +642,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       credentials: 'include',
       headers: jsonHeaders(init.headers, typeof init.body === 'string'),
     }, fallbackMessage);
+
+  const { pdfBuilding, exportPdf: handleExportPdf } = usePdfExport({
+    getSessionId: () => buildSessionIdRef.current,
+    request: apiRequest,
+    apiUrl: API_URL,
+    filename: repo ? `${repo.name}.pdf` : 'textbook.pdf',
+  });
 
   const loadPreviewHistory = async (sessionId: string, preserveSelection = false) => {
     try {
@@ -783,6 +745,31 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
+  const {
+    initialSession: initialTeamSession,
+    teamSession,
+    collaborationEnabled,
+    setCollaborationEnabled,
+    collaborationStatus,
+    setCollaborationStatus,
+    collaborators,
+    setCollaborators,
+    teamSessionBusy,
+    teamSessionNotice,
+    persistTeamSession,
+    showTeamNotice,
+    copyTeamInviteCode,
+    createTeamSession,
+    switchToSoloMode,
+    switchToTeamMode,
+  } = useTeamSession<Repository>({
+    repo,
+    user: userData,
+    request: apiRequest,
+    onCreateError: (error) => showNoticeFromError(error, 'Failed to create invite code'),
+    onCreated: () => setWorkspaceNotice(null),
+  });
+
   const handleWorkspaceNoticeAction = () => {
     if (!workspaceNotice?.actionType) return;
 
@@ -800,126 +787,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     if (workspaceNotice.actionType === 'open-preview') {
       void jumpToRelatedPreview();
     }
-  };
-
-  const copyTeamInviteCode = async () => {
-    if (!teamSession?.code) return;
-
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(teamSession.code);
-        showTeamNotice('Invite code copied');
-        return;
-      }
-    } catch (error) {
-      console.error('Failed to copy invite code:', error);
-    }
-
-    window.prompt('Copy this invite code', teamSession.code);
-  };
-
-  const createTeamSession = async () => {
-    if (!repo || teamSessionBusy) return;
-
-    setTeamSessionBusy(true);
-    setCollaborationStatus('Generating invite code…');
-
-    try {
-      const data = await apiRequest<TeamSessionData>('/team-sessions/create', {
-        method: 'POST',
-        body: JSON.stringify({
-          repo,
-          createdBy: {
-            login: userData?.login,
-            name: userData?.name,
-          }
-        })
-      }, 'Failed to create team session');
-
-      persistTeamSession(data);
-      setCollaborationEnabled(true);
-      setCollaborationStatus('Invite code ready');
-      showTeamNotice(`Team code ${data.code} is ready`);
-      setWorkspaceNotice(null);
-    } catch (error) {
-      console.error('Create team session error:', error);
-      setCollaborationEnabled(false);
-      showNoticeFromError(error, 'Failed to create invite code');
-      setCollaborationStatus(error instanceof Error ? error.message : 'Failed to create invite code');
-    } finally {
-      setTeamSessionBusy(false);
-    }
-  };
-
-  const switchToSoloMode = () => {
-    persistTeamSession(null);
-    setCollaborationEnabled(false);
-    setCollaborationStatus('');
-    setCollaborators([]);
-    showTeamNotice('Solo mode enabled');
-  };
-
-  const switchToTeamMode = () => {
-    setCollaborationEnabled(true);
-    if (teamSession?.code) {
-      setCollaborationStatus('Team room ready');
-      return;
-    }
-
-    void createTeamSession();
-  };
-
-  const handleSidebarResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    sidebarResizeRef.current = {
-      isResizing: true,
-      startX: e.clientX,
-      startWidth: sidebarWidth
-    };
-    
-    document.addEventListener('mousemove', handleSidebarResize);
-    document.addEventListener('mouseup', handleSidebarResizeStop);
-  };
-
-  const handleSidebarResize = (e: MouseEvent) => {
-    if (!sidebarResizeRef.current.isResizing) return;
-    
-    const delta = e.clientX - sidebarResizeRef.current.startX;
-    const newWidth = Math.max(200, Math.min(500, sidebarResizeRef.current.startWidth + delta));
-    setSidebarWidth(newWidth);
-  };
-
-  const handleSidebarResizeStop = () => {
-    sidebarResizeRef.current.isResizing = false;
-    document.removeEventListener('mousemove', handleSidebarResize);
-    document.removeEventListener('mouseup', handleSidebarResizeStop);
-  };
-
-  const handleEditorResizeStart = (e: React.MouseEvent) => {
-    e.preventDefault();
-    editorResizeRef.current = {
-      isResizing: true,
-      startX: e.clientX,
-      startWidth: editorWidth
-    };
-    
-    document.addEventListener('mousemove', handleEditorResize);
-    document.addEventListener('mouseup', handleEditorResizeStop);
-  };
-
-  const handleEditorResize = (e: MouseEvent) => {
-    if (!editorResizeRef.current.isResizing) return;
-    
-    const containerWidth = window.innerWidth - (sidebarOpen ? sidebarWidth + 12 : 0);
-    const delta = ((e.clientX - editorResizeRef.current.startX) / containerWidth) * 100;
-    const newWidth = Math.max(30, Math.min(70, editorResizeRef.current.startWidth + delta));
-    setEditorWidth(newWidth);
-  };
-
-  const handleEditorResizeStop = () => {
-    editorResizeRef.current.isResizing = false;
-    document.removeEventListener('mousemove', handleEditorResize);
-    document.removeEventListener('mouseup', handleEditorResizeStop);
   };
 
   const handleEditorDidMount = (editor: editor.IStandaloneCodeEditor, monaco: typeof Monaco) => {
@@ -1029,23 +896,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    const handleViewportResize = () => {
-      const nextIsCompact = isCompactEditorViewport();
-      setIsCompactViewport(nextIsCompact);
-
-      if (nextIsCompact && !wasCompactViewportRef.current) {
-        setSidebarOpen(false);
-      }
-
-      wasCompactViewportRef.current = nextIsCompact;
-    };
-
-    handleViewportResize();
-    window.addEventListener('resize', handleViewportResize);
-    return () => window.removeEventListener('resize', handleViewportResize);
-  }, []);
-
   const fetchUserRepos = async () => {
     try {
       const data = await apiRequest<RepositorySearchResult[]>('/repos', {}, 'Failed to fetch repositories');
@@ -1098,7 +948,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             throw new Error('Failed to prepare the repository workspace');
           }
 
-          if (initialStoredTeamSessionRef.current?.repo?.fullName && initialStoredTeamSessionRef.current.repo.fullName !== parsed.fullName) {
+          if (initialTeamSession?.repo?.fullName && initialTeamSession.repo.fullName !== parsed.fullName) {
             persistTeamSession(null);
             setCollaborationEnabled(false);
           }
@@ -2577,46 +2427,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  };
-
-  const handleExportPdf = async () => {
-    const sessionId = buildSessionIdRef.current;
-    if (!sessionId || pdfBuilding) return;
-
-    setPdfBuilding(true);
-    try {
-      await apiRequest(`/build/pdf/${sessionId}`, { method: 'POST' });
-    } catch {
-      setPdfBuilding(false);
-      return;
-    }
-
-    // Poll until ready
-    if (pdfPollRef.current) clearInterval(pdfPollRef.current);
-    pdfPollRef.current = setInterval(async () => {
-      const sid = buildSessionIdRef.current;
-      if (!sid) { clearInterval(pdfPollRef.current!); setPdfBuilding(false); return; }
-      try {
-        const { status } = await apiRequest<{ status: string }>(`/build/pdf-status/${sid}`);
-        if (status === 'ready') {
-          clearInterval(pdfPollRef.current!);
-          setPdfBuilding(false);
-          const a = document.createElement('a');
-          a.href = `${API_URL}/build/pdf-download/${sid}`;
-          a.download = repo ? `${repo.name}.pdf` : 'textbook.pdf';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        } else if (status === 'idle') {
-          // Build finished but no PDF was produced
-          clearInterval(pdfPollRef.current!);
-          setPdfBuilding(false);
-        }
-      } catch {
-        clearInterval(pdfPollRef.current!);
-        setPdfBuilding(false);
-      }
-    }, 5000);
   };
 
   const saveFile = async (tab: Tab | undefined = activeTab) => {

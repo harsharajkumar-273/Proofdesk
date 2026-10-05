@@ -63,6 +63,7 @@ const WorkspaceNoticeBanner: React.FC<WorkspaceNoticeBannerProps> = ({
             onClick={onDismiss}
             className="rounded-full border border-white/10 p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
             title="Dismiss notice"
+            aria-label="Dismiss notice"
           >
             <X className="h-4 w-4" />
           </button>

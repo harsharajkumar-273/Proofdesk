@@ -74,7 +74,7 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
     {tabs.length > 0 && (
       <div className="flex items-center gap-1 px-2 border-l border-zinc-200 dark:border-zinc-800 h-full">
         <div className="group relative">
-          <button className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">
+          <button aria-label="More tab actions" aria-haspopup="menu" className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-300 transition-colors">
             <MoreHorizontal className="w-4 h-4" />
           </button>
           

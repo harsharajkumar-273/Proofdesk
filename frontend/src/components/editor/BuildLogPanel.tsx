@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import BuildErrorExplanation from './BuildErrorExplanation';
 
 interface LogLine {
   line: string;
@@ -31,6 +32,13 @@ function formatElapsed(ms: number): string {
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
+
+/** The text to explain: the streamed output, falling back to the result's own error text. */
+const buildLogText = (lines: LogLine[], result: BuildResult | null): string => {
+  const streamed = lines.map((entry) => entry.line).join('\n');
+  if (streamed.trim()) return streamed;
+  return [result?.error, result?.stderr, result?.stdout].filter(Boolean).join('\n');
+};
 
 const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComplete, onClose }) => {
   const [lines, setLines] = useState<LogLine[]>([]);
@@ -125,6 +133,7 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
             onClick={onClose}
             className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
             title="Close"
+            aria-label="Close build log"
           >
             <X className="w-4 h-4" />
           </button>
@@ -145,6 +154,11 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
           ))}
           <div ref={bottomRef} />
         </div>
+
+        {/* AI explanation: only offered once a build has failed */}
+        {done && !result?.success && (
+          <BuildErrorExplanation apiUrl={apiUrl} log={buildLogText(lines, result)} />
+        )}
 
         {/* Footer */}
         {done && (
