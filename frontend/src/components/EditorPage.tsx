@@ -77,6 +77,7 @@ import {
   type ReviewThreadEntry,
 } from '../utils/editorWorkspace';
 import { useEditorLayout } from '../hooks/useEditorLayout';
+import { usePdfExport } from '../hooks/usePdfExport';
 import { summarizeUnsavedTabs, type TabChangeSummary } from '../utils/editorDiff';
 import { isPreTeXtFile } from '../utils/pretexPreview';
 import { isMathValidatableFile, validateMathInBuffer } from '../utils/mathValidator';
@@ -316,8 +317,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
   const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
   const [buildErrors, setBuildErrors] = useState<Diagnostic[]>([]);
-  const [pdfBuilding, setPdfBuilding] = useState<boolean>(false);
-  const pdfPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
   const [previewFrameKey, setPreviewFrameKey] = useState<number>(0);
@@ -666,6 +665,13 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       credentials: 'include',
       headers: jsonHeaders(init.headers, typeof init.body === 'string'),
     }, fallbackMessage);
+
+  const { pdfBuilding, exportPdf: handleExportPdf } = usePdfExport({
+    getSessionId: () => buildSessionIdRef.current,
+    request: apiRequest,
+    apiUrl: API_URL,
+    filename: repo ? `${repo.name}.pdf` : 'textbook.pdf',
+  });
 
   const loadPreviewHistory = async (sessionId: string, preserveSelection = false) => {
     try {
@@ -2486,46 +2492,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-  };
-
-  const handleExportPdf = async () => {
-    const sessionId = buildSessionIdRef.current;
-    if (!sessionId || pdfBuilding) return;
-
-    setPdfBuilding(true);
-    try {
-      await apiRequest(`/build/pdf/${sessionId}`, { method: 'POST' });
-    } catch {
-      setPdfBuilding(false);
-      return;
-    }
-
-    // Poll until ready
-    if (pdfPollRef.current) clearInterval(pdfPollRef.current);
-    pdfPollRef.current = setInterval(async () => {
-      const sid = buildSessionIdRef.current;
-      if (!sid) { clearInterval(pdfPollRef.current!); setPdfBuilding(false); return; }
-      try {
-        const { status } = await apiRequest<{ status: string }>(`/build/pdf-status/${sid}`);
-        if (status === 'ready') {
-          clearInterval(pdfPollRef.current!);
-          setPdfBuilding(false);
-          const a = document.createElement('a');
-          a.href = `${API_URL}/build/pdf-download/${sid}`;
-          a.download = repo ? `${repo.name}.pdf` : 'textbook.pdf';
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-        } else if (status === 'idle') {
-          // Build finished but no PDF was produced
-          clearInterval(pdfPollRef.current!);
-          setPdfBuilding(false);
-        }
-      } catch {
-        clearInterval(pdfPollRef.current!);
-        setPdfBuilding(false);
-      }
-    }, 5000);
   };
 
   const saveFile = async (tab: Tab | undefined = activeTab) => {
