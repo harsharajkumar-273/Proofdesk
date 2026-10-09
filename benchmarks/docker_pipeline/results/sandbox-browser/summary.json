@@ -1,0 +1,99 @@
+{
+  "directory": "/home/user/Proofdesk/benchmarks/docker_pipeline/results/sandbox-browser",
+  "primaryMetric": "totalMs",
+  "files": {
+    "browser.jsonl": {
+      "conditions": {
+        "browser-cold-noprewarm": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 2473.67,
+          "medianCI95": [
+            2450.03,
+            2500.25
+          ],
+          "p95": 2941.81,
+          "p95CI95": [
+            2581.26,
+            2972.07
+          ],
+          "mean": 2502.13,
+          "min": 2235.82,
+          "max": 2972.07
+        },
+        "browser-warm-changed": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 382.52,
+          "medianCI95": [
+            373.9,
+            390.42
+          ],
+          "p95": 504.61,
+          "p95CI95": [
+            471.15,
+            547.7
+          ],
+          "mean": 399.08,
+          "min": 343.42,
+          "max": 547.7
+        },
+        "browser-cold": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 611.12,
+          "medianCI95": [
+            589.48,
+            626.08
+          ],
+          "p95": 1074.53,
+          "p95CI95": [
+            838.86,
+            1161.29
+          ],
+          "mean": 662.66,
+          "min": 445.75,
+          "max": 1161.29
+        }
+      },
+      "comparisons": [
+        {
+          "a": "browser-cold-noprewarm",
+          "b": "browser-cold",
+          "description": "What the background pre-warm saves on the first preview (not pre-warmed vs pre-warmed)",
+          "diff": 1862.5500000000002,
+          "lo": 1837.264862000011,
+          "hi": 1898.6233010012656,
+          "ratio": 4.047764759785312,
+          "significant": true
+        },
+        {
+          "a": "browser-cold",
+          "b": "browser-warm-changed",
+          "description": "First preview of a visit (pre-warmed) vs later previews",
+          "diff": 228.60000000000002,
+          "lo": 204.5678900005296,
+          "hi": 247.8855124991387,
+          "ratio": 1.5976158109379903,
+          "significant": true
+        },
+        {
+          "a": "browser-cold-noprewarm",
+          "b": "browser-warm-changed",
+          "description": "First preview of a visit without pre-warm vs later previews",
+          "diff": 2091.15,
+          "lo": 2070.201002999209,
+          "hi": 2121.038733500056,
+          "ratio": 6.466772979190631,
+          "significant": true
+        }
+      ]
+    }
+  }
+}
