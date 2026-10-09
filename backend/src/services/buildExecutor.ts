@@ -194,6 +194,9 @@ export interface BuildSession {
   previewPath?: string | null;
   commitHash?: string | null;
   fromCache?: boolean;
+  // True once a file in the workspace has been edited after checkout. The
+  // output no longer matches `commitHash`, so it must never be cached under it.
+  hasLocalEdits?: boolean;
   localTestMode?: boolean;
   seededFromLocal?: boolean;
   defaultBranch?: string;
@@ -478,6 +481,28 @@ class BuildExecutor {
   _initLog(sessionId: string): void {
     if (!this.buildLogs.has(sessionId)) {
       this.buildLogs.set(sessionId, { lines: [], subscribers: new Set(), done: false, result: null });
+    }
+  }
+
+  /**
+   * Forget the previous build's finished state before a rebuild. Otherwise
+   * subscribeToLogs replays the old `done` event to the rebuild's waiter and
+   * updateFile resolves with the previous build's result.
+   */
+  async _resetLogForRebuild(sessionId: string): Promise<void> {
+    const entry = this.buildLogs.get(sessionId);
+    if (entry) {
+      entry.done = false;
+      entry.result = null;
+      entry.lines = [];
+    }
+    if (isRedisSharedStateEnabled()) {
+      try {
+        const redis = await getRedisClient();
+        await redis.del([`proofdesk:build-status:${sessionId}`, `proofdesk:active-logs:${sessionId}`]);
+      } catch (err: any) {
+        logger.warn(`[RedisLogPub] Reset failed: ${err.message}`);
+      }
     }
   }
 
@@ -1444,8 +1469,10 @@ class BuildExecutor {
         durationSeconds
       );
 
-      // Cache the successful build
-      if (success) {
+      // Cache the successful build — but only a pristine one. After an edit the
+      // output no longer corresponds to the commit hash it would be keyed under,
+      // and the next session to open that commit would be served the edit.
+      if (success && !session.hasLocalEdits) {
         const repoKey = `${session.owner}/${session.repo}`;
         // commitHash was already resolved above before the Docker run
         try {
@@ -1685,8 +1712,10 @@ class BuildExecutor {
     this.buildCache.delete(repoKey);
     await this._saveCache();
 
-    // Mark this session as a fresh build (not cached)
+    // Mark this session as a fresh build (not cached), diverged from its commit
     session.fromCache = false;
+    session.hasLocalEdits = true;
+    await this._resetLogForRebuild(sessionId);
 
     // If background queue is enabled, push to queue and wait for the result
     const queued = await pushBuildJob(sessionId, { xmlId, traceParent });
@@ -1886,6 +1915,9 @@ class BuildExecutor {
     if (isDirCached) {
       const repoKey = session ? `${session.owner}/${session.repo}` : sessionId;
       console.log(`[BuildCache] Keeping ${repoKey} directory (still in cache)`);
+      // The cached directory is kept, but this session's container is not
+      // reusable by anyone else and would otherwise run until the host restarts.
+      await this._stopPersistentContainer(sessionId);
       this.sessions.delete(sessionId);
       // Released here as well as on the path below. This branch returns early
       // to preserve the on-disk directory, but the log buffer and the build

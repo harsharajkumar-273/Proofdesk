@@ -119,6 +119,23 @@ ls -la /repo 2>/dev/null || echo "(empty)"
 
 cd /repo
 
+# npm install is skipped when node_modules already exists for the same
+# package.json (+ lockfile). The container is reused across rebuilds, so this
+# turns a ~2.6 s no-op into a hash comparison. Failures never write the stamp.
+npm_install_if_changed() {
+    local stamp want have
+    want=$(cat package.json package-lock.json 2>/dev/null | sha256sum | cut -d' ' -f1)
+    stamp="node_modules/.proofdesk-install-stamp"
+    have=$(cat "$stamp" 2>/dev/null || true)
+    if [ -d node_modules ] && [ "$want" = "$have" ]; then
+        echo "  ✓ npm dependencies unchanged, skipping npm install"
+        return 0
+    fi
+    if npm install 2>&1; then
+        mkdir -p node_modules && echo "$want" > "$stamp"
+    fi
+}
+
 if [ ! -d "/repo" ] || [ -z "$(ls -A /repo 2>/dev/null)" ]; then
     echo "❌ ERROR: No repository found in /repo"
     exit 1
@@ -315,7 +332,7 @@ if [ -d "mathbox" ]; then
         echo "  ✓ Using pre-built mathbox"
     elif [ -f "package.json" ]; then
         echo "  Installing mathbox dependencies..."
-        npm install 2>&1 || echo "  ⚠️  npm install had issues"
+        npm_install_if_changed || echo "  ⚠️  npm install had issues"
 
         echo "  Building mathbox with gulp..."
         if gulp build 2>&1; then
@@ -436,7 +453,7 @@ fi
 
 # Install root dependencies
 [ -f "bower.json" ] && bower install --allow-root 2>&1 || true
-[ -f "package.json" ] && npm install 2>&1 || true
+[ -f "package.json" ] && npm_install_if_changed || true
 
 echo ""
 echo "=== Step 4: Patching for Python 3 compatibility ==="
