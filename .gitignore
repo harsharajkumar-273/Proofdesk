@@ -46,3 +46,10 @@ docker/run/
 .idea/
 .vscode/
 .env.production
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log

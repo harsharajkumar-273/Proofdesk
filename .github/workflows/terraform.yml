@@ -1,0 +1,33 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths: ["infra/terraform/**", ".github/workflows/terraform.yml", "scripts/aws/bootstrap-ec2.sh"]
+  push:
+    branches: [main]
+    paths: ["infra/terraform/**", "scripts/aws/bootstrap-ec2.sh"]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform/aws
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Format check
+        run: terraform fmt -check -diff -recursive
+
+      - name: Init (no backend, no credentials)
+        run: terraform init -backend=false -input=false
+
+      - name: Validate
+        run: terraform validate

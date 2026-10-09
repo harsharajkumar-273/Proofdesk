@@ -1,0 +1,4 @@
+key_name        = "my-keypair"
+ssh_cidr_blocks = ["203.0.113.10/32"] # your IP
+# region        = "us-east-1"
+# instance_type = "t3.large"
