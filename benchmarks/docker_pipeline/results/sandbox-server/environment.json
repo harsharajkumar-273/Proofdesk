@@ -1,0 +1,86 @@
+{
+  "capturedAt": "2026-10-09T05:06:14.267Z",
+  "git": {
+    "commit": "a8908b1d99f7bde376217291984ad84a2d60a10b",
+    "branch": "claude/affectionate-noether-whilc6",
+    "dirty": true
+  },
+  "content": {
+    "dir": "backend/assets/ila-toolchain",
+    "sha256": "3d7134bb32acc0a0afcf93924f57b36861f283fefff63bc49da51146dbc42308",
+    "files": [
+      "SConstruct",
+      "demos",
+      "mathbox",
+      "pretex",
+      "static"
+    ],
+    "bytes": 21394
+  },
+  "host": {
+    "os": "Linux 6.18.44-fc-v80",
+    "arch": "x64",
+    "cpuModel": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+    "cpuCount": 4,
+    "memTotalMB": 16095,
+    "loadAvgAtStart": [
+      1.22,
+      1.14,
+      1.27
+    ],
+    "node": "v22.22.0"
+  },
+  "docker": {
+    "serverVersion": "29.6.2",
+    "storageDriver": "overlayfs",
+    "cgroupVersion": "1",
+    "cpus": 4,
+    "memTotalBytes": 16876494848,
+    "operatingSystem": "Ubuntu 24.04.4 LTS"
+  },
+  "image": {
+    "name": "mra-pretext-builder",
+    "id": "sha256:a65b6c24255370a4d1968e3949f5d9eeb971b6073b45c41445a74569e8d1f67b",
+    "sizeBytes": 2936344702,
+    "created": "2026-10-08T20:15:14.832236282Z"
+  },
+  "deviationsFromProduction": [
+    "HOST: a cloud sandbox VM (Firecracker microVM, Linux 6.18, 4 vCPU, 16 GB RAM, shared tenant). Absolute times are NOT comparable to production hardware; ratios between conditions are the more portable result.",
+    "IMAGE BASE: ubuntu:24.04 was pulled from mirror.gcr.io (Google's mirror of Docker Hub) because Docker Hub returned HTTP 429 to this network. Digest sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55.",
+    "IMAGE DEVIATION 1: the egress proxy's CA certificate was added to the image trust store so HTTPS downloads work during the build.",
+    "IMAGE DEVIATION 2: Node.js 18.19.1 + npm 9.2.0 come from Ubuntu 24.04's own packages instead of NodeSource 18.x, because deb.nodesource.com is blocked by the sandbox egress policy. Same major version as the Dockerfile's NODE_VERSION=18.",
+    "IMAGE DEVIATION 3: python-poppler was omitted. Its build downloads pybind11 from github.com, which is blocked. It is used only by the LaTeX-to-SVG math step; the benchmark content has no math, so that step is never reached.",
+    "DOCKER DAEMON: started with --iptables=false --bridge=none, so containers have no network. The benchmark content needs none at build time (build.sh only uses the network when a bower.json or package.json is present, and the content has neither).",
+    "CONTENT: the book is backend/assets/ila-toolchain (the repo's bundled ILA toolchain/demo project, 749 files, 26 MB), not a math textbook. The README's demo repo (test-repo/course-demo) cannot be used: the container pipeline fails on it with 'No HTML output generated'. Because the content has no equations, the pretex math-image cache cannot show a benefit here.",
+    "SERVER BENCHMARK: GitHub is replaced by a local bare git repository (git insteadOf), so ls-remote and clone run for real but without network latency (the code's own comment puts the HEAD check at 1-2 s over the network). GITHUB_PERSONAL_TOKEN is unset, which disables the GitHub-Releases pretex cache restore/save step that production runs before every build.",
+    "SERVER BENCHMARK: ENABLE_LOCAL_TEST_MODE=true is set only to disable the 3-builds-per-10-minutes limiter on POST /build/init. The benchmark repository does not match the demo repository, so the production build path runs.",
+    "BROWSER BENCHMARK: Pyodide 0.25.0 is served from local disk by request interception because cdn.jsdelivr.net is unreachable here. The 'cold' browser number therefore excludes the network transfer of about 12 MB and is a lower bound for a first-ever visit."
+  ],
+  "benchmark": {
+    "script": "server.mjs",
+    "runsPerCondition": 50,
+    "seed": 20261009,
+    "port": 4150,
+    "editFile": "demos/rabbits.html",
+    "primaryMetric": "totalMs",
+    "queue": "BullMQ on Redis (redis:7-alpine, as in docker-compose.yml)",
+    "netHost": true,
+    "notes": [
+      "GitHub replaced by a local bare repository through a git insteadOf rule: ls-remote and clone run for real, without network latency.",
+      "GITHUB_PERSONAL_TOKEN unset: the GitHub-Releases pretex cache restore/save step is disabled.",
+      "ENABLE_LOCAL_TEST_MODE=true only to disable the init rate limiter; the benchmark repo does not match the demo repo, so the production Docker path runs."
+    ],
+    "comparisons": [
+      [
+        "open-miss-cold",
+        "open-hit",
+        "Opening a repo: full build in a new container vs build-cache hit"
+      ],
+      [
+        "open-miss-cold",
+        "edit-publish-verified",
+        "Open (new container, full build) vs edit-to-verified-publication (running container)"
+      ]
+    ]
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "directory": "/home/user/Proofdesk/benchmarks/docker_pipeline/results/sandbox-server",
+  "primaryMetric": "totalMs",
+  "files": {
+    "server.jsonl": {
+      "conditions": {
+        "open-miss-cold": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 18019.99,
+          "medianCI95": [
+            17927.16,
+            18216.48
+          ],
+          "p95": 18505.04,
+          "p95CI95": [
+            18428.93,
+            19218.63
+          ],
+          "mean": 18054.06,
+          "min": 17429.64,
+          "max": 19218.63
+        },
+        "open-hit": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 1318.46,
+          "medianCI95": [
+            920.95,
+            1437.78
+          ],
+          "p95": 1613.88,
+          "p95CI95": [
+            1550.68,
+            2217.52
+          ],
+          "mean": 1188.72,
+          "min": 698.35,
+          "max": 2217.52
+        },
+        "edit-publish-verified": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 7246.1,
+          "medianCI95": [
+            7163.98,
+            7261.65
+          ],
+          "p95": 7482.63,
+          "p95CI95": [
+            7379.74,
+            7789
+          ],
+          "mean": 7245.29,
+          "min": 7029.37,
+          "max": 7789
+        },
+        "cache-probe-after-edit": {
+          "runs": 10,
+          "failed": 0,
+          "incorrect": 10,
+          "n": 0
+        }
+      },
+      "comparisons": [
+        {
+          "a": "open-miss-cold",
+          "b": "open-hit",
+          "description": "Opening a repo: full build in a new container vs build-cache hit",
+          "diff": 16701.530000000002,
+          "lo": 16529.2253200002,
+          "hi": 17187.809540499933,
+          "ratio": 13.667452937518014,
+          "significant": true
+        },
+        {
+          "a": "open-miss-cold",
+          "b": "edit-publish-verified",
+          "description": "Open (new container, full build) vs edit-to-verified-publication (running container)",
+          "diff": 10773.890000000001,
+          "lo": 10678.715065000579,
+          "hi": 11005.415949000511,
+          "ratio": 2.4868536178082006,
+          "significant": true
+        }
+      ]
+    }
+  }
+}
