@@ -5,6 +5,10 @@
 //   browser-cold          a brand-new browser context for every run, so Pyodide must be
 //                         loaded and initialised: the first preview of a visit
 //   browser-warm-changed  the same open editor, edit the document, click Build Preview
+//   browser-cold-noprewarm  like browser-cold, but the Pyodide download is held back during page
+//                         load and released at the moment of the click: what the first preview
+//                         would cost WITHOUT the background pre-warm the editor starts on mount
+//                         (EditorPage.tsx: "pre-warm the Pyodide WebAssembly runtime")
 //
 // The timed interval is the one the existing benchmark uses: click "Build Preview"
 // until the new content is visible in the preview iframe. There is no content cache
@@ -85,6 +89,7 @@ async function startStack() {
   const log = fs.openSync(path.join(OUT, 'stack.log'), 'w');
   const backend = spawn('node', ['--import', 'tsx', 'src/server.ts'], {
     cwd: path.join(repoRoot, 'backend'),
+    detached: true, // own process group, so the whole tree can be stopped at the end
     stdio: ['ignore', log, log],
     env: {
       ...process.env,
@@ -104,6 +109,7 @@ async function startStack() {
     if (build.code !== 0) throw new Error(`frontend build failed:\n${build.stderr.slice(-800)}`);
   }
   const frontend = spawn('npm', ['run', 'preview', '--prefix', path.join(repoRoot, 'frontend'), '--', '--host', '127.0.0.1', '--port', String(FRONTEND_PORT), '--strictPort'], {
+    detached: true,
     stdio: ['ignore', log, log],
   });
   await waitHttp(`${BACK}/health`, 'backend', backend);
@@ -114,10 +120,13 @@ async function startStack() {
 // ---------------------------------------------------------------------------
 // Driving the editor (same hooks and selectors as benchmarks/compile_latency.spec.ts)
 // ---------------------------------------------------------------------------
-async function newPage(browser) {
+async function newPage(browser, { gated = false } = {}) {
   const context = await browser.newContext();
   const pyodideRequests = { count: 0, bytes: 0 };
+  let openGate = () => {};
+  const gate = gated ? new Promise((resolve) => { openGate = resolve; }) : null;
   await context.route(`${CDN_PREFIX}**`, async (route) => {
+    if (gate) await gate; // hold the Pyodide download until the benchmark releases it
     const file = path.join(PYODIDE_DIR, new URL(route.request().url()).pathname.replace('/pyodide/v0.25.0/full/', ''));
     if (!fs.existsSync(file)) return route.fulfill({ status: 404, body: 'not found' });
     const body = fs.readFileSync(file);
@@ -130,7 +139,11 @@ async function newPage(browser) {
     window.localStorage.setItem('proofdesk_tour_v1', '1');
   });
   const page = await context.newPage();
-  return { context, page, pyodideRequests };
+  const timing = { navigationStart: null, prewarmReadyAt: null };
+  page.on('console', (message) => {
+    if (message.text().includes('Pyodide compiler runtime pre-warmed successfully')) timing.prewarmReadyAt = nowMs();
+  });
+  return { context, page, pyodideRequests, openGate, timing };
 }
 
 async function openWorkspace(page) {
@@ -151,10 +164,11 @@ async function openWorkspace(page) {
 }
 
 /** One timed preview: set the editor content, click Build Preview, wait for it to appear. */
-async function timedPreview(page, marker) {
+async function timedPreview(page, marker, { beforeClick } = {}) {
   await page.evaluate((value) => window.__mraSetActiveEditorValue(value), documentWithMarker(marker));
   const frame = page.frameLocator('iframe[title="Build Preview"]');
   const started = nowMs();
+  if (beforeClick) beforeClick();
   await page.getByRole('button', { name: /build preview|building/i }).first().click();
   await frame.getByText(marker).waitFor({ state: 'visible', timeout: 60_000 });
   const totalMs = nowMs() - started;
@@ -186,7 +200,11 @@ async function main() {
   env.benchmark = {
     script: 'browser.mjs', runsPerCondition: RUNS, seed: SEED, primaryMetric: 'totalMs', editFile: 'course.xml',
     notes: ['Pyodide 0.25.0 served from local disk by request interception; the cdn.jsdelivr.net download time is excluded.'],
-    comparisons: [['browser-cold', 'browser-warm-changed', 'Browser preview: first preview of a visit (Pyodide load) vs later previews']],
+    comparisons: [
+      ['browser-cold-noprewarm', 'browser-cold', 'What the background pre-warm saves on the first preview (not pre-warmed vs pre-warmed)'],
+      ['browser-cold', 'browser-warm-changed', 'First preview of a visit (pre-warmed) vs later previews'],
+      ['browser-cold-noprewarm', 'browser-warm-changed', 'First preview of a visit without pre-warm vs later previews'],
+    ],
   };
   const stack = await startStack();
   const browser = await chromium.launch({ executablePath: CHROMIUM });
@@ -202,18 +220,25 @@ async function main() {
 
   try {
     let index = 0;
-    for (const { block, condition } of blockRandomOrder(['browser-cold', 'browser-warm-changed'], RUNS, SEED)) {
+    for (const { block, condition } of blockRandomOrder(['browser-cold', 'browser-cold-noprewarm', 'browser-warm-changed'], RUNS, SEED)) {
       index += 1;
       const marker = `bench-${condition}-${block}-${Date.now()}`;
       let record;
       try {
-        if (condition === 'browser-cold') {
-          const cold = await newPage(browser);
+        if (condition === 'browser-cold' || condition === 'browser-cold-noprewarm') {
+          const gated = condition === 'browser-cold-noprewarm';
+          const cold = await newPage(browser, { gated });
           const t0 = nowMs();
           await openWorkspace(cold.page);
           const pageReadyMs = nowMs() - t0;
-          const r = await timedPreview(cold.page, marker);
-          record = { condition, block, index, ok: true, correct: r.correct, ...r, pageReadyMs, pyodideRequests: cold.pyodideRequests.count, pyodideBytes: cold.pyodideRequests.bytes };
+          // With the pre-warm running normally, how long after navigation did Pyodide become ready?
+          const prewarmReadyMs = cold.timing.prewarmReadyAt ? cold.timing.prewarmReadyAt - t0 : null;
+          const r = await timedPreview(cold.page, marker, { beforeClick: gated ? cold.openGate : undefined });
+          record = {
+            condition, block, index, ok: true, correct: r.correct, ...r, pageReadyMs, prewarmReadyMs,
+            pyodideReadyBeforeClick: !gated && prewarmReadyMs !== null,
+            pyodideRequests: cold.pyodideRequests.count, pyodideBytes: cold.pyodideRequests.bytes,
+          };
           await cold.context.close();
         } else {
           const r = await timedPreview(warm.page, marker);
@@ -223,12 +248,13 @@ async function main() {
         record = { condition, block, index, ok: false, correct: false, error: String(error).slice(0, 300) };
       }
       results.append(record);
-      console.log(`[browser] ${String(index).padStart(3)}/${RUNS * 2} ${condition.padEnd(22)} ${record.totalMs ? Math.round(record.totalMs) + ' ms' : 'n/a'} ${record.ok ? (record.correct ? 'ok' : 'INCORRECT-OUTPUT') : 'FAILED ' + record.error}`);
+      console.log(`[browser] ${String(index).padStart(3)}/${RUNS * 3} ${condition.padEnd(22)} ${record.totalMs ? Math.round(record.totalMs) + ' ms' : 'n/a'} ${record.ok ? (record.correct ? 'ok' : 'INCORRECT-OUTPUT') : 'FAILED ' + record.error}`);
     }
   } finally {
     await browser.close();
-    stack.backend.kill('SIGTERM');
-    stack.frontend.kill('SIGTERM');
+    for (const child of [stack.backend, stack.frontend]) {
+      try { process.kill(-child.pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
     await sleep(500);
     fs.rmSync(stack.dataDir, { recursive: true, force: true });
   }
