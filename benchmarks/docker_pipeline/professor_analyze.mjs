@@ -77,12 +77,17 @@ export function analyse(rows) {
     if (a && b) pairs.push({ id, size: a.size, previous: a.seconds, proofdesk: b.seconds, saved: a.seconds - b.seconds });
   }
   const saved = pairs.map((p) => p.saved);
+  // Percentage reduction per pair = saved / previous * 100; headline is the median of these.
+  const pct = pairs.map((p) => (p.saved / p.previous) * 100);
+  const [plo, phi] = pct.length >= 2 ? bootstrapCI(pct, median, { seed: 98 }) : [NaN, NaN];
   const [lo, hi] = saved.length >= 2 ? bootstrapCI(saved, median, { seed: 99 }) : [NaN, NaN];
   return {
     byWorkflow,
     pairs,
     pairedMedianSaved: median(saved),
     pairedMedianSavedCI95: [lo, hi],
+    pairedMedianPercentReduction: median(pct),
+    pairedMedianPercentReductionCI95: [plo, phi],
     proofdeskFasterInPairs: pairs.filter((p) => p.saved > 0).length,
   };
 }
@@ -99,4 +104,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   console.log(`\nPaired updates: ${result.pairs.length}. Proofdesk faster in ${result.proofdeskFasterInPairs} of them.`);
   console.log(`Median time saved per update (previous - proofdesk): ${f(result.pairedMedianSaved)} s, 95% CI [${f(result.pairedMedianSavedCI95[0])}, ${f(result.pairedMedianSavedCI95[1])}]`);
+  console.log(`Median per-update reduction: ${f(result.pairedMedianPercentReduction)} %, 95% CI [${f(result.pairedMedianPercentReductionCI95[0])}, ${f(result.pairedMedianPercentReductionCI95[1])}] (paired n = ${result.pairs.length}; one professor)`);
 }

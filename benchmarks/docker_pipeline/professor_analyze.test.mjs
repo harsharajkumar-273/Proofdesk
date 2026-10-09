@@ -46,6 +46,9 @@ describe('analyse', () => {
     assert.deepEqual(result.pairs.map((p) => p.id), ['1', '2']);
     assert.equal(result.pairedMedianSaved, 250); // (200 + 300) / 2
   });
+  it('reports the median per-pair percentage reduction', () => {
+    assert.ok(Math.abs(result.pairedMedianPercentReduction - 63.333) < 0.01); // median of 66.67 and 60
+  });
   it('does not call a percentile reliable below 20 samples', () => {
     assert.equal(result.byWorkflow.previous.p95Reliable, false);
   });
