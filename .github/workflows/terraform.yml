@@ -4,7 +4,6 @@ on:
   pull_request:
     paths: ["infra/terraform/**", ".github/workflows/terraform.yml", "scripts/aws/bootstrap-ec2.sh"]
   push:
-    branches: [main]
     paths: ["infra/terraform/**", "scripts/aws/bootstrap-ec2.sh"]
 
 permissions:
