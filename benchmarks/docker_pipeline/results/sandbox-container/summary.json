@@ -1,0 +1,225 @@
+{
+  "directory": "/home/user/Proofdesk/benchmarks/docker_pipeline/results/sandbox-container",
+  "primaryMetric": "totalMs",
+  "files": {
+    "container.jsonl": {
+      "conditions": {
+        "rebuild-newcontainer-changed": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 11326.98,
+          "medianCI95": [
+            11252.42,
+            11430.37
+          ],
+          "p95": 12622.9,
+          "p95CI95": [
+            11530.7,
+            22262.46
+          ],
+          "mean": 11771.4,
+          "min": 10965.51,
+          "max": 22262.46
+        },
+        "rebuild-newcontainer-unchanged": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 11354.05,
+          "medianCI95": [
+            11279.72,
+            11438.76
+          ],
+          "p95": 12997.8,
+          "p95CI95": [
+            11776.83,
+            70255.9
+          ],
+          "mean": 13542.26,
+          "min": 10944.51,
+          "max": 70255.9
+        },
+        "rebuild-running-changed": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 7000.67,
+          "medianCI95": [
+            6974,
+            7056.64
+          ],
+          "p95": 7541.82,
+          "p95CI95": [
+            7181.09,
+            10983.75
+          ],
+          "mean": 7128.9,
+          "min": 6866.39,
+          "max": 10983.75
+        },
+        "rebuild-running-emptycache": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 7069.67,
+          "medianCI95": [
+            7018.97,
+            7094.3
+          ],
+          "p95": 7281.78,
+          "p95CI95": [
+            7191.92,
+            7840.96
+          ],
+          "mean": 7082.38,
+          "min": 6874.18,
+          "max": 7840.96
+        },
+        "first-build": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 15364.34,
+          "medianCI95": [
+            15302.43,
+            15465.18
+          ],
+          "p95": 15883.37,
+          "p95CI95": [
+            15615.54,
+            16243.7
+          ],
+          "mean": 15377.37,
+          "min": 14840.33,
+          "max": 16243.7
+        },
+        "rebuild-running-unchanged": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 6991.52,
+          "medianCI95": [
+            6961.88,
+            7032.03
+          ],
+          "p95": 7298.68,
+          "p95CI95": [
+            7161.44,
+            8183.55
+          ],
+          "mean": 7044.74,
+          "min": 6795.02,
+          "max": 8183.55
+        },
+        "first-build-emptycache": {
+          "runs": 50,
+          "failed": 0,
+          "incorrect": 0,
+          "n": 50,
+          "median": 15431.13,
+          "medianCI95": [
+            15338.36,
+            15557.22
+          ],
+          "p95": 15879.58,
+          "p95CI95": [
+            15747.27,
+            16326.18
+          ],
+          "mean": 15427.96,
+          "min": 14873.31,
+          "max": 16326.18
+        }
+      },
+      "comparisons": [
+        {
+          "a": "rebuild-newcontainer-unchanged",
+          "b": "rebuild-running-unchanged",
+          "description": "Cold (new) container vs already-running container, same session state, same content",
+          "diff": 4362.529999999999,
+          "lo": 4278.737819499569,
+          "hi": 4453.2331159994355,
+          "ratio": 1.6239744719317113,
+          "significant": true
+        },
+        {
+          "a": "rebuild-newcontainer-changed",
+          "b": "rebuild-running-changed",
+          "description": "Cold (new) container vs already-running container, same session state, edited content",
+          "diff": 4326.3099999999995,
+          "lo": 4241.172697000089,
+          "hi": 4435.446497000288,
+          "ratio": 1.6179851357084392,
+          "significant": true
+        },
+        {
+          "a": "first-build",
+          "b": "rebuild-running-unchanged",
+          "description": "First build of a session vs repeated build in the running container",
+          "diff": 8372.82,
+          "lo": 8302.907911500195,
+          "hi": 8484.927808499895,
+          "ratio": 2.197567910840561,
+          "significant": true
+        },
+        {
+          "a": "first-build",
+          "b": "rebuild-newcontainer-unchanged",
+          "description": "First build of a session vs repeated build in a new container (session state kept)",
+          "diff": 4010.290000000001,
+          "lo": 3896.09143400006,
+          "hi": 4155.373258000065,
+          "ratio": 1.3532034824578014,
+          "significant": true
+        },
+        {
+          "a": "first-build-emptycache",
+          "b": "first-build",
+          "description": "Empty pretex-cache volume vs populated, on a first build",
+          "diff": 66.78999999999905,
+          "lo": -77.7022415001411,
+          "hi": 198.1878804997541,
+          "ratio": 1.0043470790154343,
+          "significant": false
+        },
+        {
+          "a": "rebuild-running-emptycache",
+          "b": "rebuild-running-unchanged",
+          "description": "Emptied pretex cache vs populated, on a repeated build",
+          "diff": 78.14999999999964,
+          "lo": 21.427721000276506,
+          "hi": 115.4086580001167,
+          "ratio": 1.011177826853102,
+          "significant": true
+        },
+        {
+          "a": "rebuild-running-changed",
+          "b": "rebuild-running-unchanged",
+          "description": "Edited vs unchanged content (running container)",
+          "diff": 9.149999999999636,
+          "lo": -37.38088550022803,
+          "hi": 71.45508300000802,
+          "ratio": 1.0013087282879831,
+          "significant": false
+        },
+        {
+          "a": "rebuild-newcontainer-changed",
+          "b": "rebuild-newcontainer-unchanged",
+          "description": "Edited vs unchanged content (new container)",
+          "diff": -27.06999999999971,
+          "lo": -138.25158249988453,
+          "hi": 109.3228779998608,
+          "ratio": 0.9976158287131024,
+          "significant": false
+        }
+      ]
+    }
+  }
+}
