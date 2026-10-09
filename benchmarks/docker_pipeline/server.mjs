@@ -26,7 +26,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { captureEnvironment, mulberry32, nowMs, openResults, run, shuffle, sha256, sleep } from './lib.mjs';
+import { captureEnvironment, nowMs, openResults, run, sha256, sleep } from './lib.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../..');
@@ -53,6 +53,10 @@ const REPO = 'book';
 const BASE = `http://127.0.0.1:${PORT}`;
 const TOKEN = 'local-test';
 const BUILD_TIMEOUT_MS = Number(args['timeout-s'] ?? 900) * 1000;
+const NET_HOST = args['net-host'] === 'true';
+const USE_REDIS = args.redis === 'true'; // run the backend as deployed: BullMQ on Redis (docker-compose.yml uses redis:7-alpine)
+const REDIS_PORT = Number(args['redis-port'] ?? 6390);
+const REDIS_IMAGE = args['redis-image'] ?? 'redis:7-alpine';
 
 const git = (cwd, ...a) => run('git', a, { cwd });
 
@@ -99,6 +103,10 @@ async function pushNewCommit(remote, marker) {
 // The backend under test
 // ---------------------------------------------------------------------------
 async function startBackend(root, remote) {
+  // Refuse to run if something already answers on this port: otherwise the health check below
+  // could be satisfied by a stale backend from an earlier run and every result would be wrong.
+  const occupied = await fetch(`${BASE}/health`).then(() => true, () => false);
+  if (occupied) throw new Error(`port ${PORT} is already in use; stop the other backend or pass --port`);
   const logFile = path.join(OUT, 'backend.log');
   const log = fs.openSync(logFile, 'w');
   const env = {
@@ -119,8 +127,16 @@ async function startBackend(root, remote) {
     LOCAL_TEST_REPO_NAME: 'course-demo',
     LOCAL_TEST_REPO_PATH: path.join(repoRoot, 'backend/assets/ila-toolchain'),
   };
+  // Sandbox only: give `docker run` the network settings build containers need (see docker-shim/docker).
+  if (NET_HOST) env.PATH = `${path.join(here, 'docker-shim')}:${process.env.PATH}`;
   delete env.GITHUB_PERSONAL_TOKEN; // keep the GitHub-releases cache step out of the measurement
-  delete env.PROOFDESK_REDIS_URL;
+  if (USE_REDIS) {
+    env.PROOFDESK_SHARED_STATE_BACKEND = 'redis';
+    env.PROOFDESK_REDIS_URL = `redis://127.0.0.1:${REDIS_PORT}`;
+  } else {
+    delete env.PROOFDESK_REDIS_URL; // in-process queue
+    delete env.PROOFDESK_SHARED_STATE_BACKEND;
+  }
   const child = spawn('node', ['--import', 'tsx', 'src/server.ts'], {
     cwd: path.join(repoRoot, 'backend'),
     env,
@@ -215,31 +231,79 @@ async function openRepo(expectMarker) {
   };
 }
 
-async function editAndPublish(sessionId, filePath, content, expectMarker) {
+/** Waits until the session's build container has no build running (only one build per repo may run at a time). */
+async function waitContainerIdle(sessionId, timeoutMs = 180_000) {
+  const name = `proofdesk-build-${sessionId}`;
+  const deadline = nowMs() + timeoutMs;
+  while (nowMs() < deadline) {
+    const busy = await run('docker', ['exec', name, 'pgrep', '-f', 'docker-entrypoint.sh']);
+    if (busy.code !== 0) return true; // no matching process: idle (or the container is gone)
+    await sleep(250);
+  }
+  return false;
+}
+
+/** Creates the public share link for a session and captures how the unedited build is published. */
+async function capturePublic(sessionId, files) {
+  const share = await api('POST', `/build/share/${sessionId}`, { entryFile: VERIFY_FILE });
+  if (share.status !== 200) throw new Error(`share ${share.status}`);
+  const token = share.json.token;
+  const pages = {};
+  for (const file of files) {
+    const res = await fetch(`${BASE}/shared/${token}/${file}`);
+    pages[file] = res.status === 200 ? await res.text() : null;
+  }
+  return { token, pages };
+}
+
+/**
+ * Edit a file and wait for it to be PUBLISHED. The clock stops when the public page (no
+ * credentials) shows the change, not when the API says it is done: POST /build/update can
+ * answer before the rebuild has run, so its response time is recorded but not trusted.
+ *
+ * Correctness is judged against how this same build was published before the edit. The share
+ * route rewrites HTML, so a published page is not byte-identical to its source; instead the
+ * edited public page must equal the earlier public rendering plus exactly the edit, and the
+ * other page must be unchanged.
+ */
+async function editAndPublish(sessionId, filePath, content, marker, before, otherFile) {
   const t0 = nowMs();
   const update = await api('POST', '/build/update', { sessionId, filePath, content });
-  const t1 = nowMs();
-  if (update.status !== 200 || update.json?.success !== true) {
-    return { ok: false, error: `update ${update.status}: ${update.text.slice(0, 200)}`, updateMs: t1 - t0, totalMs: t1 - t0 };
+  const tUpdate = nowMs();
+  const url = (file) => `${BASE}/shared/${before.token}/${file}`;
+
+  let attempts = 0;
+  let prematureResponse = null;
+  let page = '';
+  let seen = false;
+  const deadline = nowMs() + BUILD_TIMEOUT_MS;
+  while (nowMs() < deadline) {
+    attempts += 1;
+    const res = await fetch(url(VERIFY_FILE));
+    page = res.status === 200 ? await res.text() : '';
+    if (prematureResponse === null) prematureResponse = !page.includes(marker); // change not live when the API answered
+    if (page.includes(marker)) { seen = true; break; }
+    await sleep(100);
   }
-  const entry = VERIFY_FILE;
-  const share = await api('POST', `/build/share/${sessionId}`, { entryFile: entry });
-  const t2 = nowMs();
-  if (share.status !== 200) return { ok: false, error: `share ${share.status}`, updateMs: t1 - t0, shareMs: t2 - t1, totalMs: t2 - t0 };
-  // The public link is what a reader opens; it needs no credentials.
-  const publicRes = await fetch(`${BASE}/shared/${share.json.token}/${entry}`);
-  const publicBody = await publicRes.text();
-  const t3 = nowMs();
+  if (!seen) {
+    return { ok: false, error: 'the change never appeared on the public page', updateHttpStatus: update.status, updateMs: tUpdate - t0, pollAttempts: attempts, prematureResponse, totalMs: nowMs() - t0 };
+  }
+
+  const other = await fetch(url(otherFile));
+  const otherBody = other.status === 200 ? await other.text() : null;
+  const tDone = nowMs();
+  const expected = before.pages[VERIFY_FILE].replace('</body>', `<p data-bench>${marker}</p>\n</body>`);
+  const editedExact = page === expected;
+  const otherIntact = otherBody !== null && otherBody === before.pages[otherFile];
   return {
-    ok: publicRes.status === 200,
-    entry,
-    updateMs: t1 - t0,
-    shareMs: t2 - t1,
-    publishedFetchMs: t3 - t2,
-    totalMs: t3 - t0,
-    bodyHash: sha256(publicBody),
-    markerFound: expectMarker ? publicBody.includes(expectMarker) : null,
-    publishedStatus: publicRes.status,
+    ok: editedExact && otherIntact,
+    updateHttpStatus: update.status,
+    updateMs: tUpdate - t0,
+    prematureResponse,
+    pollAttempts: attempts,
+    editedPageExact: editedExact,
+    otherPageIntact: otherIntact,
+    totalMs: tDone - t0,
   };
 }
 
@@ -249,86 +313,93 @@ async function main() {
   const env = await captureEnvironment({ repoRoot, contentDir: CONTENT, image: IMAGE, deviations: DEVIATIONS });
   env.benchmark = {
     script: 'server.mjs', runsPerCondition: RUNS, seed: SEED, port: PORT, editFile: EDIT_FILE, primaryMetric: 'totalMs',
+    queue: USE_REDIS ? `BullMQ on Redis (${REDIS_IMAGE}, as in docker-compose.yml)` : 'in-process queue (no Redis)', netHost: NET_HOST,
     notes: [
       'GitHub replaced by a local bare repository through a git insteadOf rule: ls-remote and clone run for real, without network latency.',
       'GITHUB_PERSONAL_TOKEN unset: the GitHub-Releases pretex cache restore/save step is disabled.',
       'ENABLE_LOCAL_TEST_MODE=true only to disable the init rate limiter; the benchmark repo does not match the demo repo, so the production Docker path runs.',
     ],
     comparisons: [
-      ['open-miss-cold', 'open-hit', 'Opening a repo: rebuild in a new container vs build-cache hit'],
-      ['open-miss-cold', 'edit-publish-changed', 'Cold container (open, miss) vs running container (edit, rebuild)'],
-      ['edit-publish-changed', 'edit-publish-unchanged', 'Edit with changed content vs identical content (running container)'],
+      ['open-miss-cold', 'open-hit', 'Opening a repo: full build in a new container vs build-cache hit'],
+      ['open-miss-cold', 'edit-publish-verified', 'Open (new container, full build) vs edit-to-verified-publication (running container)'],
     ],
   };
   fs.writeFileSync(path.join(OUT, 'environment.json'), JSON.stringify(env, null, 2));
   const results = openResults(OUT, 'server');
 
+  const redisName = `bench-redis-${process.pid}`;
+  if (USE_REDIS) {
+    const started = await run('docker', ['run', '-d', '--name', redisName, '--network', 'host', REDIS_IMAGE, 'redis-server', '--port', String(REDIS_PORT), '--save', '', '--appendonly', 'no']);
+    if (started.code !== 0) throw new Error(`could not start redis: ${started.stderr}`);
+    for (let i = 0; i < 30; i += 1) {
+      const ping = await run('docker', ['exec', redisName, 'redis-cli', '-p', String(REDIS_PORT), 'ping']);
+      if (ping.stdout.trim() === 'PONG') break;
+      await sleep(300);
+    }
+  }
   const remote = await makeRemote(root);
   const backend = await startBackend(root, remote);
   console.log(`[server] backend up on ${BASE}; output ${OUT}`);
-  const rand = mulberry32(SEED);
-  const sessions = [];
 
   try {
+    const OTHER_PAGE = args['other-page'] ?? 'demos/cover.html';
     for (let cycle = 0; cycle < RUNS; cycle += 1) {
+      const cycleSessions = [];
       const marker = `bench-${cycle}-${Date.now()}`;
       const commit = await pushNewCommit(remote, marker);
+      const record = (r) => {
+        results.append(r);
+        console.log(`[server] ${cycle + 1}/${RUNS} ${r.condition.padEnd(24)} ${Math.round(r.totalMs ?? 0)} ms ${r.correct ? 'ok' : 'PROBLEM: ' + (r.error ?? 'verification failed')}`);
+      };
 
-      // 1. Open at a new commit: cache miss, new container.
+      // 1. Open at a new commit: build-cache miss, brand-new container, full build.
       const miss = await openRepo(marker);
       const missCorrect = miss.ok && miss.markerFound === true;
-      results.append({ condition: 'open-miss-cold', cycle, commit, correct: missCorrect, ...miss });
-      console.log(`[server] ${cycle + 1}/${RUNS} open-miss-cold ${Math.round(miss.totalMs)} ms ${missCorrect ? 'ok' : 'PROBLEM: ' + (miss.error ?? 'marker missing')}`);
+      record({ condition: 'open-miss-cold', cycle, commit, correct: missCorrect, ...miss });
       if (!miss.sessionId) continue;
-      sessions.push(miss.sessionId);
-      const goldenHash = miss.bodyHash;
+      cycleSessions.push(miss.sessionId);
+      await waitContainerIdle(miss.sessionId);
 
-      const filePath = EDIT_FILE;
+      // 2. Open the same commit again: should be served from the build cache.
+      const hit = await openRepo(marker);
+      if (hit.sessionId) cycleSessions.push(hit.sessionId);
+      record({ condition: 'open-hit', cycle, commit, correct: hit.ok && hit.fromCache === true && hit.bodyHash === miss.bodyHash, ...hit });
+
+      // 3. Edit in the first session (its container is already running) and publish.
+      //    The public link is stable across edits, so it is created once, before the edit.
       const currentContent = fs.readFileSync(path.join(remote.work, EDIT_FILE), 'utf-8');
       const editMarker = `edited-${cycle}-${Date.now()}`;
+      const before = await capturePublic(miss.sessionId, [VERIFY_FILE, OTHER_PAGE]);
+      if (before.pages[VERIFY_FILE] === null || !before.pages[VERIFY_FILE].includes(marker)) {
+        record({ condition: 'edit-publish-verified', cycle, commit, correct: false, error: 'the unedited build was not published correctly', totalMs: 0 });
+      } else {
+        const pub = await editAndPublish(miss.sessionId, EDIT_FILE, editContent(currentContent, editMarker), editMarker, before, OTHER_PAGE);
+        record({ condition: 'edit-publish-verified', cycle, commit, correct: pub.ok === true, ...pub });
+      }
+      await waitContainerIdle(miss.sessionId);
 
-      // 2-4 in random order: cache hit, edit with changed content, edit with identical content.
-      const steps = shuffle(['open-hit', 'edit-publish-changed', 'edit-publish-unchanged'], rand);
-      for (const step of steps) {
-        let record;
-        if (step === 'open-hit') {
-          const hit = await openRepo(marker);
-          if (hit.sessionId) sessions.push(hit.sessionId);
-          // A hit must serve exactly what was built for this commit.
-          const correct = hit.ok && hit.fromCache === true && hit.bodyHash === goldenHash;
-          record = { condition: step, cycle, commit, correct, ...hit };
-        } else if (step === 'edit-publish-changed') {
-          const edited = editContent(currentContent, editMarker);
-          const r = await editAndPublish(miss.sessionId, filePath, edited, editMarker);
-          record = { condition: step, cycle, commit, correct: r.ok && r.markerFound === true, ...r };
-        } else {
-          const r = await editAndPublish(miss.sessionId, filePath, currentContent, null);
-          record = { condition: step, cycle, commit, correct: r.ok, ...r };
-        }
-        results.append(record);
-        console.log(`[server] ${cycle + 1}/${RUNS} ${step} ${Math.round(record.totalMs)} ms ${record.correct ? 'ok' : 'PROBLEM: ' + (record.error ?? 'verification failed')}`);
+      // 4. Cache-correctness probe (every 5th cycle, untimed): a NEW session at the same commit
+      //    must see the committed content, not the other session's unsaved edit.
+      if (cycle % 5 === 0) {
+        const probe = await openRepo(editMarker);
+        if (probe.sessionId) cycleSessions.push(probe.sessionId);
+        const leaked = probe.markerFound === true;
+        results.append({
+          condition: 'cache-probe-after-edit', cycle, commit, ok: probe.ok, correct: probe.ok && leaked === false,
+          fromCache: probe.fromCache, otherSessionsUnsavedEditVisible: leaked, totalMs: probe.totalMs,
+        });
+        console.log(`[server] ${cycle + 1}/${RUNS} cache-probe: fromCache=${probe.fromCache}, another session's UNSAVED edit visible=${leaked}`);
+        if (probe.sessionId) await waitContainerIdle(probe.sessionId);
       }
 
-      // Cache-correctness probe (every 10th cycle, outside the timed conditions):
-      // after an edit in one session, does a NEW session at the same commit see
-      // the committed content, or the other session's unsaved edit?
-      if (cycle % 10 === 0) {
-        const probe = await api('POST', '/build/init', { owner: OWNER, repo: REPO, defaultBranch: 'main' });
-        let leaked = null;
-        if (probe.status === 200) {
-          const res = probe.json.building ? await waitForDone(probe.json.sessionId) : probe.json;
-          const body = res.success ? await fetchArtifact(probe.json.sessionId, VERIFY_FILE) : null;
-          leaked = body ? body.includes(editMarker) : null;
-          sessions.push(probe.json.sessionId);
-          results.append({ condition: 'cache-probe-after-edit', cycle, ok: true, correct: leaked === false, fromCache: res.fromCache === true, otherSessionsUnsavedEditVisible: leaked, totalMs: probe.ms });
-          console.log(`[server] ${cycle + 1}/${RUNS} cache-probe: fromCache=${res.fromCache === true}, other session's unsaved edit visible=${leaked}`);
-        }
+      for (const id of cycleSessions) {
+        await api('POST', '/build/cleanup', { sessionId: id }).catch(() => {});
       }
     }
   } finally {
-    for (const id of sessions) await api('POST', '/build/cleanup', { sessionId: id }).catch(() => {});
     backend.kill('SIGTERM');
     await sleep(500);
+    if (USE_REDIS) await run('docker', ['rm', '-f', redisName]);
     fs.rmSync(root, { recursive: true, force: true });
   }
   console.log(`[server] done: ${results.file}`);
