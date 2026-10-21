@@ -94,7 +94,7 @@ $SSH bash << 'REMOTE'
     git -C /opt/proofdesk pull --ff-only
   else
     echo "[remote] Cloning ..."
-    git clone https://github.com/harsharajkumar/proofdesk.git /opt/proofdesk
+    git clone https://github.com/harsharajkumar-273/Proofdesk.git /opt/proofdesk
   fi
 REMOTE
 

@@ -1,0 +1,40 @@
+--- Dockerfile.original	2026-10-08 20:01:25.025003473 +0000
++++ image-ctx/Dockerfile	2026-10-08 20:15:10.818484121 +0000
+@@ -4,6 +4,14 @@
+ ENV NODE_VERSION=18
+ ENV PATH="/usr/local/bin:$PATH"
+ 
++# SANDBOX DEVIATION 1: trust the egress proxy CA so HTTPS downloads work during the build.
++COPY proxy-ca.crt /usr/local/share/ca-certificates/proxy-ca.crt
++RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates \
++    && rm -rf /var/lib/apt/lists/*
++ARG NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/proxy-ca.crt
++ARG SSL_CERT_FILE=/usr/local/share/ca-certificates/proxy-ca.crt
++ARG PIP_CERT=/usr/local/share/ca-certificates/proxy-ca.crt
++
+ # Layer 1: TeX Live (largest download, rarely changes — keep in own layer for cache efficiency).
+ RUN apt-get update && apt-get install -y texlive-full \
+     && rm -rf /var/lib/apt/lists/*
+@@ -46,8 +54,8 @@
+     && rm -rf /var/lib/apt/lists/*
+ 
+ # Install Node.js 18 for mathbox/gulp.
+-RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+-    && apt-get install -y nodejs \
++# SANDBOX DEVIATION 2: deb.nodesource.com is blocked here; Ubuntu 24.04 ships nodejs 18.x itself.
++RUN apt-get update && apt-get install -y nodejs npm \
+     && rm -rf /var/lib/apt/lists/*
+ 
+ # Install Ruby gems - use sass-embedded instead of compass (Ruby 3.2 compatible).
+@@ -77,8 +85,9 @@
+     Pillow \
+     PyPDF2 \
+     pygments \
+-    pdfrw \
+-    python-poppler
++    pdfrw
++# SANDBOX DEVIATION 3: python-poppler omitted. Its build downloads pybind11 from github.com, which this
++# sandbox blocks. It is used only by the LaTeX->SVG math step, which the benchmark content never reaches.
+ 
+ # Create working directories.
+ RUN mkdir -p /repo /output /home/vagrant/build /home/vagrant/cache /home/vagrant/output-html

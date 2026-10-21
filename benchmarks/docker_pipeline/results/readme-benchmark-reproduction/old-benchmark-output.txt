@@ -1,0 +1,106 @@
+[2m[WebServer] [22mBrowserslist: browsers data (caniuse-lite) is 6 months old. Please run:
+[2m[WebServer] [22m  npx update-browserslist-db@latest
+[2m[WebServer] [22m  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+[2m[WebServer] [22m[33m
+[2m[WebServer] [22m(!) Some chunks are larger than 850 kB after minification. Consider:
+[2m[WebServer] [22m- Using dynamic import() to code-split the application
+[2m[WebServer] [22m- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+[2m[WebServer] [22m- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+
+Running 1 test using 1 worker
+
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+[2m[WebServer] [22m[DB] Failed to save session fd80885fa48b5d58 to DB: 
+[2m[WebServer] [22mInvalid `prisma.user.findUnique()` invocation in
+[2m[WebServer] [22m/home/user/Proofdesk/backend/src/repositories/workspace.repository.ts:17:27
+[2m[WebServer] [22m
+[2m[WebServer] [22m  14   commitHash?: string;
+[2m[WebServer] [22m  15 }) {
+[2m[WebServer] [22m  16   const creator = data.creatorLogin
+[2m[WebServer] [22m→ 17     ? await prisma.user.findUnique(
+[2m[WebServer] [22mThe table `main.User` does not exist in the current database.
+
+=== Proofdesk compile latency: Docker (server-side BullMQ worker) ===
+{
+  "label": "docker",
+  "runs": 5,
+  "samplesMs": [
+    2946,
+    2949,
+    2954,
+    2990,
+    3042
+  ],
+  "avgMs": 2976.2,
+  "p50Ms": 2954,
+  "p95Ms": 3042,
+  "minMs": 2946,
+  "maxMs": 3042
+}
+=======================================================================
+
+  ✓  1 benchmarks/compile_latency.spec.ts:274:5 › Docker/BullMQ compile latency (server-side sandbox) (23.2s)
+
+  1 passed (1.1m)

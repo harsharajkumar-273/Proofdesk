@@ -47,5 +47,12 @@ docker/run/
 .vscode/
 .env.production
 
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+crash.log
+
 # Eval cases exported from real builds hold user source; keep them local
 backend/evals/**/*.local.json

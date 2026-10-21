@@ -1,0 +1,14 @@
+#!/bin/bash
+# Benchmark-only wrapper, used ONLY with `server.mjs --net-host` in environments where Docker's
+# bridge network is unavailable (e.g. a sandbox). The backend starts build containers with plain
+# `docker run`; this adds the network flags those containers need so that the build's
+# `npm install` can reach the registry. Every other docker command is passed through unchanged.
+REAL="$(command -v -p docker || echo /usr/bin/docker)"
+if [ "$1" = "run" ]; then
+  shift
+  exec "$REAL" run --network host \
+    -e HTTPS_PROXY="$HTTPS_PROXY" -e https_proxy="$HTTPS_PROXY" \
+    -e NO_PROXY="$NO_PROXY" -e no_proxy="$NO_PROXY" \
+    -e NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/proxy-ca.crt "$@"
+fi
+exec "$REAL" "$@"

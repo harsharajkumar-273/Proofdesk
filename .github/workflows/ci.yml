@@ -42,6 +42,13 @@ jobs:
       - name: Install backend dependencies
         run: npm ci --prefix backend
 
+      # The backend imports PrismaClient at startup. The client is generated code,
+      # not committed, so without this step every test file that loads the server
+      # fails with "does not provide an export named 'PrismaClient'".
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: backend
+
       - name: Verify runtime configuration
         run: npm run verify:env
 

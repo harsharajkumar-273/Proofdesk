@@ -1,0 +1,10 @@
+{
+  "mode": "local-test (demo/course-demo)",
+  "buildType": "local-demo",
+  "initMs": 108,
+  "updates": 40,
+  "medianMs": 12.8,
+  "p95Ms": 19.8,
+  "minMs": 10,
+  "maxMs": 29.2
+}

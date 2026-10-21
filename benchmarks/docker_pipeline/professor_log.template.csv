@@ -1,0 +1,3 @@
+update_id,size,workflow,order_index,operator,t0_iso,t1_iso,duration_s,interruption_s,retries,verified_correct,notes
+1,small,previous,1,professor,2026-01-01T10:00:00Z,2026-01-01T10:04:10Z,,0,0,yes,"example row: delete me"
+1,small,proofdesk,2,professor,2026-01-01T10:20:00Z,2026-01-01T10:21:05Z,,0,0,yes,"example row: delete me"
