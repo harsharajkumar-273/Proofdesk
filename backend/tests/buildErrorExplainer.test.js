@@ -1,11 +1,15 @@
-import { afterEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   ExplainerDeclinedError,
+  ExplainerRateLimitedError,
   MAX_LOG_CHARS,
+  buildUserContent,
+  clearExplanationCache,
   explainBuildError,
   isExplainerConfigured,
+  normalizeLocation,
   parseExplanation,
   prepareLogForModel,
   redactSecrets,
@@ -115,6 +119,7 @@ describe('parseExplanation', () => {
 });
 
 describe('explainBuildError', () => {
+  beforeEach(() => clearExplanationCache());
   afterEach(() => {
     delete process.env.PROOFDESK_AI_MODEL;
   });
@@ -124,6 +129,8 @@ describe('explainBuildError', () => {
     const result = await explainBuildError('some log', { client });
     assert.deepEqual(result.explanation, validExplanation);
     assert.deepEqual(result.usage, { inputTokens: 120, outputTokens: 45 });
+    assert.match(result.id, /^[0-9a-f]{16}$/);
+    assert.equal(result.cached, false);
   });
 
   it('sends a redacted, delimited log with structured output and low effort', async () => {
@@ -131,7 +138,7 @@ describe('explainBuildError', () => {
     await explainBuildError('error near https://u:topsecret@github.com/o/r', { client });
 
     const [params] = calls;
-    assert.equal(params.model, 'claude-opus-5-5');
+    assert.equal(params.model, 'claude-haiku-5-5');
     assert.equal(params.output_config.effort, 'low');
     assert.equal(params.output_config.format.type, 'json_schema');
     assert.equal(params.output_config.format.schema.additionalProperties, false);
@@ -175,6 +182,94 @@ describe('explainBuildError', () => {
     const error = Object.create(Anthropic.RateLimitError.prototype);
     const client = { messages: { create: async () => { throw error; } } };
     await assert.rejects(() => explainBuildError('log', { client }), (thrown) => thrown === error);
+  });
+});
+
+describe('explainBuildError caching and rate limiting', () => {
+  beforeEach(() => clearExplanationCache());
+
+  it('answers a repeated request from the cache without calling the model or the rate limiter', async () => {
+    const { client, calls } = fakeClient(textResponse(JSON.stringify(validExplanation)));
+    let allowances = 0;
+    const allowModelCall = () => { allowances += 1; return true; };
+
+    const first = await explainBuildError('same log', { client, allowModelCall });
+    const second = await explainBuildError('same log', { client, allowModelCall });
+
+    assert.equal(calls.length, 1);
+    assert.equal(allowances, 1);
+    assert.equal(second.cached, true);
+    assert.equal(second.id, first.id);
+    assert.deepEqual(second.explanation, first.explanation);
+  });
+
+  it('treats different source context as a different question', async () => {
+    const { client, calls } = fakeClient(textResponse(JSON.stringify(validExplanation)));
+    await explainBuildError('same log', { client });
+    await explainBuildError('same log', { client, sourceContext: [{ path: 'a.xml', line: 1, text: '> 1 | <p>' }] });
+    assert.equal(calls.length, 2);
+  });
+
+  it('does not call the model when the rate limiter says no', async () => {
+    const { client, calls } = fakeClient(textResponse(JSON.stringify(validExplanation)));
+    await assert.rejects(
+      () => explainBuildError('log', { client, allowModelCall: () => false }),
+      ExplainerRateLimitedError,
+    );
+    assert.equal(calls.length, 0);
+  });
+
+  it('does not cache a declined answer', async () => {
+    const declined = fakeClient(textResponse('', { stop_reason: 'refusal' }));
+    await assert.rejects(() => explainBuildError('log', { client: declined.client }), ExplainerDeclinedError);
+    const ok = fakeClient(textResponse(JSON.stringify(validExplanation)));
+    const result = await explainBuildError('log', { client: ok.client });
+    assert.equal(result.cached, false);
+  });
+
+  it('rewrites a container path in the location to the repository path', async () => {
+    const reply = { ...validExplanation, location: '/home/runner/work/source/ch1.xml:42' };
+    const { client } = fakeClient(textResponse(JSON.stringify(reply)));
+    const result = await explainBuildError('log', {
+      client,
+      sourceContext: [{ path: 'source/ch1.xml', line: 42, text: '> 42 | <p>' }],
+    });
+    assert.equal(result.explanation.location, 'source/ch1.xml:42');
+  });
+});
+
+describe('buildUserContent', () => {
+  it('adds redacted source context and a keyword hint in their own tags', () => {
+    const content = buildUserContent(
+      'the log',
+      [{ path: 'src/"x".xml', line: 3, text: '> 3 | token=supersecretvalue' }],
+      { code: 'course_source_invalid', advice: 'Check the XML.' },
+    );
+    assert.match(content, /<build_log>\nthe log\n<\/build_log>/);
+    assert.match(content, /<file path="src\/&#34;x&#34;\.xml" line="3">/);
+    assert.doesNotMatch(content, /supersecretvalue/);
+    assert.match(content, /<keyword_hint code="course_source_invalid">Check the XML\.<\/keyword_hint>/);
+  });
+
+  it('leaves out the generic catch-all hint and empty context', () => {
+    const content = buildUserContent('the log', [], { code: 'build_failed', advice: 'Review the build log.' });
+    assert.doesNotMatch(content, /source_context|keyword_hint/);
+  });
+});
+
+describe('normalizeLocation', () => {
+  const context = [{ path: 'source/ch1.xml', line: 1, text: '' }];
+
+  it('maps printed paths onto known repository paths', () => {
+    assert.equal(normalizeLocation('/build/source/ch1.xml:9', context), 'source/ch1.xml:9');
+    assert.equal(normalizeLocation('ch1.xml:9:4', context), 'source/ch1.xml:9');
+    assert.equal(normalizeLocation('source/ch1.xml:9', context), 'source/ch1.xml:9');
+  });
+
+  it('leaves unknown paths and non-locations alone', () => {
+    assert.equal(normalizeLocation('other.xml:2', context), 'other.xml:2');
+    assert.equal(normalizeLocation('', context), '');
+    assert.equal(normalizeLocation('somewhere in chapter 1', context), 'somewhere in chapter 1');
   });
 });
 

@@ -313,6 +313,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [buildSessionId, setBuildSessionId] = useState<string | null>(null);
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
   const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
+  // Bumped for every streamed build so a rebuild of the same session gets a fresh log panel.
+  const [streamingBuildKey, setStreamingBuildKey] = useState(0);
   const [buildErrors, setBuildErrors] = useState<Diagnostic[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
@@ -2293,6 +2295,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         if (sid) {
           buildSessionIdRef.current = sid;
           setBuildSessionId(sid);
+          setStreamingBuildKey((key) => key + 1);
           setStreamingBuildSessionId(sid);
         }
         return sid || null;
@@ -3096,13 +3099,17 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
       {streamingBuildSessionId && (
         <BuildLogPanel
+          key={streamingBuildKey}
           sessionId={streamingBuildSessionId}
           apiUrl={API_URL}
           onComplete={(result) => {
-            setStreamingBuildSessionId(null);
+            // A failed build keeps the panel open so the author can read the
+            // log and ask for an explanation; they close it themselves.
+            if (result.success) setStreamingBuildSessionId(null);
             applyBuildResponse(result as BuildResponse);
           }}
           onClose={() => setStreamingBuildSessionId(null)}
+          onOpenLocation={(path, line) => void openFileInTab(path, line)}
         />
       )}
 

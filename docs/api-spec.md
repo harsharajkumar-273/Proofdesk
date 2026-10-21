@@ -565,21 +565,13 @@ Response:
 }
 ```
 
-### `POST /build/explain-error`
+### `POST /build/explain-error/:sessionId`
 
-Asks Claude to explain a failed build log in plain English. Optional: only available when the server has `ANTHROPIC_API_KEY` set.
+Asks Claude to explain the session's last failed build in plain English. Optional: only available when the server has `ANTHROPIC_API_KEY` set.
 
-Auth required: yes. Limited to 10 requests per 10 minutes per signed-in user.
+Auth required: yes, and the caller must own the workspace session. Model calls are limited to 10 per 10 minutes per signed-in user; this limit stays on in local test mode. Repeating a request for the same failure within an hour returns the cached answer and does not count against the limit.
 
-Credentials (GitHub/Anthropic/AWS tokens, URL credentials, bearer tokens, `key=value` secrets) are redacted from the log before it is sent, and long logs are shortened to the first 2,000 characters plus the tail.
-
-Request:
-
-```json
-{
-  "log": "chapters/ch1.xml:42: parser error : Opening and ending tag mismatch ..."
-}
-```
+The server reads the build output itself; the request body is ignored. It also reads up to three snippets of the author's source (13 lines each) around file locations the log names, so the answer can point at the exact markup. Credentials (GitHub/Anthropic/AWS tokens, URL credentials, bearer tokens, `key=value` secrets) are redacted from the log and the snippets before they are sent, and long logs are shortened to the first 2,000 characters plus the tail.
 
 Response:
 
@@ -591,21 +583,49 @@ Response:
     "fixSteps": ["Open chapters/ch1.xml", "Add </theorem> after the proof"],
     "location": "chapters/ch1.xml:42",
     "confidence": "high"
-  }
+  },
+  "id": "3f9a1c0e5b7d2a46",
+  "cached": false
 }
 ```
 
-`location` is an empty string when the log names no file. `confidence` is `high`, `medium` or `low`.
+`location` is a repository-relative `path:line` when the log names a file, otherwise an empty string. `confidence` is `high`, `medium` or `low`. `id` identifies the answer for feedback.
 
 Errors (each has a machine-readable `code`):
 
-- `400` `invalid_log` when `log` is missing, blank, or not a string
+- `400` `invalid_session` when the session id is malformed
 - `401` when not authenticated
-- `413` `log_too_large` when `log` exceeds 200,000 characters
+- `403` when the session belongs to another user
+- `404` `build_log_not_found` when the session has no build output (or `Session not found`)
+- `409` `build_not_failed` when the latest build succeeded
 - `422` `ai_declined` when the model declined or returned an unusable answer
 - `429` `rate_limited` when the per-user limit is exceeded
 - `502` `ai_failed` for any other upstream failure
 - `503` `ai_not_configured` when no API key is configured, or `ai_busy` when the AI service is overloaded
+
+A failed build's `done` event on `GET /build/logs/:sessionId` also carries a keyword-based `code` and `advice`, which the editor shows immediately without calling the AI.
+
+### `POST /build/explain-error/:sessionId/feedback`
+
+Records whether an explanation helped. Only the explanation id, the vote and the session id are kept.
+
+Auth required: yes, workspace owner. Limited to 30 requests per 10 minutes per user.
+
+Request:
+
+```json
+{ "id": "3f9a1c0e5b7d2a46", "helpful": false }
+```
+
+Response: `204 No Content`. Errors: `400` `invalid_feedback`, `429` `rate_limited`, `503` `ai_not_configured`.
+
+### Evaluating the explainer
+
+`backend/evals/build-error-explainer/` holds hand-written failing builds with expected answers. Run it before changing the prompt or the model (it calls the real API):
+
+```bash
+cd backend && ANTHROPIC_API_KEY=... npx tsx evals/build-error-explainer/run.ts claude-haiku-5-5 claude-opus-5-5
+```
 
 ## Legacy single-file compile route
 

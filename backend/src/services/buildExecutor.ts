@@ -16,6 +16,7 @@ import { recordPreviewSnapshot } from './previewHistoryService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import logger from '../utils/logger.js';
 import { resolveContainedPath } from '../utils/pathContainment.js';
+import { classifyBuildFailure } from '../utils/buildDiagnostics.js';
 import { dockerBuildDurationSeconds, activeBuildJobs } from './metricsService.js';
 import {
   getRedisClient,
@@ -512,6 +513,19 @@ class BuildExecutor {
 
   _finishLog(sessionId: string, result: any): void {
     const entry = this.buildLogs.get(sessionId);
+    const lines = entry ? entry.lines : [];
+    const stdout = lines.filter((l) => l.stream === 'stdout').map((l) => l.line).join('\n');
+    const stderr = lines.filter((l) => l.stream === 'stderr').map((l) => l.line).join('\n');
+
+    // A failed result carries the keyword-based hint so the editor can show it
+    // immediately, before (or instead of) asking the AI explainer.
+    if (result && result.success === false && !result.advice) {
+      const { code, advice } = classifyBuildFailure(
+        [result.error, result.stderr, stderr, result.stdout, stdout].filter(Boolean).join('\n'),
+      );
+      result = { ...result, code: result.code || code, advice };
+    }
+
     if (entry) {
       entry.done = true;
       entry.result = result;
@@ -519,9 +533,6 @@ class BuildExecutor {
       entry.subscribers.clear();
     }
 
-    const lines = entry ? entry.lines : [];
-    const stdout = lines.filter((l) => l.stream === 'stdout').map((l) => l.line).join('\n');
-    const stderr = lines.filter((l) => l.stream === 'stderr').map((l) => l.line).join('\n');
     workspaceRepository.createBuildLog({
       sessionId,
       status: result?.success ? 'success' : 'failed',
@@ -545,6 +556,16 @@ class BuildExecutor {
         }
       })();
     }
+  }
+
+  /**
+   * The output and result of a session's finished build, while it is still in
+   * memory. Returns null when no build has finished for the session here.
+   */
+  getFinishedBuildLog(sessionId: string): { text: string; result: any } | null {
+    const entry = this.buildLogs.get(sessionId);
+    if (!entry || !entry.done) return null;
+    return { text: entry.lines.map((l) => l.line).join('\n'), result: entry.result };
   }
 
   subscribeToLogs(sessionId: string, onEvent: (event: any) => void): () => void {

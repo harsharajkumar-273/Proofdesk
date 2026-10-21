@@ -1,6 +1,10 @@
 import { Router } from 'express';
 import { requireAccessToken, checkWorkspaceOwner } from '../middleware/auth.js';
-import { explainBuildErrorHandler } from '../controllers/aiAssist.controller.js';
+import {
+  explainBuildErrorHandler,
+  explanationFeedbackHandler,
+  requireExplainerConfigured,
+} from '../controllers/aiAssist.controller.js';
 import {
   getSharedPreviewRoot,
   getSharedPreviewFile,
@@ -52,8 +56,21 @@ export default function createBuildRouter(): Router {
   router.post('/build/prewarm', requireAccessToken, prewarmBuild);
   router.get('/build/cache-status', requireAccessToken, getBuildCacheStatus);
 
-  // AI: plain-English explanation of a failed build log (opt-in via ANTHROPIC_API_KEY)
-  router.post('/build/explain-error', requireAccessToken, explainBuildErrorHandler);
+  // AI: plain-English explanation of the session's last failed build (opt-in via ANTHROPIC_API_KEY)
+  router.post(
+    '/build/explain-error/:sessionId',
+    requireAccessToken,
+    requireExplainerConfigured,
+    checkWorkspaceOwner,
+    explainBuildErrorHandler,
+  );
+  router.post(
+    '/build/explain-error/:sessionId/feedback',
+    requireAccessToken,
+    requireExplainerConfigured,
+    checkWorkspaceOwner,
+    explanationFeedbackHandler,
+  );
 
   // Legacy compile route
   router.post('/compile', requireAccessToken, legacyCompileFile);

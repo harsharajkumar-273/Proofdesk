@@ -13,13 +13,25 @@ export const rateLimitingDisabled = (): boolean =>
 
 // In-memory sliding-window limiter. Returns a function that records a call for
 // `key` and reports whether it is within `maxRequests` per `windowMs`.
-export const createRateLimiter = ({ windowMs, maxRequests }: { windowMs: number; maxRequests: number }) => {
+//
+// `capsSpending` marks a limiter that guards paid API usage. Local test mode
+// can be left on in a demo deployment, so such a limiter stays enforced there
+// and is only lifted for the test suite itself.
+export const createRateLimiter = ({
+  windowMs,
+  maxRequests,
+  capsSpending = false,
+}: {
+  windowMs: number;
+  maxRequests: number;
+  capsSpending?: boolean;
+}) => {
   const buckets = new Map<string, number[]>();
 
   return (key: string) => {
     // Checked per call rather than once at module load so the limiter follows
     // the environment even if it is set after this module is imported.
-    if (rateLimitingDisabled()) {
+    if (capsSpending ? process.env.NODE_ENV === 'test' : rateLimitingDisabled()) {
       return true;
     }
 

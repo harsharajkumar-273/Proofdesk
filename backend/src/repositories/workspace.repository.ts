@@ -84,6 +84,13 @@ export class WorkspaceRepository {
     });
   }
 
+  async getLatestBuildLog(sessionId: string) {
+    return prisma.buildLog.findFirst({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async saveReviewMarkers(sessionId: string, markers: Record<string, any[]>) {
     // Flatten markers map from frontend. Frontend structure of review-markers is file-keyed map:
     // { "src/vectors.xml": [ { line, severity, message }, ... ] }
