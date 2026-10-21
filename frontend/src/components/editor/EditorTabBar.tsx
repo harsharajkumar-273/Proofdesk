@@ -4,6 +4,8 @@ import { FileCode, X, MoreHorizontal, MousePointer2 } from 'lucide-react';
 interface TabLike {
   id: string;
   name: string;
+  /** Repository path, exposed as data-tab-path for tests. */
+  path?: string;
   hasUnsavedChanges: boolean;
 }
 
@@ -32,6 +34,8 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
           return (
             <div
               key={tab.id}
+              data-tab-path={tab.path}
+              data-active={isActive}
               className={`group relative flex items-center gap-2 px-3 h-full min-w-[120px] max-w-[240px] text-[11px] font-bold uppercase tracking-wider cursor-pointer transition-all border-x border-transparent ${
                 isActive
                   ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 border-x-zinc-200 dark:border-x-zinc-800 rounded-t-lg shadow-[0_-2px_0_inset_#6366f1]'

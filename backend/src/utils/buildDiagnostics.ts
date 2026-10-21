@@ -8,7 +8,8 @@ export interface BuildFailurePayload extends DiagnosticAdvice {
   details: string;
 }
 
-const summarizeBuildFailure = (message = ''): DiagnosticAdvice => {
+/** Keyword-based first guess at what kind of failure a build log shows. */
+export const classifyBuildFailure = (message = ''): DiagnosticAdvice => {
   const normalizedMessage = String(message);
   const lower = normalizedMessage.toLowerCase();
 
@@ -65,5 +66,5 @@ const summarizeBuildFailure = (message = ''): DiagnosticAdvice => {
 export const buildFailurePayload = (message = '', details = ''): BuildFailurePayload => ({
   error: message || 'Build failed',
   details,
-  ...summarizeBuildFailure(`${message}\n${details}`),
+  ...classifyBuildFailure(`${message}\n${details}`),
 });
