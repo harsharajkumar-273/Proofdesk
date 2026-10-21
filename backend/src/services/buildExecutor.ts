@@ -511,7 +511,51 @@ class BuildExecutor {
     }
   }
 
-  _finishLog(sessionId: string, result: any): void {
+  /**
+   * Starts an empty log for a new build of the session.
+   *
+   * `_initLog` only creates a buffer when none exists, so without this a
+   * rebuild appended its lines to the previous build's finished buffer: a new
+   * subscriber was told at once that the *old* build was done (a queued
+   * rebuild resolved with the stale result), and the explainer read the old
+   * result next to the new output. A build already running locally keeps its
+   * buffer.
+   */
+  async _startLog(sessionId: string): Promise<void> {
+    if (this.buildPromises.has(sessionId)) return;
+    const previous = this.buildLogs.get(sessionId);
+    if (previous && !previous.done && previous.subscribers.size > 0) return;
+    this.buildLogs.set(sessionId, { lines: [], subscribers: previous?.subscribers ?? new Set(), done: false, result: null });
+
+    if (isRedisSharedStateEnabled()) {
+      try {
+        const redis = await getRedisClient();
+        await redis.del([`proofdesk:build-status:${sessionId}`, `proofdesk:active-logs:${sessionId}`]);
+      } catch (err: any) {
+        logger.error(`[RedisLogPub] Reset failed: ${err.message}`, err);
+      }
+    }
+  }
+
+  /** Runs a build in the foreground and records its outcome as the session's latest build. */
+  async _buildAndFinishLog(sessionId: string, options: { xmlId?: string | null; traceParent?: string | null } = {}): Promise<any> {
+    try {
+      const result = await this.build(sessionId, options);
+      return this._finishLog(sessionId, result);
+    } catch (err: any) {
+      this._finishLog(sessionId, {
+        success: false,
+        error: err.message,
+        stdout: err.stdout || '',
+        stderr: err.stderr || err.message,
+        sessionId,
+      });
+      throw err;
+    }
+  }
+
+  /** Marks the session's build finished and returns the result as sent to subscribers. */
+  _finishLog(sessionId: string, result: any): any {
     const entry = this.buildLogs.get(sessionId);
     const lines = entry ? entry.lines : [];
     const stdout = lines.filter((l) => l.stream === 'stdout').map((l) => l.line).join('\n');
@@ -556,12 +600,19 @@ class BuildExecutor {
         }
       })();
     }
+
+    return result;
   }
 
   /**
    * The output and result of a session's finished build, while it is still in
    * memory. Returns null when no build has finished for the session here.
    */
+  /** True while a build of the session is writing to this process's log buffer. */
+  isBuildLogOpen(sessionId: string): boolean {
+    return this.buildLogs.get(sessionId)?.done === false;
+  }
+
   getFinishedBuildLog(sessionId: string): { text: string; result: any } | null {
     const entry = this.buildLogs.get(sessionId);
     if (!entry || !entry.done) return null;
@@ -1571,16 +1622,15 @@ class BuildExecutor {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error('Invalid build session');
 
+    await this._startLog(sessionId);
+
     // Cache hits and local-test mode complete in milliseconds — run synchronously
     if (session.fromCache || session.localTestMode) {
       const result = await this.build(sessionId, options);
-      this._initLog(sessionId);
-      this._finishLog(sessionId, result);
-      return result;
+      return this._finishLog(sessionId, result);
     }
 
     // Fresh Docker build: kick off in background, return null so caller opens SSE
-    this._initLog(sessionId);
 
     // If background queue is enabled, push job to queue!
     const queued = await pushBuildJob(sessionId, options);
@@ -1697,8 +1747,12 @@ class BuildExecutor {
     await fs.writeFile(targetPath, content, 'utf-8');
     logger.info(`Updated file: ${filePath}${xmlId ? ` (section: ${xmlId})` : ''}`, { sessionId });
 
+    // The rebuild is the session's latest build from here on: it gets its own
+    // log, and its result (with the keyword hint) is what the explainer reads.
+    await this._startLog(sessionId);
+
     if (session.localTestMode) {
-      return this.build(sessionId);
+      return this._buildAndFinishLog(sessionId);
     }
 
     // Invalidate the build cache for this repo since content changed
@@ -1730,7 +1784,7 @@ class BuildExecutor {
       });
     }
 
-    return this.build(sessionId, { xmlId, traceParent });
+    return this._buildAndFinishLog(sessionId, { xmlId, traceParent });
   }
 
   /* ─── serveArtifact ──────────────────────────────────────────────────────── */

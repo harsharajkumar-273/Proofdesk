@@ -38,11 +38,12 @@ const run = async (overrides = {}, params = { sessionId: SESSION }) => {
   const handler = createExplainBuildErrorHandler({
     explain: async (log, options) => {
       explainCalls.push({ log, options });
-      if (options.allowModelCall && !options.allowModelCall()) throw new ExplainerRateLimitedError();
+      const verdict = options.reserveModelCall ? await options.reserveModelCall() : 'ok';
+      if (verdict !== 'ok') throw new ExplainerRateLimitedError(verdict);
       return { explanation, usage: { inputTokens: 1, outputTokens: 2 }, id: 'feedfacefeedface', cached: false };
     },
     isConfigured: () => true,
-    rateAllowed: () => true,
+    reserveModelCall: async () => 'ok',
     loadBuildLog: async () => failedBuild,
     loadSourceContext: async () => snippets,
     ...overrides,
@@ -84,6 +85,7 @@ describe('POST /build/explain-error/:sessionId handler', () => {
       [{ status: 'missing' }, 404, 'build_log_not_found'],
       [{ status: 'failed', log: '   ', hint: null }, 404, 'build_log_not_found'],
       [{ status: 'succeeded' }, 409, 'build_not_failed'],
+      [{ status: 'running' }, 409, 'build_in_progress'],
     ]) {
       const { res, explainCalls } = await run({ loadBuildLog: async () => build });
       assert.equal(res.statusCode, status, code);
@@ -100,10 +102,16 @@ describe('POST /build/explain-error/:sessionId handler', () => {
 
   it('returns 429 when the caller is over the rate limit, keyed by GitHub login', async () => {
     const keys = [];
-    const { res } = await run({ rateAllowed: (key) => { keys.push(key); return false; } });
+    const { res } = await run({ reserveModelCall: async (key) => { keys.push(key); return 'user_limit'; } });
     assert.equal(res.statusCode, 429);
     assert.equal(res.body.code, 'rate_limited');
     assert.deepEqual(keys, ['ada']);
+  });
+
+  it('returns 429 with its own code when the server-wide daily limit is reached', async () => {
+    const { res } = await run({ reserveModelCall: async () => 'daily_limit' });
+    assert.equal(res.statusCode, 429);
+    assert.equal(res.body.code, 'ai_daily_limit');
   });
 
   it('maps service and provider errors to safe responses', async () => {

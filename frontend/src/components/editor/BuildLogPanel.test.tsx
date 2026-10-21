@@ -3,6 +3,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorApiError } from '../../utils/editorApi';
 import BuildLogPanel from './BuildLogPanel';
+import { useBuildErrorExplanation } from '../../hooks/useBuildErrorExplanation';
 
 const requestJson = vi.hoisted(() => vi.fn());
 vi.mock('../../utils/editorApi', async (importOriginal) => ({
@@ -54,8 +55,15 @@ describe('BuildLogPanel', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  const renderPanel = (props: Partial<React.ComponentProps<typeof BuildLogPanel>> = {}) =>
-    render(<BuildLogPanel sessionId="0123456789abcdef" apiUrl="http://api.test" onComplete={vi.fn()} onClose={vi.fn()} {...props} />);
+  type PanelProps = React.ComponentProps<typeof BuildLogPanel>;
+  // The explainer lives in EditorPage in the app; this stands in for it.
+  const Harness = (props: Partial<PanelProps>) => {
+    const explainer = useBuildErrorExplanation('http://api.test', '0123456789abcdef');
+    return (
+      <BuildLogPanel sessionId="0123456789abcdef" apiUrl="http://api.test" onComplete={vi.fn()} onClose={vi.fn()} explainer={explainer} {...props} />
+    );
+  };
+  const renderPanel = (props: Partial<PanelProps> = {}) => render(<Harness {...props} />);
 
   it('offers the AI explanation only after a build has failed', () => {
     renderPanel();
@@ -128,5 +136,28 @@ describe('BuildLogPanel', () => {
     await userEvent.click(screen.getByRole('button', { name: /explain this error/i }));
     await vi.waitFor(() => expect(screen.queryByRole('button', { name: /explain this error/i })).toBeNull());
     expect(screen.getByText('A hint.')).toBeInTheDocument();
+  });
+
+  it('shows an explanation the editor already has as soon as it reopens over a finished build', async () => {
+    requestJson.mockResolvedValue({ explanation, id: 'feedfacefeedface' });
+    const ReopenHarness = ({ open }: { open: boolean }) => {
+      const explainer = useBuildErrorExplanation('http://api.test', '0123456789abcdef');
+      return (
+        <>
+          <button type="button" onClick={() => void explainer.explain()}>outside explain</button>
+          {open && (
+            <BuildLogPanel sessionId="0123456789abcdef" apiUrl="http://api.test" onComplete={vi.fn()} onClose={vi.fn()} explainer={explainer} />
+          )}
+        </>
+      );
+    };
+    const { rerender } = render(<ReopenHarness open={false} />);
+    await userEvent.click(screen.getByRole('button', { name: 'outside explain' }));
+
+    rerender(<ReopenHarness open />);
+    finishBuild({ success: false }, ['boom']);
+
+    expect(await screen.findByText('A tag is not closed.')).toBeInTheDocument();
+    expect(requestJson).toHaveBeenCalledTimes(1);
   });
 });

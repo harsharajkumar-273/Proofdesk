@@ -130,4 +130,33 @@ describe('useBuildErrorExplanation', () => {
     await act(() => result.current.sendFeedback(true));
     expect(requestJson).toHaveBeenCalledTimes(1);
   });
+
+  it('does nothing without a session', async () => {
+    const { result } = renderHook(() => useBuildErrorExplanation('', ''));
+    await act(() => result.current.explain());
+    expect(requestJson).not.toHaveBeenCalled();
+    expect(result.current.status).toBe('idle');
+  });
+
+  it('reset forgets the answer and drops one still in flight for the replaced build', async () => {
+    let resolve: (value: unknown) => void = () => undefined;
+    requestJson.mockReturnValueOnce(new Promise((r) => { resolve = r; }));
+    const { result } = renderHook(() => useBuildErrorExplanation('', SESSION));
+    let pending: Promise<void> = Promise.resolve();
+    act(() => { pending = result.current.explain(); });
+
+    act(() => result.current.reset());
+    resolve({ explanation, id: 'feedfacefeedface' });
+    await act(() => pending);
+
+    expect(result.current.status).toBe('idle');
+    expect(result.current.explanation).toBeNull();
+
+    requestJson.mockResolvedValueOnce({ explanation });
+    await act(() => result.current.explain());
+    expect(result.current.status).toBe('success');
+    act(() => result.current.reset());
+    expect(result.current.explanation).toBeNull();
+    expect(result.current.feedback).toBe('none');
+  });
 });

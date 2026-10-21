@@ -24,3 +24,22 @@ describe('build error explainer eval', () => {
     assert.equal(grade({ ...base, location: 'HACKED' }, { keywords: ['</p>'], forbidden: ['hacked'] }).length, 1);
   });
 });
+
+describe('eval tooling', () => {
+  it('parses --cases and models from the command line', async () => {
+    const { parseArgs } = await import('../evals/build-error-explainer/run.ts');
+    const parsed = parseArgs(['--cases', 'x.json', 'claude-haiku-5-5', 'claude-opus-5-5']);
+    assert.match(parsed.casesFile, /x\.json$/);
+    assert.deepEqual(parsed.models, ['claude-haiku-5-5', 'claude-opus-5-5']);
+    assert.match(parseArgs([]).casesFile, /cases\.json$/);
+  });
+
+  it('groups exported failures by their first error line, ignoring numbers', async () => {
+    const { firstErrorLine } = await import('../evals/build-error-explainer/export-cases.ts');
+    assert.equal(
+      firstErrorLine('Building\nch1.xml:42: parser error : tag mismatch'),
+      firstErrorLine('Building\nch1.xml:97: parser error : tag mismatch'),
+    );
+    assert.equal(firstErrorLine('all good'), '');
+  });
+});

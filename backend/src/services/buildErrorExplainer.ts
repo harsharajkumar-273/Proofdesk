@@ -38,11 +38,13 @@ export class ExplainerUnavailableError extends Error {
   }
 }
 
-/** The caller is over its allowance of model calls. Cached answers do not count. */
+/** A spending limit refused the model call. Cached answers never reach the limits. */
 export class ExplainerRateLimitedError extends Error {
-  constructor() {
-    super('Too many explanation requests');
+  readonly reason: 'user_limit' | 'daily_limit';
+  constructor(reason: 'user_limit' | 'daily_limit' = 'user_limit') {
+    super(reason === 'daily_limit' ? "Today's AI explanation limit has been reached" : 'Too many explanation requests');
     this.name = 'ExplainerRateLimitedError';
+    this.reason = reason;
   }
 }
 
@@ -135,9 +137,9 @@ export interface ExplainOptions {
   hint?: DiagnosticAdvice | null;
   /**
    * Called only when the answer is not cached, right before the paid model
-   * call. Returning false aborts with ExplainerRateLimitedError.
+   * call. Any verdict but 'ok' aborts with ExplainerRateLimitedError.
    */
-  allowModelCall?: () => boolean;
+  reserveModelCall?: () => Promise<'ok' | 'user_limit' | 'daily_limit'>;
 }
 
 export interface ExplainResult {
@@ -145,10 +147,20 @@ export interface ExplainResult {
   usage: { inputTokens: number; outputTokens: number };
   /** Stable id for this answer, used to attach feedback to it. */
   id: string;
+  /** The model that wrote the answer. */
+  model: string;
   cached: boolean;
 }
 
 const cache = new Map<string, { result: Omit<ExplainResult, 'cached'>; expiresAt: number }>();
+
+/** The model behind a recent answer, while it is still cached. */
+export const lookupExplanationModel = (id: string): string | null => {
+  for (const [key, entry] of cache) {
+    if (key.startsWith(id)) return entry.result.model;
+  }
+  return null;
+};
 
 /** Empties the answer cache. For tests. */
 export const clearExplanationCache = (): void => cache.clear();
@@ -256,7 +268,10 @@ export const explainBuildError = async (rawLog: string, options: ExplainOptions 
   const cached = readCache(key);
   if (cached) return { ...cached, cached: true };
 
-  if (options.allowModelCall && !options.allowModelCall()) throw new ExplainerRateLimitedError();
+  if (options.reserveModelCall) {
+    const verdict = await options.reserveModelCall();
+    if (verdict !== 'ok') throw new ExplainerRateLimitedError(verdict);
+  }
 
   const client = options.client ?? getClient();
   const response = await client.messages.create({
@@ -286,6 +301,7 @@ export const explainBuildError = async (rawLog: string, options: ExplainOptions 
     explanation,
     usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
     id: key.slice(0, 16),
+    model,
   };
   writeCache(key, result);
   return { ...result, cached: false };

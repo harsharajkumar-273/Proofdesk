@@ -6,9 +6,12 @@ import {
   ExplainerUnavailableError,
   explainBuildError,
   isExplainerConfigured,
+  lookupExplanationModel,
 } from '../services/buildErrorExplainer.js';
+import { reserveModelCall, type BudgetVerdict } from '../services/aiUsageBudget.js';
 import { collectSourceContext, type SourceSnippet } from '../services/buildSourceContext.js';
 import { buildExecutor } from '../services/buildExecutor.js';
+import { isRedisSharedStateEnabled } from '../utils/redisClient.js';
 import { recordMonitoringEvent } from '../services/monitoringService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import { classifyBuildFailure, type DiagnosticAdvice } from '../utils/buildDiagnostics.js';
@@ -18,14 +21,12 @@ import logger from '../utils/logger.js';
 const SESSION_ID = /^[0-9a-f]{16}$/;
 const EXPLANATION_ID = /^[0-9a-f]{16}$/;
 
-// Each model call spends API credit, so cap it per signed-in user. Cached
-// answers do not count against it.
-const explainRateAllowed = createRateLimiter({ windowMs: 10 * 60_000, maxRequests: 10, capsSpending: true });
 const feedbackRateAllowed = createRateLimiter({ windowMs: 10 * 60_000, maxRequests: 30 });
 
 export type FailedBuildLog =
   | { status: 'failed'; log: string; hint: DiagnosticAdvice | null }
   | { status: 'succeeded' }
+  | { status: 'running' }
   | { status: 'missing' };
 
 /**
@@ -44,6 +45,10 @@ export const loadFailedBuildLog = async (sessionId: string): Promise<FailedBuild
     return { status: 'failed', log, hint };
   }
 
+  // With shared Redis state the worker may be another process, which never
+  // closes this process's buffer, so only trust "running" for local builds.
+  if (!isRedisSharedStateEnabled() && buildExecutor.isBuildLogOpen(sessionId)) return { status: 'running' };
+
   const stored = await workspaceRepository.getLatestBuildLog(sessionId);
   if (!stored) return { status: 'missing' };
   if (stored.status !== 'failed') return { status: 'succeeded' };
@@ -60,7 +65,8 @@ const rateLimitKeyFor = (req: Request): string =>
 interface Dependencies {
   explain: typeof explainBuildError;
   isConfigured: () => boolean;
-  rateAllowed: (key: string) => boolean;
+  /** Spending limits (see aiUsageBudget); consulted only when the answer is not cached. */
+  reserveModelCall: (userKey: string) => Promise<BudgetVerdict>;
   loadBuildLog: (sessionId: string) => Promise<FailedBuildLog>;
   loadSourceContext: (sessionId: string, log: string) => Promise<SourceSnippet[]>;
 }
@@ -79,7 +85,7 @@ export const requireExplainerConfigured = (_req: Request, res: Response, next: N
   isExplainerConfigured() ? next() : notConfigured(res);
 
 export const createExplainBuildErrorHandler =
-  ({ explain, isConfigured, rateAllowed, loadBuildLog, loadSourceContext }: Dependencies) =>
+  ({ explain, isConfigured, reserveModelCall, loadBuildLog, loadSourceContext }: Dependencies) =>
   async (req: Request, res: Response): Promise<any> => {
     if (!isConfigured()) return notConfigured(res);
 
@@ -93,6 +99,9 @@ export const createExplainBuildErrorHandler =
       if (build.status === 'missing' || (build.status === 'failed' && !build.log.trim())) {
         return res.status(404).json({ error: 'No build output was found for this workspace', code: 'build_log_not_found' });
       }
+      if (build.status === 'running') {
+        return res.status(409).json({ error: 'The build is still running', code: 'build_in_progress' });
+      }
       if (build.status === 'succeeded') {
         return res.status(409).json({ error: 'The latest build did not fail', code: 'build_not_failed' });
       }
@@ -104,12 +113,18 @@ export const createExplainBuildErrorHandler =
       const { explanation, usage, id, cached } = await explain(build.log, {
         sourceContext,
         hint: build.hint,
-        allowModelCall: () => rateAllowed(rateLimitKey),
+        reserveModelCall: () => reserveModelCall(rateLimitKey),
       });
       // Token counts only: build logs can contain repository content.
       if (!cached) logger.info('Build error explained', { ...usage, snippets: sourceContext.length });
       return res.json({ explanation, id, cached });
     } catch (error) {
+      if (error instanceof ExplainerRateLimitedError && error.reason === 'daily_limit') {
+        return res.status(429).json({
+          error: 'AI explanations have reached their daily limit on this server. The keyword hint above still applies.',
+          code: 'ai_daily_limit',
+        });
+      }
       if (error instanceof ExplainerRateLimitedError) {
         return res.status(429).json({
           error: 'Too many explanation requests. Please wait a few minutes and try again.',
@@ -139,7 +154,7 @@ export const createExplainBuildErrorHandler =
 export const explainBuildErrorHandler = createExplainBuildErrorHandler({
   explain: explainBuildError,
   isConfigured: isExplainerConfigured,
-  rateAllowed: explainRateAllowed,
+  reserveModelCall: (userKey) => reserveModelCall(userKey),
   loadBuildLog: loadFailedBuildLog,
   loadSourceContext,
 });
@@ -168,12 +183,18 @@ export const createExplanationFeedbackHandler =
 export const explanationFeedbackHandler = createExplanationFeedbackHandler({
   rateAllowed: feedbackRateAllowed,
   record: async ({ explanationId, helpful, sessionId }) => {
-    logger.info('Build error explanation feedback', { explanationId, helpful });
+    const model = lookupExplanationModel(explanationId) ?? 'unknown';
+    logger.info('Build error explanation feedback', { explanationId, helpful, model });
+    // Stored so "is the default model good enough?" can be answered with a query.
+    // A missing table (schema not pushed yet) must not fail the vote.
+    await workspaceRepository
+      .recordExplanationFeedback({ explanationId, sessionId, helpful, model })
+      .catch((error: Error) => logger.error(`[DB] Failed to store explanation feedback: ${error.message}`));
     await recordMonitoringEvent({
       level: 'info',
       category: 'ai_explanation_feedback',
       message: helpful ? 'Explanation marked helpful' : 'Explanation marked not helpful',
-      metadata: { explanationId, helpful, sessionId },
+      metadata: { explanationId, helpful, sessionId, model },
     });
   },
 });

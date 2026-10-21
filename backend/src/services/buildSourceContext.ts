@@ -10,6 +10,10 @@ const MAX_SNIPPETS = 3;
 const MAX_SOURCE_BYTES = 2 * 1024 * 1024;
 /** Long lines (minified data, base64 images) are cut so one line cannot crowd out the rest. */
 const MAX_LINE_CHARS = 300;
+/** Bounds on the repository walk used to find an undefined LaTeX macro. */
+const MAX_SEARCH_FILES = 2_000;
+const SKIPPED_DIRS = new Set(['.git', 'node_modules', 'output', 'generated-assets', '.proofdesk-data']);
+const SOURCE_EXTENSIONS = new Set(['.xml', '.ptx']);
 
 export interface SourceSnippet {
   /** Repository-relative POSIX path, the same form the editor opens files by. */
@@ -80,6 +84,72 @@ export const resolveLogPath = async (repoRoot: string, rawPath: string): Promise
   return null;
 };
 
+// "! Undefined control sequence." then TeX's "l.1180 <text up to the bad macro>"
+const UNDEFINED_MACRO = /Undefined control sequence\.?[^\n]*\n(?:[^\n]*\n){0,4}?l\.\d+ ([^\n]*)/g;
+
+/**
+ * Macros LaTeX reported as undefined. TeX prints the source line up to and
+ * including the offending command, so it is the last command on that line.
+ */
+export const findUndefinedMacros = (log: string): string[] => {
+  const macros: string[] = [];
+  UNDEFINED_MACRO.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = UNDEFINED_MACRO.exec(log)) !== null) {
+    const commands = match[1].match(/\\[A-Za-z]+/g);
+    const macro = commands?.[commands.length - 1];
+    if (macro && !macros.includes(macro)) macros.push(macro);
+  }
+  return macros;
+};
+
+/** Repository-relative paths of PreTeXt source files, walked without following symlinks. */
+const listSourceFiles = async (repoRoot: string): Promise<string[]> => {
+  const found: string[] = [];
+  const pending = [''];
+  while (pending.length > 0 && found.length < MAX_SEARCH_FILES) {
+    const relativeDir = pending.shift() as string;
+    let entries: import('fs').Dirent[];
+    try {
+      entries = await fs.readdir(path.join(repoRoot, relativeDir), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const relative = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      if (entry.isDirectory() && !SKIPPED_DIRS.has(entry.name)) pending.push(relative);
+      else if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name))) found.push(relative);
+    }
+  }
+  return found;
+};
+
+/**
+ * LaTeX errors point at the generated .tex file, which the author never edits.
+ * For an undefined macro, find where the author's source uses it instead.
+ */
+const locateMacroUses = async (repoRoot: string, macros: string[], limit: number): Promise<LogLocation[]> => {
+  if (macros.length === 0 || limit <= 0) return [];
+  const hits: LogLocation[] = [];
+  const patterns = macros.map((macro) => new RegExp(`${macro.replace(/\\/g, '\\\\')}(?![A-Za-z])`));
+
+  for (const file of await listSourceFiles(repoRoot)) {
+    if (hits.length >= limit) break;
+    try {
+      const stat = await fs.stat(path.join(repoRoot, file));
+      if (stat.size > MAX_SOURCE_BYTES) continue;
+      const lines = (await fs.readFile(path.join(repoRoot, file), 'utf8')).split('\n');
+      for (const pattern of patterns) {
+        const index = lines.findIndex((text) => pattern.test(text));
+        if (index >= 0 && hits.length < limit) hits.push({ rawPath: file, line: index + 1 });
+      }
+    } catch {
+      // Unreadable file: skip it.
+    }
+  }
+  return hits;
+};
+
 const formatSnippet = (lines: string[], line: number): string => {
   const first = Math.max(1, line - CONTEXT_RADIUS);
   const last = Math.min(lines.length, line + CONTEXT_RADIUS);
@@ -104,7 +174,12 @@ export const collectSourceContext = async (repoRoot: string | undefined, log: st
   const snippets: SourceSnippet[] = [];
   const fileCache = new Map<string, string[] | null>();
 
-  for (const { rawPath, line } of findLogLocations(log)) {
+  // Locations in generated LaTeX are dropped by resolveLogPath (the file is not
+  // in the repository), so undefined macros are looked up in the source.
+  const named = findLogLocations(log);
+  const macroUses = await locateMacroUses(repoRoot, findUndefinedMacros(log), MAX_SNIPPETS);
+
+  for (const { rawPath, line } of [...named, ...macroUses]) {
     if (snippets.length >= MAX_SNIPPETS) break;
 
     const relative = await resolveLogPath(repoRoot, rawPath);

@@ -20,6 +20,7 @@ const messageFor = (error: unknown): string => {
     if (error.status === 429) return 'Too many explanation requests. Please wait a few minutes and try again.';
     if (error.code === 'build_log_not_found') return 'The output of this build is no longer available. Run the build again.';
     if (error.code === 'build_not_failed') return 'The latest build did not fail, so there is nothing to explain.';
+    if (error.code === 'build_in_progress') return 'The build is still running. Try again when it finishes.';
     return error.message || GENERIC_ERROR;
   }
   return GENERIC_ERROR;
@@ -41,6 +42,8 @@ export function useBuildErrorExplanation(apiUrl: string, sessionId: string) {
 
   const mountedRef = useRef(true);
   const inFlightRef = useRef(false);
+  // Bumped by reset(); an answer for an earlier generation is dropped.
+  const generationRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -52,8 +55,9 @@ export function useBuildErrorExplanation(apiUrl: string, sessionId: string) {
   const endpoint = `${apiUrl}/build/explain-error/${encodeURIComponent(sessionId)}`;
 
   const explain = useCallback(async () => {
-    if (inFlightRef.current) return;
+    if (inFlightRef.current || !sessionId) return;
     inFlightRef.current = true;
+    const generation = generationRef.current;
     setStatus('loading');
     setErrorMessage('');
 
@@ -68,13 +72,13 @@ export function useBuildErrorExplanation(apiUrl: string, sessionId: string) {
         },
         GENERIC_ERROR,
       );
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || generation !== generationRef.current) return;
       setExplanation(data.explanation);
       setExplanationId(data.id ?? null);
       setFeedback('none');
       setStatus('success');
     } catch (error) {
-      if (!mountedRef.current) return;
+      if (!mountedRef.current || generation !== generationRef.current) return;
       if (error instanceof EditorApiError && error.code === 'ai_not_configured') {
         setUnavailable(true);
         setStatus('idle');
@@ -85,7 +89,18 @@ export function useBuildErrorExplanation(apiUrl: string, sessionId: string) {
     } finally {
       inFlightRef.current = false;
     }
-  }, [endpoint]);
+  }, [endpoint, sessionId]);
+
+  /** Forgets the current explanation, e.g. because a newer build replaced the one it explained. */
+  const reset = useCallback(() => {
+    generationRef.current += 1;
+    inFlightRef.current = false;
+    setStatus('idle');
+    setExplanation(null);
+    setExplanationId(null);
+    setErrorMessage('');
+    setFeedback('none');
+  }, []);
 
   /** Records whether the explanation helped. Best effort: a failure is not shown to the author. */
   const sendFeedback = useCallback(
@@ -110,5 +125,17 @@ export function useBuildErrorExplanation(apiUrl: string, sessionId: string) {
     [endpoint, explanationId, feedback],
   );
 
-  return { status, explanation, errorMessage, unavailable, feedback, canSendFeedback: Boolean(explanationId), explain, sendFeedback };
+  return {
+    status,
+    explanation,
+    errorMessage,
+    unavailable,
+    feedback,
+    canSendFeedback: Boolean(explanationId),
+    explain,
+    sendFeedback,
+    reset,
+  };
 }
+
+export type BuildErrorExplainer = ReturnType<typeof useBuildErrorExplanation>;

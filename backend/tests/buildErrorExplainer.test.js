@@ -9,6 +9,7 @@ import {
   clearExplanationCache,
   explainBuildError,
   isExplainerConfigured,
+  lookupExplanationModel,
   normalizeLocation,
   parseExplanation,
   prepareLogForModel,
@@ -191,10 +192,10 @@ describe('explainBuildError caching and rate limiting', () => {
   it('answers a repeated request from the cache without calling the model or the rate limiter', async () => {
     const { client, calls } = fakeClient(textResponse(JSON.stringify(validExplanation)));
     let allowances = 0;
-    const allowModelCall = () => { allowances += 1; return true; };
+    const reserveModelCall = async () => { allowances += 1; return 'ok'; };
 
-    const first = await explainBuildError('same log', { client, allowModelCall });
-    const second = await explainBuildError('same log', { client, allowModelCall });
+    const first = await explainBuildError('same log', { client, reserveModelCall });
+    const second = await explainBuildError('same log', { client, reserveModelCall });
 
     assert.equal(calls.length, 1);
     assert.equal(allowances, 1);
@@ -210,13 +211,23 @@ describe('explainBuildError caching and rate limiting', () => {
     assert.equal(calls.length, 2);
   });
 
-  it('does not call the model when the rate limiter says no', async () => {
+  it('does not call the model when a spending limit says no, and says which one', async () => {
     const { client, calls } = fakeClient(textResponse(JSON.stringify(validExplanation)));
-    await assert.rejects(
-      () => explainBuildError('log', { client, allowModelCall: () => false }),
-      ExplainerRateLimitedError,
-    );
+    for (const verdict of ['user_limit', 'daily_limit']) {
+      await assert.rejects(
+        () => explainBuildError('log', { client, reserveModelCall: async () => verdict }),
+        (error) => error instanceof ExplainerRateLimitedError && error.reason === verdict,
+      );
+    }
     assert.equal(calls.length, 0);
+  });
+
+  it('remembers which model wrote an answer, for feedback', async () => {
+    const { client } = fakeClient(textResponse(JSON.stringify(validExplanation)));
+    const result = await explainBuildError('model log', { client, model: 'claude-opus-5-5' });
+    assert.equal(result.model, 'claude-opus-5-5');
+    assert.equal(lookupExplanationModel(result.id), 'claude-opus-5-5');
+    assert.equal(lookupExplanationModel('0000000000000000'), null);
   });
 
   it('does not cache a declined answer', async () => {

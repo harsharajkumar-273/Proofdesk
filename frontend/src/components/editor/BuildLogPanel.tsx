@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { X, CheckCircle2, XCircle, Loader2, AlertCircle, Sparkles, Lightbulb } from 'lucide-react';
 import BuildErrorExplanation from './BuildErrorExplanation';
-import { useBuildErrorExplanation } from '../../hooks/useBuildErrorExplanation';
+import type { BuildErrorExplainer } from '../../hooks/useBuildErrorExplanation';
 
 interface LogLine {
   line: string;
@@ -31,6 +31,12 @@ interface BuildLogPanelProps {
   onClose: () => void;
   /** Opens a source file at a line; the panel closes so the editor is visible. */
   onOpenLocation?: (path: string, line: number) => void;
+  /**
+   * The editor's explanation state for this session. It lives outside the
+   * panel so an explanation survives closing it and can be reopened from the
+   * build-failure notice.
+   */
+  explainer: BuildErrorExplainer;
 }
 
 function formatElapsed(ms: number): string {
@@ -39,7 +45,7 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComplete, onClose, onOpenLocation }) => {
+const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComplete, onClose, onOpenLocation, explainer: ai }) => {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [done, setDone] = useState(false);
   const [result, setResult] = useState<BuildResult | null>(null);
@@ -47,7 +53,6 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedAt = useRef(Date.now());
   const esRef = useRef<EventSource | null>(null);
-  const ai = useBuildErrorExplanation(apiUrl, sessionId);
   // Once an explanation arrives it takes the log's place; the author can switch back.
   const [showLog, setShowLog] = useState(true);
 
@@ -116,7 +121,12 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="flex flex-col w-full max-w-3xl mx-4 h-[70vh] rounded-2xl overflow-hidden shadow-2xl border border-zinc-700 bg-zinc-950">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Build log"
+        className="flex flex-col w-full max-w-3xl mx-4 h-[70vh] rounded-2xl overflow-hidden shadow-2xl border border-zinc-700 bg-zinc-950"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
           <div className="flex items-center gap-3">

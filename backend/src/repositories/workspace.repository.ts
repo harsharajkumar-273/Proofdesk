@@ -91,6 +91,10 @@ export class WorkspaceRepository {
     });
   }
 
+  async recordExplanationFeedback(data: { explanationId: string; sessionId: string; helpful: boolean; model: string }) {
+    return prisma.aiExplanationFeedback.create({ data });
+  }
+
   async saveReviewMarkers(sessionId: string, markers: Record<string, any[]>) {
     // Flatten markers map from frontend. Frontend structure of review-markers is file-keyed map:
     // { "src/vectors.xml": [ { line, severity, message }, ... ] }
