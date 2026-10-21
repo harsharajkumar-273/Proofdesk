@@ -89,8 +89,9 @@ const SECTIONS = [
         <p>
           If the server operator has enabled AI build-error explanations, clicking{' '}
           <strong className="text-zinc-800 dark:text-zinc-200">Explain this error</strong> on a failed build sends
-          that build's log, with credentials removed, to Anthropic to generate the explanation. Nothing is sent unless
-          you click the button.
+          that build's log and a few lines of your source around the reported error, with credentials removed, to
+          Anthropic to generate the explanation. Nothing is sent unless you click the button. If you rate an
+          explanation, only your vote is stored.
         </p>
         <p>
           No other third-party analytics, advertising, or tracking services are used.

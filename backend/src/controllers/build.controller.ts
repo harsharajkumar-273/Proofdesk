@@ -10,6 +10,7 @@ import { listPreviewSnapshots, readPreviewSnapshotHtml } from '../services/previ
 import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
 import { buildFailurePayload } from '../utils/buildDiagnostics.js';
 import { createRateLimiter } from '../utils/rateLimiter.js';
+import { canAccessBuildSession } from '../middleware/auth.js';
 import { getMonitoringContextFromRequest, recordMonitoringEvent } from '../services/monitoringService.js';
 
 const buildInitRateAllowed = createRateLimiter({ windowMs: 10 * 60_000, maxRequests: 3 });
@@ -114,8 +115,7 @@ export const initBuild = async (req: Request, res: Response): Promise<any> => {
 
   if (sessionId) {
     const existingSession = buildExecutor.getSession(sessionId);
-    const initLogin = req.authSession?.user?.login;
-    if (initLogin && existingSession?.creatorLogin && existingSession.creatorLogin !== initLogin) {
+    if (existingSession && !canAccessBuildSession(existingSession, req)) {
       return res.status(403).json({ error: 'Access denied' });
     }
     try {
@@ -177,9 +177,8 @@ export const initBuild = async (req: Request, res: Response): Promise<any> => {
 
 export const updateBuildFile = async (req: Request, res: Response): Promise<any> => {
   const { sessionId, filePath, content, sectionXmlId } = req.body;
-  const updateLogin = req.authSession?.user?.login;
   const updateSession = buildExecutor.getSession(sessionId);
-  if (updateLogin && updateSession?.creatorLogin && updateSession.creatorLogin !== updateLogin) {
+  if (updateSession && !canAccessBuildSession(updateSession, req)) {
     return res.status(403).json({ error: 'Access denied' });
   }
 
@@ -406,9 +405,8 @@ export const shareBuild = async (req: Request, res: Response): Promise<any> => {
 
 export const cleanupBuild = async (req: Request, res: Response): Promise<any> => {
   const { sessionId } = req.body;
-  const cleanupLogin = req.authSession?.user?.login;
   const cleanupSession = buildExecutor.getSession(sessionId);
-  if (cleanupLogin && cleanupSession?.creatorLogin && cleanupSession.creatorLogin !== cleanupLogin) {
+  if (cleanupSession && !canAccessBuildSession(cleanupSession, req)) {
     return res.status(403).json({ error: 'Access denied' });
   }
 

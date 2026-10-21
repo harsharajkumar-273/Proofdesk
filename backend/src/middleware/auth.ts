@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import authSessionStore from '../services/authSessionStore.js';
 import buildExecutor from '../services/buildExecutor.js';
@@ -82,10 +83,37 @@ export const requireAdmin = (req: Request, res: Response, next: NextFunction): a
   next();
 };
 
+const tokensMatch = (expected: unknown, actual: unknown): boolean => {
+  if (typeof expected !== 'string' || typeof actual !== 'string' || !expected || !actual) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(actual);
+  return a.length === b.length && timingSafeEqual(a, b);
+};
+
+/**
+ * Whether this request may act on a build session.
+ *
+ * A session started by a signed-in user belongs to that GitHub login. A
+ * session started with a bare bearer token (no cookie session, so no verified
+ * login) belongs to that token. Either way the request must prove one of the
+ * two; a request that proves neither is refused.
+ *
+ * This used to skip the check whenever the request carried no login, which is
+ * exactly the bare-bearer-token path `requireAccessToken` accepts: any valid
+ * GitHub token could act on any session whose id it knew.
+ */
+export const canAccessBuildSession = (
+  session: { creatorLogin?: string | null; token?: string | null },
+  req: Request,
+): boolean => {
+  const login = req.authSession?.user?.login;
+  if (session.creatorLogin && login && session.creatorLogin === login) return true;
+  return tokensMatch(session.token, req.accessToken);
+};
+
 export const checkWorkspaceOwner = (req: Request, res: Response, next: NextFunction): any => {
   const { sessionId } = req.params;
-  const login = req.authSession?.user?.login;
-  if (!login || !sessionId) return next();
+  if (!sessionId) return next();
   const session = buildExecutor.getSession(sessionId as string);
 
   // An unresolvable session is refused rather than waved through.
@@ -105,7 +133,7 @@ export const checkWorkspaceOwner = (req: Request, res: Response, next: NextFunct
     return res.status(404).json({ error: 'Session not found' });
   }
 
-  if (session.creatorLogin && session.creatorLogin !== login) {
+  if (!canAccessBuildSession(session, req)) {
     return res.status(403).json({ error: 'Access denied' });
   }
 

@@ -86,3 +86,16 @@ model Comment {
 
   @@index([sessionId])
 }
+
+// A vote on an AI build-error explanation. Holds no log or source text.
+// Not tied to WorkspaceSession: votes outlive the sessions they were cast in.
+model AiExplanationFeedback {
+  id            String   @id @default(uuid())
+  explanationId String
+  sessionId     String
+  helpful       Boolean
+  model         String
+  createdAt     DateTime @default(now())
+
+  @@index([createdAt])
+}

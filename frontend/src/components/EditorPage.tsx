@@ -100,6 +100,8 @@ import {
 } from '../utils/proseSpellCheck';
 import { loadSpellChecker } from '../utils/spellDictionary';
 import { parseBuildErrors } from '../utils/buildErrorParser';
+import { parseLocation } from '../utils/buildErrorLocation';
+import { useBuildErrorExplanation } from '../hooks/useBuildErrorExplanation';
 import { type PreviewSnapshotEntry } from '../utils/previewDiff';
 import { MonacoYjsCollaborationSession } from '../utils/yjsCollaboration';
 
@@ -313,6 +315,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [buildSessionId, setBuildSessionId] = useState<string | null>(null);
   const [buildResult, setBuildResult] = useState<BuildResponse | null>(null);
   const [streamingBuildSessionId, setStreamingBuildSessionId] = useState<string | null>(null);
+  // Bumped for every streamed build so a rebuild of the same session gets a fresh log panel.
+  const [streamingBuildKey, setStreamingBuildKey] = useState(0);
   const [buildErrors, setBuildErrors] = useState<Diagnostic[]>([]);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewEntryFile, setPreviewEntryFile] = useState<string | null>(null);
@@ -322,6 +326,14 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   const [editorReady, setEditorReady] = useState<boolean>(false);
   const [collaborationRetryKey, setCollaborationRetryKey] = useState<number>(0);
   const [workspaceNotice, setWorkspaceNotice] = useState<WorkspaceNotice | null>(null);
+  // AI explanation of the session's latest failed build. Held here, not in the
+  // log panel, so it survives closing the panel and is reachable from the
+  // failure notice after a live rebuild (which never opens the panel).
+  const buildExplainer = useBuildErrorExplanation(API_URL, buildSessionId ?? '');
+  const resetBuildExplanation = buildExplainer.reset;
+  // True when the log panel was reopened over a build that already finished,
+  // so its result is not applied a second time.
+  const [buildLogReplay, setBuildLogReplay] = useState(false);
   const [recentFiles, setRecentFiles] = useState<RecentFileEntry[]>([]);
   const [reviewMarkers, setReviewMarkers] = useState<Record<string, ReviewMarkerEntry>>({});
   const [reviewStatus, setReviewStatus] = useState<ReviewMarkerStatus>('needs-review');
@@ -456,6 +468,33 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     };
   }, [reviewMarkers]);
 
+  useEffect(() => {
+    resetBuildExplanation();
+  }, [buildSessionId, resetBuildExplanation]);
+
+  // The AI's pointer to the failure, shown like any other build problem.
+  const buildDiagnostics = useMemo<Diagnostic[]>(() => {
+    const explanation = buildExplainer.explanation;
+    const target = explanation ? parseLocation(explanation.location) : null;
+    if (!explanation || !target) return buildErrors;
+    return [
+      ...buildErrors,
+      {
+        filePath: target.path,
+        fileName: target.path.split('/').pop() ?? target.path,
+        startLineNumber: target.line,
+        startColumn: 1,
+        endLineNumber: target.line,
+        endColumn: 1000,
+        message: `AI: ${explanation.summary}`,
+        hint: explanation.fixSteps[0],
+        severity: 'warning',
+        source: 'AI explanation',
+        code: 'ai_explanation',
+      },
+    ];
+  }, [buildErrors, buildExplainer.explanation]);
+
   const allDiagnostics = useMemo<Diagnostic[]>(() => {
     const result: Diagnostic[] = [];
     for (const tab of tabs) {
@@ -471,7 +510,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       }
     }
     // Build errors: match parsed errors against open tabs
-    for (const err of buildErrors) {
+    for (const err of buildDiagnostics) {
       const tab = tabs.find(
         (t) => t.path === err.filePath || err.filePath.endsWith(t.name),
       );
@@ -482,7 +521,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     // recomputed synchronously here.
     result.push(...spellDiagnostics);
     return result;
-  }, [tabs, buildErrors, spellDiagnostics]);
+  }, [tabs, buildDiagnostics, spellDiagnostics]);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const reviewDecorationIdsRef = useRef<string[]>([]);
@@ -769,6 +808,21 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     onCreateError: (error) => showNoticeFromError(error, 'Failed to create invite code'),
     onCreated: () => setWorkspaceNotice(null),
   });
+
+  /**
+   * Reopens the log panel over the session's finished build (the server
+   * replays its log) and asks for an explanation if there is none yet.
+   */
+  const openBuildExplanation = () => {
+    const sid = buildSessionIdRef.current || buildSessionId;
+    if (!sid) return;
+    setBuildLogReplay(true);
+    setStreamingBuildKey((key) => key + 1);
+    setStreamingBuildSessionId(sid);
+    if (buildExplainer.status !== 'success' && buildExplainer.status !== 'loading') {
+      void buildExplainer.explain();
+    }
+  };
 
   const handleWorkspaceNoticeAction = () => {
     if (!workspaceNotice?.actionType) return;
@@ -1262,11 +1316,11 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     const monaco = monacoRef.current;
     const model = editorRef.current?.getModel?.();
     if (!monaco || !model) return;
-    if (!activeTab || buildErrors.length === 0) {
+    if (!activeTab || buildDiagnostics.length === 0) {
       monaco.editor.setModelMarkers(model, 'proofdesk-build', []);
       return;
     }
-    const tabErrors = buildErrors.filter(
+    const tabErrors = buildDiagnostics.filter(
       (e) => e.filePath === activeTab.path || e.filePath.endsWith(activeTab.name),
     );
     monaco.editor.setModelMarkers(
@@ -1281,10 +1335,10 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         severity: e.severity === 'error'
           ? monaco.MarkerSeverity.Error
           : monaco.MarkerSeverity.Warning,
-        source: 'Build',
+        source: e.source === 'AI explanation' ? 'AI explanation' : 'Build',
       })),
     );
-  }, [activeTab, buildErrors, editorReady]);
+  }, [activeTab, buildDiagnostics, editorReady]);
 
   useEffect(() => {
     const editorInstance = editorRef.current;
@@ -1770,7 +1824,9 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(newTab.id);
       setRecentFiles(pushRecentFile(repo.fullName, { path, name: newTab.name }));
-      setWorkspaceNotice(null);
+      // Opening a file clears stale notices, but not a build failure: the build
+      // is still broken, and that notice is the way back to its explanation.
+      setWorkspaceNotice((notice) => (notice?.actionType === 'retry-build' ? notice : null));
       if (line) {
         setTimeout(() => {
           editorRef.current?.revealLineInCenter(line);
@@ -2177,6 +2233,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   };
 
   const applyBuildResponse = (data: BuildResponse, options: { quiet?: boolean } = {}) => {
+    // Any explanation was of the build this result replaces.
+    resetBuildExplanation();
     const nextSessionId = data.sessionId || buildSessionId || null;
     const entryFile = data.entryFile || data.artifacts?.find((a) => a.type === '.html')?.path || null;
 
@@ -2293,6 +2351,8 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         if (sid) {
           buildSessionIdRef.current = sid;
           setBuildSessionId(sid);
+          setStreamingBuildKey((key) => key + 1);
+          setBuildLogReplay(false);
           setStreamingBuildSessionId(sid);
         }
         return sid || null;
@@ -2741,6 +2801,12 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
         notice={workspaceNotice}
         onAction={handleWorkspaceNoticeAction}
         onDismiss={() => setWorkspaceNotice(null)}
+        secondaryActionLabel={
+          workspaceNotice?.actionType === 'retry-build' && buildSessionId && !buildExplainer.unavailable
+            ? buildExplainer.status === 'success' ? 'Show explanation' : 'Explain this error'
+            : undefined
+        }
+        onSecondaryAction={openBuildExplanation}
       />
 
       {openRepoKeys.length >= 1 && (
@@ -3096,13 +3162,19 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
 
       {streamingBuildSessionId && (
         <BuildLogPanel
+          key={streamingBuildKey}
           sessionId={streamingBuildSessionId}
           apiUrl={API_URL}
           onComplete={(result) => {
-            setStreamingBuildSessionId(null);
+            if (buildLogReplay) return;
+            // A failed build keeps the panel open so the author can read the
+            // log and ask for an explanation; they close it themselves.
+            if (result.success) setStreamingBuildSessionId(null);
             applyBuildResponse(result as BuildResponse);
           }}
           onClose={() => setStreamingBuildSessionId(null)}
+          onOpenLocation={(path, line) => void openFileInTab(path, line)}
+          explainer={buildExplainer}
         />
       )}
 

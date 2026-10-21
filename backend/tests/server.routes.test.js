@@ -525,7 +525,7 @@ describe('active backend routes', () => {
   });
 
   it('requires authentication to explain a build error', async () => {
-    const response = await request(app).post('/build/explain-error').send({ log: 'boom' });
+    const response = await request(app).post('/build/explain-error/0123456789abcdef').send({});
     assert.equal(response.status, 401);
   });
 
@@ -534,9 +534,9 @@ describe('active backend routes', () => {
     delete process.env.ANTHROPIC_API_KEY;
     try {
       const response = await request(app)
-        .post('/build/explain-error')
+        .post('/build/explain-error/0123456789abcdef')
         .set('Authorization', 'Bearer local-test')
-        .send({ log: 'boom' });
+        .send({});
       assert.equal(response.status, 503);
       assert.equal(response.body.code, 'ai_not_configured');
     } finally {

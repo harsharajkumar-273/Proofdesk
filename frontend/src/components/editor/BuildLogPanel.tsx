@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { X, CheckCircle2, XCircle, Loader2 } from 'lucide-react';
+import { X, CheckCircle2, XCircle, Loader2, AlertCircle, Sparkles, Lightbulb } from 'lucide-react';
 import BuildErrorExplanation from './BuildErrorExplanation';
+import type { BuildErrorExplainer } from '../../hooks/useBuildErrorExplanation';
 
 interface LogLine {
   line: string;
@@ -18,6 +19,9 @@ interface BuildResult {
   fromCache?: boolean;
   buildType?: string;
   buildInProgress?: boolean;
+  /** Keyword-based hint the server attaches to a failed build. */
+  advice?: string;
+  code?: string;
 }
 
 interface BuildLogPanelProps {
@@ -25,6 +29,14 @@ interface BuildLogPanelProps {
   apiUrl: string;
   onComplete: (result: BuildResult) => void;
   onClose: () => void;
+  /** Opens a source file at a line; the panel closes so the editor is visible. */
+  onOpenLocation?: (path: string, line: number) => void;
+  /**
+   * The editor's explanation state for this session. It lives outside the
+   * panel so an explanation survives closing it and can be reopened from the
+   * build-failure notice.
+   */
+  explainer: BuildErrorExplainer;
 }
 
 function formatElapsed(ms: number): string {
@@ -33,14 +45,7 @@ function formatElapsed(ms: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-/** The text to explain: the streamed output, falling back to the result's own error text. */
-const buildLogText = (lines: LogLine[], result: BuildResult | null): string => {
-  const streamed = lines.map((entry) => entry.line).join('\n');
-  if (streamed.trim()) return streamed;
-  return [result?.error, result?.stderr, result?.stdout].filter(Boolean).join('\n');
-};
-
-const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComplete, onClose }) => {
+const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComplete, onClose, onOpenLocation, explainer: ai }) => {
   const [lines, setLines] = useState<LogLine[]>([]);
   const [done, setDone] = useState(false);
   const [result, setResult] = useState<BuildResult | null>(null);
@@ -48,6 +53,15 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
   const bottomRef = useRef<HTMLDivElement>(null);
   const startedAt = useRef(Date.now());
   const esRef = useRef<EventSource | null>(null);
+  // Once an explanation arrives it takes the log's place; the author can switch back.
+  const [showLog, setShowLog] = useState(true);
+
+  useEffect(() => {
+    if (ai.status === 'success') setShowLog(false);
+  }, [ai.status]);
+
+  const failed = done && !result?.success;
+  const showExplanation = failed && ai.status === 'success' && ai.explanation && !showLog;
 
   // Elapsed timer
   useEffect(() => {
@@ -107,7 +121,12 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="flex flex-col w-full max-w-3xl mx-4 h-[70vh] rounded-2xl overflow-hidden shadow-2xl border border-zinc-700 bg-zinc-950">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Build log"
+        className="flex flex-col w-full max-w-3xl mx-4 h-[70vh] rounded-2xl overflow-hidden shadow-2xl border border-zinc-700 bg-zinc-950"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 bg-zinc-900 flex-shrink-0">
           <div className="flex items-center gap-3">
@@ -139,25 +158,82 @@ const BuildLogPanel: React.FC<BuildLogPanelProps> = ({ sessionId, apiUrl, onComp
           </button>
         </div>
 
-        {/* Log output */}
-        <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-5 px-4 py-3 bg-zinc-950">
-          {lines.length === 0 && !done && (
-            <p className="text-zinc-600 italic">Waiting for build output…</p>
-          )}
-          {lines.map((entry, i) => (
-            <div
-              key={i}
-              className={entry.stream === 'stderr' ? 'text-amber-400/80' : 'text-zinc-300'}
-            >
-              {entry.line}
-            </div>
-          ))}
-          <div ref={bottomRef} />
-        </div>
+        {/* Log output, or the AI explanation in its place */}
+        {showExplanation && ai.explanation ? (
+          <BuildErrorExplanation
+            explanation={ai.explanation}
+            feedback={ai.feedback}
+            onFeedback={ai.canSendFeedback ? (helpful) => void ai.sendFeedback(helpful) : undefined}
+            onOpenLocation={
+              onOpenLocation
+                ? (path, line) => {
+                    onOpenLocation(path, line);
+                    onClose();
+                  }
+                : undefined
+            }
+          />
+        ) : (
+          <div className="flex-1 overflow-y-auto font-mono text-[11px] leading-5 px-4 py-3 bg-zinc-950">
+            {lines.length === 0 && !done && (
+              <p className="text-zinc-600 italic">Waiting for build output…</p>
+            )}
+            {lines.map((entry, i) => (
+              <div
+                key={i}
+                className={entry.stream === 'stderr' ? 'text-amber-400/80' : 'text-zinc-300'}
+              >
+                {entry.line}
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        )}
 
-        {/* AI explanation: only offered once a build has failed */}
-        {done && !result?.success && (
-          <BuildErrorExplanation apiUrl={apiUrl} log={buildLogText(lines, result)} />
+        {/* After a failure: the instant keyword hint, and the AI explanation on request */}
+        {failed && (result?.advice || !ai.unavailable) && (
+          <div className="flex flex-shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-800 bg-zinc-900/60 px-4 py-2">
+            {result?.advice && (
+              <p className="flex min-w-0 flex-1 items-start gap-1.5 text-xs text-zinc-300">
+                <Lightbulb className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-amber-300" aria-hidden="true" />
+                <span>{result.advice}</span>
+              </p>
+            )}
+            {!ai.unavailable && (
+              <div className="ml-auto flex items-center gap-3">
+                {ai.status === 'error' && (
+                  <p role="alert" className="flex items-center gap-1.5 text-xs text-rose-300">
+                    <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
+                    {ai.errorMessage}
+                  </p>
+                )}
+                {ai.status === 'success' ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowLog((value) => !value)}
+                    className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs font-bold text-zinc-300 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                  >
+                    {showLog ? 'Show explanation' : 'Show build log'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void ai.explain()}
+                    disabled={ai.status === 'loading'}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {ai.status === 'loading' ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                    )}
+                    {ai.status === 'loading' ? 'Analyzing…' : ai.status === 'error' ? 'Try again' : 'Explain this error'}
+                  </button>
+                )}
+                {ai.status === 'loading' && <span role="status" className="sr-only">Analyzing the build error</span>}
+              </div>
+            )}
+          </div>
         )}
 
         {/* Footer */}

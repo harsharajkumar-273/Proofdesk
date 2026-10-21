@@ -565,21 +565,17 @@ Response:
 }
 ```
 
-### `POST /build/explain-error`
+### `POST /build/explain-error/:sessionId`
 
-Asks Claude to explain a failed build log in plain English. Optional: only available when the server has `ANTHROPIC_API_KEY` set.
+Asks Claude to explain the session's last failed build in plain English. Optional: only available when the server has `ANTHROPIC_API_KEY` set.
 
-Auth required: yes. Limited to 10 requests per 10 minutes per signed-in user.
+Auth required: yes, and the caller must own the workspace session (the GitHub login that started it, or the bearer token that started it).
 
-Credentials (GitHub/Anthropic/AWS tokens, URL credentials, bearer tokens, `key=value` secrets) are redacted from the log before it is sent, and long logs are shortened to the first 2,000 characters plus the tail.
+Spending limits: 10 model calls per user per 10-minute window, and a server-wide daily total set by `PROOFDESK_AI_DAILY_LIMIT` (default 500; `0` turns it off). Both are counted in Redis when shared state is on, so they hold across backend instances, and both stay on in local test mode. Repeating a request for the same failure within an hour returns the cached answer and does not count against either limit.
 
-Request:
+The explanation is always of the session's latest build, whether it was the initial build or a live rebuild after an edit (`POST /build/update`).
 
-```json
-{
-  "log": "chapters/ch1.xml:42: parser error : Opening and ending tag mismatch ..."
-}
-```
+The server reads the build output itself; the request body is ignored. It also reads up to three snippets of the author's source (13 lines each) around file locations the log names, so the answer can point at the exact markup. For a LaTeX "Undefined control sequence", whose location is in generated `.tex`, it finds where the author's `.xml`/`.ptx` source uses the macro instead. Credentials (GitHub/Anthropic/AWS tokens, URL credentials, bearer tokens, `key=value` secrets) are redacted from the log and the snippets before they are sent, and long logs are shortened to the first 2,000 characters plus the tail.
 
 Response:
 
@@ -591,21 +587,63 @@ Response:
     "fixSteps": ["Open chapters/ch1.xml", "Add </theorem> after the proof"],
     "location": "chapters/ch1.xml:42",
     "confidence": "high"
-  }
+  },
+  "id": "3f9a1c0e5b7d2a46",
+  "cached": false
 }
 ```
 
-`location` is an empty string when the log names no file. `confidence` is `high`, `medium` or `low`.
+`location` is a repository-relative `path:line` when the log names a file, otherwise an empty string. `confidence` is `high`, `medium` or `low`. `id` identifies the answer for feedback.
 
 Errors (each has a machine-readable `code`):
 
-- `400` `invalid_log` when `log` is missing, blank, or not a string
+- `400` `invalid_session` when the session id is malformed
 - `401` when not authenticated
-- `413` `log_too_large` when `log` exceeds 200,000 characters
+- `403` when the session belongs to another user
+- `404` `build_log_not_found` when the session has no build output (or `Session not found`)
+- `409` `build_not_failed` when the latest build succeeded, or `build_in_progress` while it is still running
 - `422` `ai_declined` when the model declined or returned an unusable answer
-- `429` `rate_limited` when the per-user limit is exceeded
+- `429` `rate_limited` when the per-user limit is exceeded, or `ai_daily_limit` when the server-wide daily limit is reached
 - `502` `ai_failed` for any other upstream failure
 - `503` `ai_not_configured` when no API key is configured, or `ai_busy` when the AI service is overloaded
+
+A failed build's result (the `done` event on `GET /build/logs/:sessionId`, and the `POST /build/update` response) also carries a keyword-based `code` and `advice`, which the editor shows immediately without calling the AI.
+
+### `POST /build/explain-error/:sessionId/feedback`
+
+Records whether an explanation helped, in the `AiExplanationFeedback` table: the explanation id, the vote, the session id, and the model that wrote the answer. No log or source text is stored. The table is created by `npx prisma db push`; until then votes are only logged.
+
+Auth required: yes, workspace owner. Limited to 30 requests per 10 minutes per user.
+
+Request:
+
+```json
+{ "id": "3f9a1c0e5b7d2a46", "helpful": false }
+```
+
+Response: `204 No Content`. Errors: `400` `invalid_feedback`, `429` `rate_limited`, `503` `ai_not_configured`.
+
+### Evaluating the explainer
+
+`backend/evals/build-error-explainer/` holds hand-written failing builds with expected answers. Run it before changing the prompt or the model (it calls the real API):
+
+```bash
+cd backend && ANTHROPIC_API_KEY=... npx tsx evals/build-error-explainer/run.ts claude-haiku-5-5 claude-opus-5-5
+```
+
+To test on failures users actually hit, export recent failed builds from the database (written to a git-ignored `real-cases.local.json`, since it holds user source), then run against them. Unlabelled cases are printed rather than scored so you can fill in their `expect`:
+
+```bash
+cd backend && npx tsx evals/build-error-explainer/export-cases.ts 50
+ANTHROPIC_API_KEY=... npx tsx evals/build-error-explainer/run.ts --cases evals/build-error-explainer/real-cases.local.json
+```
+
+How the default model is doing in practice:
+
+```sql
+SELECT model, AVG(CASE WHEN helpful THEN 1.0 ELSE 0 END) AS helpful_rate, COUNT(*) AS votes
+FROM "AiExplanationFeedback" GROUP BY model;
+```
 
 ## Legacy single-file compile route
 

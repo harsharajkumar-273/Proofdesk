@@ -46,3 +46,6 @@ docker/run/
 .idea/
 .vscode/
 .env.production
+
+# Eval cases exported from real builds hold user source; keep them local
+backend/evals/**/*.local.json
