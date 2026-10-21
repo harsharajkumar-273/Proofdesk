@@ -485,28 +485,6 @@ class BuildExecutor {
     }
   }
 
-  /**
-   * Forget the previous build's finished state before a rebuild. Otherwise
-   * subscribeToLogs replays the old `done` event to the rebuild's waiter and
-   * updateFile resolves with the previous build's result.
-   */
-  async _resetLogForRebuild(sessionId: string): Promise<void> {
-    const entry = this.buildLogs.get(sessionId);
-    if (entry) {
-      entry.done = false;
-      entry.result = null;
-      entry.lines = [];
-    }
-    if (isRedisSharedStateEnabled()) {
-      try {
-        const redis = await getRedisClient();
-        await redis.del([`proofdesk:build-status:${sessionId}`, `proofdesk:active-logs:${sessionId}`]);
-      } catch (err: any) {
-        logger.warn(`[RedisLogPub] Reset failed: ${err.message}`);
-      }
-    }
-  }
-
   _appendLog(sessionId: string, rawLine: string, stream = 'stdout'): void {
     const entry = this.buildLogs.get(sessionId);
     const line = BuildExecutor._stripAnsi(rawLine).trimEnd();
@@ -1790,7 +1768,6 @@ class BuildExecutor {
     // Mark this session as a fresh build (not cached), diverged from its commit
     session.fromCache = false;
     session.hasLocalEdits = true;
-    await this._resetLogForRebuild(sessionId);
 
     // If background queue is enabled, push to queue and wait for the result
     const queued = await pushBuildJob(sessionId, { xmlId, traceParent });
