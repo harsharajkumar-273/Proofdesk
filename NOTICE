@@ -1,0 +1,10 @@
+Proofdesk
+Copyright 2026 The Proofdesk Authors
+
+This product includes software developed by the Proofdesk contributors
+(https://github.com/harsharajkumar-273/Proofdesk).
+
+The Apache License 2.0 in LICENSE covers Proofdesk's own source code. Third-party
+material bundled in this repository keeps its own license. See
+THIRD_PARTY_NOTICES.md; in particular, backend/assets/ila-toolchain/ is not
+covered by the license granted in LICENSE.
