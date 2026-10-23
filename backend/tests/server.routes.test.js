@@ -204,12 +204,13 @@ before(async () => {
   // file anyway. previewSessionId is a synthetic id used only to exercise
   // the file-serving/rewriting logic, so it needs a matching in-memory
   // session registered for these preview requests to reach the handler at
-  // all. No creatorLogin, so any authenticated login is accepted.
+  // all. It belongs to the local demo user, the login the cookie tests use.
   buildExecutor.setSession(previewSessionId, {
     owner: 'demo',
     repo: 'course-demo',
     repoPath: path.resolve(getProofdeskDataPath(previewSessionId, 'repo')),
     outputPath: previewOutputDir,
+    creatorLogin: 'local-tester',
   });
 
   await fs.writeFile(
@@ -522,6 +523,42 @@ describe('active backend routes', () => {
       .get(`/preview/${previewSessionId}/demo.html`)
       .set('Cookie', cookie);
     assert.equal(response.status, 200);
+  });
+
+  describe('preview ownership', () => {
+    const otherSessionId = 'bbbbbbbbbbbbbbbb';
+    const session = (extra) => ({
+      owner: 'demo',
+      repo: 'course-demo',
+      repoPath: path.resolve(getProofdeskDataPath(otherSessionId, 'repo')),
+      outputPath: previewOutputDir,
+      ...extra,
+    });
+    const get = async () =>
+      request(app)
+        .get(`/preview/${otherSessionId}/demo.html`)
+        .set('Cookie', (await request(app).get('/auth/local-test')).headers['set-cookie']);
+
+    it('refuses a signed-in user who is not the creator', async () => {
+      buildExecutor.setSession(otherSessionId, session({ creatorLogin: 'someone-else' }));
+      assert.equal((await get()).status, 403);
+    });
+
+    it('refuses a session with no recorded owner to every signed-in user', async () => {
+      buildExecutor.setSession(otherSessionId, session({ creatorLogin: null }));
+      assert.equal((await get()).status, 403);
+    });
+
+    it('lets in the account whose token started an ownerless session', async () => {
+      // The local demo login holds the token 'local-test'.
+      buildExecutor.setSession(otherSessionId, session({ creatorLogin: null, token: 'local-test' }));
+      assert.equal((await get()).status, 200);
+    });
+
+    it('answers 404 for a session the server no longer holds', async () => {
+      buildExecutor.sessions.delete(otherSessionId);
+      assert.equal((await get()).status, 404);
+    });
   });
 
   it('requires authentication to explain a build error', async () => {

@@ -128,6 +128,8 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
             setShowRepoSwitcher(!showRepoSwitcher);
             if (!showRepoSwitcher) fetchUserRepos();
           }}
+          aria-haspopup="listbox"
+          aria-expanded={showRepoSwitcher}
           className="flex min-w-0 items-center gap-2 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 rounded-lg text-sm font-semibold text-zinc-900 transition-all active:scale-[0.98]"
         >
           <FolderTree className="w-4 h-4 text-indigo-600" />
@@ -215,6 +217,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       <button
         onClick={openSaveReview}
         disabled={saving || unsavedCount === 0}
+        aria-label={unsavedCount > 0 ? `Save All (${unsavedCount})` : 'Save All'}
         className="btn-primary h-9 flex-shrink-0 px-3 py-1.5 !bg-zinc-900 hover:!bg-zinc-800 sm:px-4"
       >
         <Save className="w-3.5 h-3.5" />
@@ -225,6 +228,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
         data-testid="build-repository-button"
         onClick={compileRepository}
         disabled={compiling}
+        aria-label={compiling ? 'Building' : 'Build Preview'}
         className="btn-primary h-9 flex-shrink-0 px-3 py-1.5 sm:px-4"
       >
         {compiling ? (
@@ -239,6 +243,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
         <button
           onClick={compileSectionById}
           disabled={compiling}
+          aria-label="Section"
           className="h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-40 disabled:cursor-not-allowed"
           title={`Rebuild only "${activeSectionXmlId}" section (faster)`}
         >
@@ -250,6 +255,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       <button
         onClick={onExportZip}
         disabled={!canExport}
+        aria-label="Export ZIP"
         className="h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
         title={canExport ? 'Download compiled output as ZIP' : 'Run a build first to enable export'}
       >
@@ -260,6 +266,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       <button
         onClick={onExportPdf}
         disabled={!canExportPdf || pdfBuilding}
+        aria-label={pdfBuilding ? 'Building PDF…' : 'Export PDF'}
         className="h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 bg-white text-zinc-500 border border-zinc-200 hover:border-zinc-300 hover:text-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed"
         title={canExportPdf ? 'Export textbook as PDF (may take a few minutes)' : 'Run a build first to enable PDF export'}
       >
@@ -273,6 +280,8 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
 
       <button
         onClick={toggleSplitView}
+        aria-label="Split View"
+        aria-pressed={splitView}
         className={`h-9 flex-shrink-0 px-3 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 ${
           splitView
             ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 shadow-sm'
@@ -289,6 +298,9 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
       <div className="relative flex-shrink-0">
         <button
           onClick={() => setProfileDropdownOpen(!profileDropdownOpen)}
+          aria-label="Account menu"
+          aria-haspopup="menu"
+          aria-expanded={profileDropdownOpen}
           className="flex items-center gap-1 p-0.5 pr-1.5 bg-zinc-100 rounded-full border border-zinc-200 hover:bg-zinc-200 transition-all active:scale-95"
         >
           {userData?.avatar_url ? (
@@ -309,7 +321,7 @@ const EditorTopBar: React.FC<EditorTopBarProps> = ({
           <div className="absolute right-0 top-full mt-2 w-56 bg-white border border-zinc-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
             <div className="p-4 border-b border-zinc-100 bg-zinc-50/50">
               <div className="font-bold text-zinc-900 text-sm">{userData?.name || userData?.login}</div>
-              <div className="text-[10px] text-zinc-500 font-medium truncate uppercase tracking-wider mt-0.5">{userData?.email || 'Authenticated Author'}</div>
+              <div className="text-xs text-zinc-500 truncate mt-0.5">{userData?.email || 'Signed in'}</div>
             </div>
             <div className="p-1">
               <button

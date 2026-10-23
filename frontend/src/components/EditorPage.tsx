@@ -17,6 +17,7 @@ import type * as Monaco from 'monaco-editor';
 import {
   GitBranch, Search, FolderTree,
   AlertCircle,
+  ClipboardCheck,
   UploadCloud,
   History,
 } from 'lucide-react';
@@ -30,6 +31,7 @@ import EditorStatusBar from './editor/EditorStatusBar';
 import EditorTabBar from './editor/EditorTabBar';
 import WorkspaceNoticeBanner from './editor/WorkspaceNoticeBanner';
 import EditorExplorerPane from './editor/EditorExplorerPane';
+import ReviewWorkflowPanel from './editor/ReviewWorkflowPanel';
 import EditorSearchPane from './editor/EditorSearchPane';
 import EditorProblemsPane, { type Diagnostic } from './editor/EditorProblemsPane';
 import BuildLogPanel from './editor/BuildLogPanel';
@@ -64,7 +66,6 @@ import {
   pushRecentFile,
   readRecentFiles,
   readReviewMarkers,
-  removeReviewMarker,
   resolvePreviewTarget,
   upsertReviewMarker,
   type RecentFileEntry,
@@ -387,7 +388,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
   // compares against it. Without it that comparison is between types with no
   // overlap, which tsc -b reports as TS2367 and treats as an error — failing
   // `npm run build`, and with it the frontend stage of docker/Dockerfile.nginx.
-  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history' | 'graph'>('explorer');
+  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'review' | 'git' | 'problems' | 'import' | 'debug' | 'extensions' | 'history' | 'graph'>('explorer');
   const [profileDropdownOpen, setProfileDropdownOpen] = useState<boolean>(false);
   const [userData, setUserData] = useState<UserData | null>(null);
   const [userRepos, setUserRepos] = useState<RepositorySearchResult[]>([]);
@@ -2095,18 +2096,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
     });
   };
 
-  const clearReviewMarker = (filePath: string = activeTab?.path || '') => {
-    if (!repo?.fullName || !filePath) return;
-
-    const nextMarkers = removeReviewMarker(repo.fullName, filePath);
-    saveReviewMarkersState(nextMarkers);
-    if (activeTab?.path === filePath) {
-      setReviewStatus('needs-review');
-      setReviewNote('');
-      setReviewCommentDraft('');
-    }
-  };
-
   const addReviewComment = () => {
     if (!repo?.fullName || !activeTab || !selectedReviewLine || !reviewCommentDraft.trim()) return;
 
@@ -2855,6 +2844,7 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                 : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
             }`}
             title="Repository Explorer"
+            aria-label="Repository Explorer"
           >
             <FolderTree className="w-5 h-5" />
           </button>
@@ -2873,8 +2863,33 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                 : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
             }`}
             title="Global Search"
+            aria-label="Global Search"
           >
             <Search className="w-5 h-5" />
+          </button>
+
+          <button
+            onClick={() => {
+              if (activityBarTab === 'review' && sidebarOpen) setSidebarOpen(false);
+              else {
+                setActivityBarTab('review');
+                setSidebarOpen(true);
+              }
+            }}
+            className={`relative p-2.5 rounded-xl transition-all active:scale-90 ${
+              activityBarTab === 'review' && sidebarOpen
+                ? 'bg-white dark:bg-zinc-800 text-indigo-600 dark:text-indigo-400 shadow-sm ring-1 ring-zinc-900/5'
+                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-800'
+            }`}
+            title="Review and comments"
+            aria-label="Review and comments"
+          >
+            <ClipboardCheck className="w-5 h-5" />
+            {reviewSummary.openThreads > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-3.5 flex items-center justify-center rounded-full bg-indigo-600 text-white text-[9px] font-bold px-0.5">
+                {reviewSummary.openThreads}
+              </span>
+            )}
           </button>
 
           <button
@@ -2971,7 +2986,6 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
             <div className="flex-1 overflow-hidden">
               {activityBarTab === 'explorer' && (
                 <EditorExplorerPane
-                  activeTab={activeTab}
                   activeTabId={activeTabId}
                   autoCompile={autoCompile}
                   compilationMode={compilationMode}
@@ -2981,38 +2995,46 @@ const EditorPage: React.FC<EditorPageProps> = ({ onLogout }) => {
                   loading={loading}
                   loadingFolders={loadingFolders}
                   recentFiles={recentFiles}
-                  reviewEntries={reviewEntries}
                   reviewMarkers={reviewMarkers}
-                  reviewNote={reviewNote}
-                  reviewStatus={reviewStatus}
-                  reviewCommentDraft={reviewCommentDraft}
-                  selectedReviewLine={selectedReviewLine}
-                  activeReviewThreads={activeReviewThreads}
-                  reviewSummary={reviewSummary}
-                  searchQuery={searchQuery}
-                  setReviewCommentDraft={setReviewCommentDraft}
-                  setReviewNote={setReviewNote}
-                  setSelectedReviewLine={setSelectedReviewLine}
-                  setReviewStatus={setReviewStatus}
-                  setSearchQuery={setSearchQuery}
+                  openReviewThreads={reviewSummary.openThreads}
+                  onOpenReview={() => setActivityBarTab('review')}
                   setAutoCompile={setAutoCompile}
                   setCompilationMode={setCompilationMode}
                   tabs={tabs}
-                  onClearReviewMarker={clearReviewMarker}
-                  onAddReviewComment={addReviewComment}
                   onOpenFile={openFileInTab}
                   onRefresh={() => {
                     if (repo) {
                       return fetchFileTree(repo).then(() => {});
                     }
                   }}
-                  onReopenReviewThread={(threadId) => updateReviewThreadState(threadId, 'open')}
-                  onResolveReviewThread={(threadId) => updateReviewThreadState(threadId, 'resolved')}
-                  onSaveReviewMarker={saveReviewMarker}
                   onToggleFolder={toggleFolder}
                 />
               )}
               
+              {activityBarTab === 'review' && (
+                <div className="h-full overflow-y-auto bg-zinc-50/50 p-3 dark:bg-zinc-950/50">
+                  <ReviewWorkflowPanel
+                    activeFilePath={activeTab?.path}
+                    reviewSummary={reviewSummary}
+                    reviewEntries={reviewEntries}
+                    reviewStatus={reviewStatus}
+                    reviewNote={reviewNote}
+                    selectedReviewLine={selectedReviewLine}
+                    reviewCommentDraft={reviewCommentDraft}
+                    activeThreads={activeReviewThreads}
+                    setReviewStatus={setReviewStatus}
+                    setReviewNote={setReviewNote}
+                    setSelectedReviewLine={setSelectedReviewLine}
+                    setReviewCommentDraft={setReviewCommentDraft}
+                    onSaveReviewMarker={saveReviewMarker}
+                    onAddReviewComment={addReviewComment}
+                    onResolveThread={(threadId) => updateReviewThreadState(threadId, 'resolved')}
+                    onReopenThread={(threadId) => updateReviewThreadState(threadId, 'open')}
+                    onOpenFile={openFileInTab}
+                  />
+                </div>
+              )}
+
               {activityBarTab === 'search' && (
                 <EditorSearchPane
                   activeTabId={activeTabId}

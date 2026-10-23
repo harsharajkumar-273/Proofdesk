@@ -83,6 +83,20 @@ class TeamSessionStore {
         nextSessions.set(session.code, session);
       }
 
+      // Merge rather than replace. A session created here is written to disk a
+      // moment later, so a reload that lands in between would otherwise throw it
+      // away and its invite code would answer "not found". Whichever copy was
+      // touched most recently wins, so changes made by another process on the
+      // same file still come through.
+      const touchedAt = (session: TeamSession): number => session.updatedAt || session.createdAt || 0;
+      for (const [code, local] of this.sessions) {
+        const stored = nextSessions.get(code);
+        if (touchedAt(local) < cutoff) continue;
+        if (!stored || touchedAt(local) > touchedAt(stored)) {
+          nextSessions.set(code, local);
+        }
+      }
+
       this.sessions = nextSessions;
       this.lastLoadedMtimeMs = stats.mtimeMs;
     } catch {

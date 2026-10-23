@@ -1,12 +1,13 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { loadEditorPage } from './utils/prefetchEditor';
 import './App.css';
 import { PRODUCT_NAME } from './utils/brand';
 import { clearSessionStorage } from './utils/workspaceStorage';
 
 const LandingPage = lazy(() => import('./components/LandingPage'));
 const RepoInputPage = lazy(() => import('./components/RepoInputPage'));
-const EditorPage = lazy(() => import('./components/EditorPage'));
+const EditorPage = lazy(loadEditorPage);
 const TermsPage = lazy(() => import('./components/TermsPage'));
 const PrivacyPage = lazy(() => import('./components/PrivacyPage'));
 const ReviewPage = lazy(() => import('./components/ReviewPage'));
@@ -24,7 +25,26 @@ const RouteLoading = () => (
   </div>
 );
 
-const INTRO_SPLASH_DURATION_MS = 2400;
+const INTRO_SPLASH_DURATION_MS = 1200;
+const INTRO_SEEN_KEY = 'proofdesk_intro_seen';
+
+/** The intro plays once per browser session, and never for people who ask for reduced motion. */
+const shouldPlayIntro = (): boolean => {
+  try {
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false;
+    return sessionStorage.getItem(INTRO_SEEN_KEY) !== '1';
+  } catch {
+    return true;
+  }
+};
+
+const markIntroSeen = () => {
+  try {
+    sessionStorage.setItem(INTRO_SEEN_KEY, '1');
+  } catch {
+    // Private mode: the intro may play again on reload, which is harmless.
+  }
+};
 
 const IntroSplash = () => (
   <div className="intro-splash">
@@ -146,14 +166,27 @@ function App() {
   useEffect(() => {
     if (isLoading) return;
     if (location.pathname !== '/' || introPlayedRef.current) return;
+    if (!shouldPlayIntro()) {
+      introPlayedRef.current = true;
+      return;
+    }
 
     setShowIntroSplash(true);
-    const timer = window.setTimeout(() => {
+    const finish = () => {
       introPlayedRef.current = true;
+      markIntroSeen();
       setShowIntroSplash(false);
-    }, INTRO_SPLASH_DURATION_MS);
+    };
+    const timer = window.setTimeout(finish, INTRO_SPLASH_DURATION_MS);
+    // Any key press or click skips it.
+    window.addEventListener('keydown', finish);
+    window.addEventListener('pointerdown', finish);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener('keydown', finish);
+      window.removeEventListener('pointerdown', finish);
+    };
   }, [isLoading, location.pathname]);
 
   const handleLogout = () => {

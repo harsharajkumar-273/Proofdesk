@@ -75,10 +75,21 @@ All pull requests are expected to include test coverage for new features or bug 
   ```bash
   npm run test --prefix backend
   ```
-* Run Playwright End-to-End sanity tests:
+* Run the Playwright end-to-end suite. It starts its own backend and frontend against the local demo repository, so it needs neither Docker nor a GitHub account. CI runs it on every pull request and attaches a report when it fails:
+  ```bash
+  npx playwright install chromium   # first time only
+  npm run test:e2e
+  ```
+* Run the Playwright cross-browser sanity tests:
   ```bash
   npx playwright test --config=playwright.sanity.config.ts
   ```
+
+---
+
+## 📄 License
+
+Proofdesk is licensed under the [MIT License](LICENSE). Contributions are accepted under the same license: by opening a pull request you agree that your contribution may be distributed under it. Don't add code you don't have the right to share, and list any third-party code you bundle in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ---
 
