@@ -238,6 +238,10 @@ describe('TeamSessionStore.load', () => {
     const noCode = { repo, createdAt: T0, updatedAt: T0 };
     await fs.writeFile(STORE_FILE, JSON.stringify([fresh, stale, noCode]), 'utf-8');
 
+    // A cold start: nothing in memory yet. (load() merges with what is in memory,
+    // and earlier tests in this file leave sessions behind in the shared store.)
+    store.sessions.clear();
+    store.lastLoadedMtimeMs = 0;
     await store.load(true);
 
     assert.ok(store.sessions.has('FRESH1'));
@@ -269,31 +273,86 @@ describe('TeamSessionStore.cleanupExpiredSessions', () => {
 });
 
 // ===========================================================================
-// 5. A bug these tests found.
+// 5. A bug these tests found, now fixed.
 //
-// Both createSession and getSession reload the whole store from disk and
-// REPLACE the in-memory map. The disk write for a new session happens a moment
-// later, so when requests overlap, sessions that were just created are
-// overwritten by an older copy from disk and silently disappear: the host gets
-// an invite code that then answers "not found".
-//
-// Run as a plain script (10 rounds of 10 simultaneous creates, then a lookup of
-// each) about 80% of the codes were lost.
-//
-// `todo` keeps the test in the suite and visible in the output, without turning
-// the whole run red until someone fixes the store. When it is fixed, delete the
-// `todo` option and it becomes a regular regression test.
+// Both createSession and getSession reload the whole store from disk. They used
+// to REPLACE the in-memory map, and the disk write for a new session happens a
+// moment later, so when requests overlapped, sessions that were just created
+// were overwritten by an older copy from disk and silently disappeared: the
+// host got an invite code that then answered "not found". Run as a plain script
+// (10 rounds of 10 simultaneous creates, then a lookup of each), about 80% of
+// the codes were lost. Reloading now merges, keeping the newer copy of each.
 // ===========================================================================
 describe('TeamSessionStore under concurrent use', () => {
-  it(
-    'does not lose sessions that are created at the same time',
-    { todo: 'known bug: concurrent createSession/getSession overwrite each other' },
-    async () => {
+  afterEach(() => mock.timers.reset());
+
+  it('does not lose sessions that are created at the same time', async () => {
+    const created = await Promise.all(
+      Array.from({ length: 10 }, () => store.createSession({ repo, createdBy: host })),
+    );
+    const found = await Promise.all(created.map((session) => store.getSession(session.code)));
+    assert.equal(found.filter(Boolean).length, 10);
+  });
+
+  it('does not lose them across many rounds of overlapping creates and lookups', async () => {
+    const codes = [];
+    for (let round = 0; round < 10; round += 1) {
       const created = await Promise.all(
         Array.from({ length: 10 }, () => store.createSession({ repo, createdBy: host })),
       );
-      const found = await Promise.all(created.map((session) => store.getSession(session.code)));
-      assert.equal(found.filter(Boolean).length, 10);
-    },
-  );
+      codes.push(...created.map((session) => session.code));
+      // Lookups overlapping the next round's creates is what used to lose them.
+      await Promise.all(created.map((session) => store.getSession(session.code)));
+    }
+    const found = await Promise.all(codes.map((code) => store.getSession(code)));
+    assert.equal(found.filter(Boolean).length, codes.length);
+  });
+
+  it('keeps every session on disk too, so a restart would still find them', async () => {
+    const created = await Promise.all(
+      Array.from({ length: 5 }, () => store.createSession({ repo, createdBy: host })),
+    );
+    await waitFor(async () => {
+      const stored = await readStoredCodes();
+      return created.every((session) => stored.includes(session.code));
+    });
+  });
+
+  it('still picks up a session another process wrote to the shared file', async () => {
+    const mine = await store.createSession({ repo, createdBy: host });
+    await waitFor(async () => (await readStoredCodes()).includes(mine.code));
+
+    const theirs = { ...mine, code: 'ZZZZZZ', hostLogin: 'grace', createdAt: Date.now(), updatedAt: Date.now() };
+    const stored = JSON.parse(await fs.readFile(STORE_FILE, 'utf-8'));
+    await fs.writeFile(STORE_FILE, JSON.stringify([...stored, theirs]), 'utf-8');
+
+    assert.equal((await store.getSession('ZZZZZZ'))?.hostLogin, 'grace');
+    assert.ok(await store.getSession(mine.code), 'a reload must not drop what this process created');
+  });
+
+  it('prefers whichever copy of a session was touched most recently', async () => {
+    freezeTime();
+    const session = await store.createSession({ repo, createdBy: host });
+    await waitFor(async () => (await readStoredCodes()).includes(session.code));
+
+    // Another process touched it later than this one did.
+    mock.timers.setTime(T0 + 1000);
+    const stored = JSON.parse(await fs.readFile(STORE_FILE, 'utf-8'));
+    await fs.writeFile(
+      STORE_FILE,
+      JSON.stringify(stored.map((entry) => (entry.code === session.code ? { ...entry, hostName: 'Renamed', updatedAt: T0 + 1000 } : entry))),
+      'utf-8',
+    );
+    assert.equal((await store.getSession(session.code))?.hostName, 'Renamed');
+  });
+
+  it('does not bring back a session that has already expired', async () => {
+    freezeTime();
+    const old = await store.createSession({ repo, createdBy: host });
+    mock.timers.setTime(T0 + RETENTION_MS + 1);
+    store.cleanupExpiredSessions();
+    await store.load(true);
+    assert.equal(store.sessions.has(old.code), false);
+    assert.equal(await store.getSession(old.code), null);
+  });
 });
