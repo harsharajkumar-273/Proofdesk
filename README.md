@@ -13,7 +13,7 @@ A collaborative web editor for PreTeXt textbooks. Authors edit together in a Mon
 | **Browser preview** | 358 ms median (avg 957 ms, p95 3,382 ms) for the in-browser XML-to-HTML preview, 5 local runs |
 | **Server build** | 2,914 ms median for a Docker HTML preview build, 5 local runs |
 | **Collaboration** | 0.29 ms median (avg 0.43 ms, p95 1.19 ms) one-way Y.js sync over localhost, 30/30 rounds |
-| **Tests** | Frontend (Vitest), backend (node:test), and Playwright end-to-end suites; CI on pushes to `main` and on pull requests |
+| **Tests** | Frontend (Vitest), backend (node:test), and Playwright end-to-end suites, all run by CI on pushes to `main` and on pull requests |
 | **Built by** | Started for the Vanderbilt Mathematics Department; now maintained in the open with contributors (see [Credits](#credits)) |
 
 The two preview paths use different inputs and caching, so their numbers aren't a like-for-like speed comparison. They answer different questions: how fast an author sees a rough preview, and how long a full server build takes.

@@ -16,6 +16,10 @@ const frontendCommand = hasLiveGitHubEnv
 export default defineConfig({
   testDir: './tests/e2e',
   timeout: 45_000,
+  // One retry in CI absorbs a flaky browser start without hiding a real failure.
+  retries: process.env.CI ? 1 : 0,
+  forbidOnly: Boolean(process.env.CI),
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   testIgnore: hasLiveGitHubEnv
     ? ['tests/e2e/local-demo.spec.ts', ...sharedIgnoredSpecs]
     : ['tests/e2e/github-live.spec.ts', ...sharedIgnoredSpecs],

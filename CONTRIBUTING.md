@@ -75,7 +75,12 @@ All pull requests are expected to include test coverage for new features or bug 
   ```bash
   npm run test --prefix backend
   ```
-* Run Playwright End-to-End sanity tests:
+* Run the Playwright end-to-end suite. It starts its own backend and frontend against the local demo repository, so it needs neither Docker nor a GitHub account. CI runs it on every pull request and attaches a report when it fails:
+  ```bash
+  npx playwright install chromium   # first time only
+  npm run test:e2e
+  ```
+* Run the Playwright cross-browser sanity tests:
   ```bash
   npx playwright test --config=playwright.sanity.config.ts
   ```

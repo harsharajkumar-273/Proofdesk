@@ -60,3 +60,51 @@ jobs:
 
       - name: Build frontend
         run: npm run build --prefix frontend
+
+  # Drives the real editor in Chromium against the local demo repository: the
+  # failed-build explanation flow, the editor layout, and the demo workspace.
+  # None of it needs Docker or GitHub; Pyodide is stubbed by the tests.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PROOFDESK_SESSION_SECRET: ci-session-secret
+      PROOFDESK_DATA_DIR: ./.tmp/proofdesk-e2e
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Prepare the database
+        working-directory: backend
+        run: |
+          npx prisma generate
+          npx prisma db push
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        run: npx playwright test
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
