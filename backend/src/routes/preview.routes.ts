@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import fs from 'fs/promises';
 import path from 'path';
 import buildExecutor from '../services/buildExecutor.js';
+import { canAccessBuildSession } from '../middleware/auth.js';
 import { ensurePreviewBundle } from '../services/previewBundleService.js';
 import { injectLatestPreTeXtLayoutFix } from '../services/previewTransformService.js';
 import { getProofdeskDataPath } from '../utils/dataPaths.js';
@@ -145,7 +146,11 @@ export const createPreviewRouter = (): Router => {
       return res.status(404).send('Session not found');
     }
 
-    if (buildSession.creatorLogin && buildSession.creatorLogin !== login) {
+    // Same rule as every other session route: the creator's login, or the very
+    // token that started the session. A session with no recorded owner and no
+    // matching token used to be open to every signed-in user, which meant one
+    // account could read another's compiled output by knowing the id.
+    if (!canAccessBuildSession(buildSession, { authSession: session, accessToken: session?.accessToken })) {
       return res.status(403).send('Access denied');
     }
 

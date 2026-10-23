@@ -104,7 +104,7 @@ const tokensMatch = (expected: unknown, actual: unknown): boolean => {
  */
 export const canAccessBuildSession = (
   session: { creatorLogin?: string | null; token?: string | null },
-  req: Request,
+  req: Pick<Request, 'authSession' | 'accessToken'>,
 ): boolean => {
   const login = req.authSession?.user?.login;
   if (session.creatorLogin && login && session.creatorLogin === login) return true;
