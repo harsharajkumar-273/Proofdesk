@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { editor } from 'monaco-editor';
 import type * as Monaco from 'monaco-editor';
 import {
@@ -7,8 +7,10 @@ import {
   Check,
   Download,
   Eye,
+  FileText,
   LayoutGrid,
   Link,
+  MoreHorizontal,
   Package,
   RefreshCw,
   SplitSquareHorizontal,
@@ -54,6 +56,52 @@ interface PreviewPaneProps {
   onChangeCompilerRuntime?: (runtime: 'docker' | 'wasm') => void;
 }
 
+/** An icon-only toolbar button. The label doubles as tooltip and accessible name. */
+const ToolbarButton: React.FC<{
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+  /** Marks a button that opens a menu. */
+  haspopup?: boolean;
+  children: React.ReactNode;
+}> = ({ label, onClick, disabled, pressed, haspopup, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    title={label}
+    aria-label={label}
+    aria-pressed={haspopup ? undefined : pressed}
+    aria-haspopup={haspopup ? 'menu' : undefined}
+    aria-expanded={haspopup ? Boolean(pressed) : undefined}
+    className={`rounded p-1.5 transition-colors disabled:opacity-50 ${
+      pressed ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+    }`}
+  >
+    {children}
+  </button>
+);
+
+/** One row of the toolbar's "More" menu: an icon and a readable label. */
+const MenuItem: React.FC<{
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+}> = ({ icon, label, onClick, disabled }) => (
+  <button
+    type="button"
+    role="menuitem"
+    onClick={onClick}
+    disabled={disabled}
+    className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs text-gray-200 hover:bg-gray-700 disabled:opacity-50"
+  >
+    <span className="flex-shrink-0 text-gray-400" aria-hidden="true">{icon}</span>
+    {label}
+  </button>
+);
+
 const PreviewPane: React.FC<PreviewPaneProps> = ({
   compilationMode,
   activeTab,
@@ -88,6 +136,25 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
 }) => {
   const [shareState, setShareState] = useState<'idle' | 'loading' | 'copied'>('idle');
   const [reviewLinkCopied, setReviewLinkCopied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // The "More" menu closes on an outside click or Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [menuOpen]);
 
   const handleDownloadZip = useCallback(() => {
     if (!sessionId) return;
@@ -126,20 +193,40 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
     }
   }, [sessionId, apiUrl, previewUrl, shareState]);
 
+  // Monaco stays mounted even with no file open (its instance is wired into
+  // collaboration and markers), so the empty state is laid over it.
   const renderEditor = () => (
-    <MonacoEditor
-      height="100%"
-      language={activeTab?.language || 'plaintext'}
-      value={activeTab?.content}
-      onChange={onEditorChange}
-      onMount={onEditorDidMount}
-      theme="handshake-light"
-      options={{
-        minimap: { enabled: true },
-        fontSize: 14,
-        wordWrap: 'on',
-      }}
-    />
+    <div className="relative h-full">
+      <MonacoEditor
+        height="100%"
+        language={activeTab?.language || 'plaintext'}
+        value={activeTab?.content}
+        onChange={onEditorChange}
+        onMount={onEditorDidMount}
+        theme="handshake-light"
+        options={{
+          minimap: { enabled: true },
+          fontSize: 14,
+          wordWrap: 'on',
+          renderLineHighlight: 'gutter',
+        }}
+      />
+      {!activeTab && (
+        <div
+          className="absolute inset-0 z-10 flex items-center justify-center bg-white p-6 dark:bg-zinc-950"
+          data-testid="editor-empty-state"
+        >
+          <div className="max-w-xs text-center">
+            <FileText className="mx-auto mb-3 h-10 w-10 text-zinc-300" aria-hidden="true" />
+            <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">No file open</p>
+            <p className="mt-1 text-xs leading-relaxed text-zinc-500">
+              Choose a file from the explorer to start editing. The preview updates as you type.
+              Press <kbd className="rounded border border-zinc-200 bg-zinc-50 px-1 py-0.5 font-mono text-[10px]">Ctrl/⌘ K</kbd> to find a file or command.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   const baseSnapshot = previewHistory.find((snapshot) => snapshot.snapshotId === previewBaseSnapshotId) || null;
@@ -147,7 +234,12 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
     ? `${apiUrl}/build/preview-history/${encodeURIComponent(sessionId)}/${encodeURIComponent(baseSnapshot.snapshotId)}?entryFile=${encodeURIComponent(baseSnapshot.entryFile)}`
     : null;
 
-  if (compilationMode === 'file' || !splitView) {
+  // Opening a file switches to "file" mode, but a draft preview (PreTeXt, XML
+  // and HTML render in the browser as you type) is still worth showing beside
+  // the editor. Other file types have no draft, so the editor takes the width.
+  const showPreview = splitView && (compilationMode === 'repository' || Boolean(srcDocContent));
+
+  if (!showPreview) {
     return (
       <div className="flex-1">
         <React.Suspense fallback={<div className="flex h-full items-center justify-center bg-gray-900 text-sm text-gray-400">Loading editor…</div>}>
@@ -177,30 +269,24 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
 
       <div className="editor-preview-surface overflow-hidden bg-gray-900" style={{ width: `${100 - editorWidth}%` }}>
         <div className="flex h-full flex-col">
-          <div className="editor-preview-toolbar flex h-8 flex-shrink-0 items-center justify-between border-b border-gray-700 bg-gray-800 px-3">
-            <div className="flex items-center space-x-2">
-              <Eye className="h-4 w-4 text-gray-400" />
+          <div className="editor-preview-toolbar flex h-10 flex-shrink-0 items-center justify-between gap-2 border-b border-gray-700 bg-gray-800 px-3">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+              <Eye className="h-4 w-4 flex-shrink-0 text-gray-400" aria-hidden="true" />
               <span className="text-sm font-medium text-gray-300">Preview</span>
-              {compilerRuntime === 'wasm' && (
-                <span className="flex items-center gap-1 rounded-full bg-indigo-950/60 border border-indigo-700 px-2 py-0.5 text-[10px] font-bold text-indigo-300">
-                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                  WASM Active
-                </span>
-              )}
               {srcDocContent && (
-                <span className="flex items-center gap-1 rounded-full bg-green-900 px-2 py-0.5 text-xs text-green-300">
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-green-400" />
+                <span className="flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-green-900 px-2 py-0.5 text-[10px] font-semibold text-green-300">
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" />
                   Draft
                 </span>
               )}
               {compiling && (
-                <div className="flex items-center text-xs text-blue-400">
-                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
-                  {srcDocContent ? 'Syncing compiled preview…' : 'Building...'}
+                <div className="flex flex-shrink-0 items-center whitespace-nowrap text-xs text-blue-400" role="status">
+                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" aria-hidden="true" />
+                  {srcDocContent ? 'Syncing…' : 'Building…'}
                 </div>
               )}
               {collaborationEnabled && collaborators.length > 0 && (
-                <div className="ml-1 flex items-center space-x-1">
+                <div className="ml-1 flex flex-shrink-0 items-center space-x-1">
                   {collaborators.slice(0, 4).map((participant) => (
                     <div
                       key={participant.clientId}
@@ -214,94 +300,85 @@ const PreviewPane: React.FC<PreviewPaneProps> = ({
                 </div>
               )}
               {collaborationEnabled && collaborationStatus && (
-                <span className="rounded-full bg-cyan-900 px-2 py-0.5 text-xs text-cyan-300">
+                <span className="flex-shrink-0 whitespace-nowrap rounded-full bg-cyan-900 px-2 py-0.5 text-xs text-cyan-300">
                   {collaborationStatus}
                 </span>
               )}
             </div>
-            <div className="flex items-center space-x-2">
-              <button
+            <div className="flex flex-shrink-0 items-center gap-0.5">
+              <ToolbarButton
+                label="Open the preview page for this file"
                 onClick={() => void jumpToRelatedPreview()}
-                className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
-                title="Open the preview page that best matches the active source file"
               >
-                <ArrowUpRight className="h-3 w-3" />
-                <span className="hidden sm:inline">Related Page</span>
-              </button>
-              {previewHistory.length > 1 && previewUrl && (
-                <button
-                  onClick={onTogglePreviewDiff}
-                  className={`inline-flex items-center gap-1 rounded px-2 py-1 text-xs ${
-                    previewDiffEnabled ? 'bg-indigo-600 text-white hover:bg-indigo-500' : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`}
-                  title="Compare the current preview with an earlier compiled snapshot"
-                >
-                  <SplitSquareHorizontal className="h-3 w-3" />
-                  <span className="hidden sm:inline">Diff</span>
-                </button>
-              )}
-              {sessionId && (previewUrl || compiledOutput) && (
-                <>
-                  <button
-                    onClick={() => void handleCopyReviewLink()}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
-                    title="Copy reviewer link — fullscreen read-only view, no login needed"
+                <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+              </ToolbarButton>
+              <select
+                value={compilerRuntime}
+                onChange={(e) => onChangeCompilerRuntime?.(e.target.value as 'docker' | 'wasm')}
+                aria-label="Preview engine"
+                className="mx-1 max-w-[6.5rem] cursor-pointer rounded-md border border-gray-700 bg-gray-900 px-1.5 py-1 text-[11px] font-medium text-gray-300 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                title="WASM Sandbox renders in your browser; Cloud Docker builds on the server"
+              >
+                <option value="wasm" className="bg-gray-800 text-gray-200">In browser</option>
+                <option value="docker" className="bg-gray-800 text-gray-200">On server</option>
+              </select>
+              <ToolbarButton label="Rebuild preview" onClick={compileRepository}>
+                <RefreshCw className={`h-4 w-4 ${compiling ? 'animate-spin' : ''}`} aria-hidden="true" />
+              </ToolbarButton>
+              <div className="relative" ref={menuRef}>
+                <ToolbarButton label="More preview actions" pressed={menuOpen} onClick={() => setMenuOpen((open) => !open)} haspopup>
+                  <MoreHorizontal className="h-4 w-4" aria-hidden="true" />
+                </ToolbarButton>
+                {menuOpen && (
+                  <div
+                    role="menu"
+                    aria-label="Preview actions"
+                    className="absolute right-0 top-full z-30 mt-1 w-64 overflow-hidden rounded-lg border border-gray-700 bg-gray-800 py-1 shadow-xl"
                   >
-                    {reviewLinkCopied ? (
-                      <><Check className="h-3 w-3 text-green-400" /><span className="hidden text-green-400 sm:inline">Copied!</span></>
-                    ) : (
-                      <><BookOpen className="h-3 w-3" /><span className="hidden sm:inline">Review link</span></>
+                    {previewHistory.length > 1 && previewUrl && (
+                      <MenuItem
+                        icon={<SplitSquareHorizontal className="h-4 w-4" />}
+                        label={previewDiffEnabled ? 'Stop comparing with an earlier build' : 'Compare with an earlier build'}
+                        onClick={() => {
+                          onTogglePreviewDiff();
+                          setMenuOpen(false);
+                        }}
+                      />
                     )}
-                  </button>
-                  <button
-                    onClick={() => void handleSharePreview()}
-                    disabled={shareState === 'loading'}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white disabled:opacity-50"
-                    title="Copy shareable link (valid 7 days, no login needed)"
-                  >
-                    {shareState === 'copied' ? (
-                      <><Check className="h-3 w-3 text-green-400" /><span className="hidden text-green-400 sm:inline">Copied!</span></>
-                    ) : (
-                      <><Link className="h-3 w-3" /><span className="hidden sm:inline">Share</span></>
+                    {sessionId && (previewUrl || compiledOutput) && (
+                      <>
+                        <MenuItem
+                          icon={reviewLinkCopied ? <Check className="h-4 w-4 text-green-400" /> : <BookOpen className="h-4 w-4" />}
+                          label={reviewLinkCopied ? 'Review link copied' : 'Copy review link (read-only, no login)'}
+                          onClick={() => void handleCopyReviewLink()}
+                        />
+                        <MenuItem
+                          icon={shareState === 'copied' ? <Check className="h-4 w-4 text-green-400" /> : <Link className="h-4 w-4" />}
+                          label={shareState === 'copied' ? 'Share link copied' : 'Copy share link (valid 7 days)'}
+                          disabled={shareState === 'loading'}
+                          onClick={() => void handleSharePreview()}
+                        />
+                        <MenuItem
+                          icon={<Download className="h-4 w-4" />}
+                          label="Download the built site as a ZIP"
+                          onClick={() => {
+                            handleDownloadZip();
+                            setMenuOpen(false);
+                          }}
+                        />
+                      </>
                     )}
-                  </button>
-                  <button
-                    onClick={handleDownloadZip}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white"
-                    title="Download compiled output as ZIP"
-                  >
-                    <Download className="h-3 w-3" />
-                    <span className="hidden sm:inline">Export ZIP</span>
-                  </button>
-                </>
-              )}
-              <div className="flex items-center space-x-1 border border-gray-700 rounded-md bg-gray-900 px-1.5 py-0.5 mr-1">
-                <span className="text-[10px] text-gray-400 font-semibold px-0.5">Engine:</span>
-                <select
-                  value={compilerRuntime}
-                  onChange={(e) => onChangeCompilerRuntime?.(e.target.value as 'docker' | 'wasm')}
-                  className="bg-transparent text-[11px] text-gray-300 font-bold focus:outline-none cursor-pointer"
-                  title="WASM Sandbox compiles locally in browser; Docker compiles remotely via server sandbox containers"
-                >
-                  <option value="wasm" className="bg-gray-800 text-gray-200">WASM Sandbox</option>
-                  <option value="docker" className="bg-gray-800 text-gray-200">Cloud Docker</option>
-                </select>
+                    <MenuItem
+                      icon={<LayoutGrid className="h-4 w-4" />}
+                      label="Reset the split to 50/50"
+                      onClick={() => {
+                        setEditorWidth(50);
+                        setMenuOpen(false);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
-              <button
-                onClick={compileRepository}
-                className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
-                title="Rebuild"
-                aria-label="Rebuild preview"
-              >
-                <RefreshCw className={`h-4 w-4 ${compiling ? 'animate-spin' : ''}`} />
-              </button>
-              <button
-                onClick={() => setEditorWidth(50)}
-                className="rounded p-1 text-gray-400 hover:bg-gray-700 hover:text-white"
-                title="Reset split"
-              >
-                <LayoutGrid className="h-4 w-4" />
-              </button>
             </div>
           </div>
 

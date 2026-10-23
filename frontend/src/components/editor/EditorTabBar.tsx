@@ -36,7 +36,7 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
               key={tab.id}
               data-tab-path={tab.path}
               data-active={isActive}
-              className={`group relative flex items-center gap-2 px-3 h-full min-w-[120px] max-w-[240px] text-[11px] font-bold uppercase tracking-wider cursor-pointer transition-all border-x border-transparent ${
+              className={`group relative flex items-center gap-2 px-3 h-full min-w-[120px] max-w-[240px] text-xs font-semibold cursor-pointer transition-all border-x border-transparent ${
                 isActive
                   ? 'bg-white dark:bg-zinc-900 text-indigo-600 dark:text-indigo-400 border-x-zinc-200 dark:border-x-zinc-800 rounded-t-lg shadow-[0_-2px_0_inset_#6366f1]'
                   : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-900/50'
@@ -55,6 +55,7 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
                     event.stopPropagation();
                     closeTab(tab.id);
                   }}
+                  aria-label={`Close ${tab.name}`}
                   className={`p-1 rounded-md transition-all ${
                     isActive 
                     ? 'hover:bg-zinc-100 dark:hover:bg-zinc-800 opacity-100' 
@@ -68,9 +69,9 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
           );
         })
       ) : (
-        <div className="flex items-center gap-2 px-4 text-[10px] font-bold text-zinc-400 uppercase tracking-widest italic opacity-60">
+        <div className="flex items-center gap-2 px-4 text-xs text-zinc-400">
           <MousePointer2 className="w-3 h-3" />
-          <span>No Workspace Files Active</span>
+          <span>No files open</span>
         </div>
       )}
     </div>
@@ -88,15 +89,15 @@ const EditorTabBar: React.FC<EditorTabBarProps> = ({
                 onClick={() => {
                   if (activeTabId) closeOtherTabs(activeTabId);
                 }}
-                className="w-full text-left px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[10px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider rounded-md transition-colors"
+                className="w-full text-left px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs font-medium text-zinc-600 dark:text-zinc-400 rounded-md transition-colors"
               >
-                Close Others
+                Close others
               </button>
               <button
                 onClick={closeAllTabs}
-                className="w-full text-left px-3 py-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-[10px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider rounded-md transition-colors"
+                className="w-full text-left px-3 py-2 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-xs font-medium text-rose-600 dark:text-rose-400 rounded-md transition-colors"
               >
-                Close All Tabs
+                Close all tabs
               </button>
             </div>
           </div>

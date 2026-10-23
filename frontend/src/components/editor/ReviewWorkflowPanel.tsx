@@ -140,16 +140,18 @@ const ReviewWorkflowPanel: React.FC<ReviewWorkflowPanelProps> = ({
         <input
           type="number"
           min={1}
+          aria-label="Line number"
           value={selectedReviewLine ?? ''}
           onChange={(event) => setSelectedReviewLine(Number(event.target.value || 1))}
-          className="w-24 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+          className="w-20 shrink-0 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
         />
         <input
           type="text"
           value={reviewCommentDraft}
           onChange={(event) => setReviewCommentDraft(event.target.value)}
-          placeholder={activeFilePath ? 'Add a reviewer comment…' : 'Open a file to comment'}
-          className="flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
+          aria-label="Comment"
+          placeholder={activeFilePath ? 'Add a comment…' : 'Open a file to comment'}
+          className="min-w-0 flex-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
         />
       </div>
 

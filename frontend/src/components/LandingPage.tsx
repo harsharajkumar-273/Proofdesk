@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { isLocalTestModeEnabled } from '../utils/localTestMode';
 import { PRODUCT_NAME } from '../utils/brand';
+import { prefetchEditor } from '../utils/prefetchEditor';
 
 interface LandingPageProps {
   hasWorkspaceAccess: boolean;
@@ -82,6 +83,11 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
   const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
   const showLocalTestAccess = isLocalTestModeEnabled();
 
+  // A signed-in visitor is one click from the editor: start fetching it now.
+  useEffect(() => {
+    if (hasWorkspaceAccess) prefetchEditor();
+  }, [hasWorkspaceAccess]);
+
   const handleStartDemo = () => {
     sessionStorage.setItem('standaloneDemo', 'true');
     sessionStorage.setItem('selectedRepo', JSON.stringify({
@@ -108,6 +114,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
           <div className="flex items-center gap-3">
             <button
               onClick={handleStartDemo}
+              onMouseEnter={prefetchEditor}
+              onFocus={prefetchEditor}
               className="hidden items-center gap-1.5 px-4 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-semibold hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors sm:flex"
             >
               <Play className="w-3.5 h-3.5" /> Try Demo
@@ -121,12 +129,6 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
               </Link>
             ) : (
               <>
-                <a
-                  href={`${backendUrl}/auth/github`}
-                  className="hidden sm:flex items-center gap-2 px-4 py-1.5 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-sm font-semibold hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
-                >
-                  <Github className="w-3.5 h-3.5" /> GitHub
-                </a>
                 <a
                   href={`${backendUrl}/auth/github`}
                   className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 transition-colors"
@@ -188,6 +190,8 @@ const LandingPage: React.FC<LandingPageProps> = ({ hasWorkspaceAccess, entryNoti
                   </a>
                   <button
                     onClick={handleStartDemo}
+                    onMouseEnter={prefetchEditor}
+                    onFocus={prefetchEditor}
                     className="flex items-center gap-2 px-6 py-3 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-semibold text-base hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all active:scale-[0.98]"
                   >
                     <Play className="w-4 h-4" /> Try Demo
