@@ -1,14 +1,14 @@
 # Third-party notices
 
-Proofdesk's own source code is licensed under the Apache License 2.0 (see
-[`LICENSE`](LICENSE) and [`NOTICE`](NOTICE)). That grant does **not** cover the
-third-party material below, which keeps the license of its authors.
+Proofdesk's own source code is licensed under the MIT License (see
+[`LICENSE`](LICENSE)). That grant does **not** cover the third-party material
+below, which keeps the license of its authors.
 
 ## Bundled in this repository: `backend/assets/ila-toolchain/`
 
 This directory is the build toolchain for the *Interactive Linear Algebra*
 textbook (Georgia Tech), copied into the repository so the local demo can run
-without network access. **None of it is covered by Proofdesk's Apache-2.0 grant.**
+without network access. **None of it is covered by Proofdesk's MIT license.**
 
 ### Components that state their license
 
@@ -17,14 +17,14 @@ without network access. **None of it is covered by Proofdesk's Apache-2.0 grant.
 | MathBox, ShaderGraph, Threestrap (Steven Wittens and contributors) | `mathbox/`, `mathbox/vendor/shadergraph/`, `mathbox/vendor/threestrap/` | MIT (`LICENSE.md` in each) |
 | three.js r71 | `mathbox/vendor/three.min.js` | MIT (see threejs.org/license) |
 | Bootstrap 3.1.1 | `demos/vendor/bootstrap*` | MIT (stated in the file header) |
-| dat.gui (Google Data Arts Team) | `demos/vendor/dat.gui*` | Apache-2.0 (stated in the file header) |
+| dat.gui (Google Data Arts Team) | `demos/vendor/dat.gui*` | Apache-2.0 (stated in the file header; keep that header if you redistribute the file) |
 | plotly.js 1.32.0 | `demos/vendor/plotly.js` | MIT (stated in the file header) |
 | screenfull 5.0.0 | `demos/vendor/screenfull.js` | MIT (stated in the file header) |
 
 ### Material whose license is not stated in this repository
 
 These files carry no license text here. Their upstream licenses should be
-confirmed before anyone relies on them being reusable.
+confirmed before anyone relies on them being reusable under the MIT license or any other.
 
 - **ILA textbook tooling**: the `demos/*.mako` pages, `demos/SConscript`,
   `demos/css/`, `static/css/`, and `static/js/Mathbook.js` ("GT Mathbook",

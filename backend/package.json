@@ -2,7 +2,7 @@
   "name": "mra-backend",
   "version": "1.0.0",
   "description": "Backend for Modern Repository Analyzer",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "type": "module",
   "main": "src/server.ts",
   "scripts": {

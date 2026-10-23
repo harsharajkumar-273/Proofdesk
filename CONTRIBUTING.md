@@ -89,7 +89,7 @@ All pull requests are expected to include test coverage for new features or bug 
 
 ## 📄 License
 
-Proofdesk is licensed under the [Apache License 2.0](LICENSE). By submitting a contribution you agree that it is licensed under the same terms (section 5 of the license). Don't add code you don't have the right to share, and list any third-party code you bundle in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+Proofdesk is licensed under the [MIT License](LICENSE). Contributions are accepted under the same license: by opening a pull request you agree that your contribution may be distributed under it. Don't add code you don't have the right to share, and list any third-party code you bundle in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 ---
 

@@ -112,6 +112,6 @@ See the [merged pull requests](https://github.com/harsharajkumar-273/Proofdesk/p
 
 ## License
 
-Proofdesk's own code is licensed under the [Apache License 2.0](LICENSE). Copyright 2026 The Proofdesk Authors; see [`NOTICE`](NOTICE).
+Proofdesk's own code is licensed under the [MIT License](LICENSE). Copyright (c) 2026 The Proofdesk Authors.
 
 Third-party material bundled in the repository keeps its own license and is **not** covered by that grant. In particular, `backend/assets/ila-toolchain/` is the Georgia Tech *Interactive Linear Algebra* build toolchain, whose license for parts of it still needs confirming with its authors. See [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
