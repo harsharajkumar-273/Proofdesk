@@ -10,13 +10,13 @@ A collaborative web editor for PreTeXt textbooks. Authors edit together in a Mon
 
 | | |
 |---|---|
-| **Browser preview** | 358 ms median (avg 957 ms, p95 3,382 ms) for the in-browser XML-to-HTML preview, 5 local runs |
-| **Server build** | 2,914 ms median for a Docker HTML preview build, 5 local runs |
+| **Browser preview** | Warm preview: 383 ms median / 505 ms p95 over 50 sandbox runs; excludes the first Pyodide download. See the detailed benchmark report. |
+| **Server build** | First container build: 15.4 s median; repeated build in a running container: 7.0 s median. Recorded in a cloud sandbox, 50 runs per condition. |
 | **Collaboration** | 0.29 ms median (avg 0.43 ms, p95 1.19 ms) one-way Y.js sync over localhost, 30/30 rounds |
 | **Tests** | Frontend (Vitest), backend (node:test), and Playwright end-to-end suites, all run by CI on pushes to `main` and on pull requests |
 | **Built by** | Started for the Vanderbilt Mathematics Department; now maintained in the open with contributors (see [Credits](#credits)) |
 
-The two preview paths use different inputs and caching, so their numbers aren't a like-for-like speed comparison. They answer different questions: how fast an author sees a rough preview, and how long a full server build takes.
+Browser previews and full server builds produce different outputs; their latencies are not a like-for-like compiler speedup. The recorded timings are sandbox measurements, not production capacity or author productivity claims. [Detailed methods, raw results, and limitations](benchmarks/docker_pipeline/README.md).
 
 ---
 
@@ -47,23 +47,21 @@ More detail: [`ARCHITECTURE.md`](ARCHITECTURE.md), [`docs/system-design.md`](doc
 
 ## Benchmarks
 
-Both are committed and runnable. See [`benchmarks/README.md`](benchmarks/README.md).
+The [Docker pipeline report](benchmarks/docker_pipeline/README.md) separates container builds, the backend API path, and browser previews, with committed raw results. Measurements were recorded against commit `0346b51e` in a 4-vCPU, 16-GB cloud sandbox; they do not establish current production latency. Each condition below has 50 runs.
 
-```bash
-# Browser preview vs. server build (drives the real editor UI, 5 builds per path)
-npx playwright test -c playwright.benchmark.config.ts
+| Path / condition | Median | p95 |
+|---|---|---|
+| First container build of a session | 15,364 ms | 15,883 ms |
+| Repeated build, running container, unchanged content | 6,992 ms | 7,299 ms |
+| Browser preview, warm | 383 ms | 505 ms |
+| First browser preview, Pyodide pre-warmed | 611 ms | 1,075 ms |
+| First browser preview, not pre-warmed | 2,474 ms | 2,942 ms |
 
-# Y.js sync latency over the authenticated collab WebSocket (30 rounds)
-node benchmarks/crdt_sync_latency.mjs
-```
+Browser measurements served Pyodide locally and exclude its initial download. The browser renderer supports a subset of PreTeXt and does not produce the full publishable site.
 
-| Path | Avg | p50 | p95 | Samples |
-|---|---|---|---|---|
-| In-browser XML preview (Pyodide) | 957 ms | 358 ms | 3,382 ms | 5 |
-| Server Docker HTML preview build | 2,909 ms | 2,914 ms | 2,925 ms | 5 |
-| Y.js one-way sync | 0.43 ms | 0.29 ms | 1.19 ms | 30 |
+**Correction to the earlier table:** the old 2,914 ms "Docker build" result measured a local-demo editor update dominated by debounce, not a Docker container build. The older five-run browser sample is retained in benchmark history; the table above uses the larger, explicitly scoped run.
 
-All runs were on localhost with small samples, so treat the browser preview's wide spread (358 ms median, 3.4 s p95) as unexplained until it's measured with more runs.
+The professor's before/after editing-to-publication workflow has not been measured. No author-efficiency percentage is claimed. The existing compile and WebSocket benchmark scripts are documented in [benchmarks/README.md](benchmarks/README.md); run conditions must be recorded when comparing results.
 
 ---
 
@@ -96,7 +94,7 @@ npm run test:e2e    # Playwright end-to-end tests
 
 - The in-browser preview handles a subset of PreTeXt. Anything it doesn't support needs a server build.
 - Build containers have memory and process limits but no read-only root filesystem or non-root user yet.
-- Benchmarks are small local samples (5 builds per path), not production measurements.
+- Reported benchmarks use a controlled cloud sandbox and limited content; they do not establish production performance or measured author productivity.
 
 ---
 
