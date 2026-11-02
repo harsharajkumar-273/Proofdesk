@@ -1760,10 +1760,17 @@ class BuildExecutor {
       return this._buildAndFinishLog(sessionId);
     }
 
-    // Invalidate the build cache for this repo since content changed
+    // The cached build for this commit stays valid for every other session:
+    // they work on copies of it, and hasLocalEdits below keeps this session's
+    // output from being cached in its place. The one exception is when this
+    // session's own directories are what the cache entry points at, because the
+    // write above has just changed them.
     const repoKey = `${session.owner}/${session.repo}`;
-    this.buildCache.delete(repoKey);
-    await this._saveCache();
+    const cached = this.buildCache.get(repoKey);
+    if (cached && path.resolve(path.dirname(cached.repoPath)) === path.resolve(path.dirname(session.repoPath))) {
+      this.buildCache.delete(repoKey);
+      await this._saveCache();
+    }
 
     // Mark this session as a fresh build (not cached), diverged from its commit
     session.fromCache = false;

@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs/promises';
@@ -155,5 +155,97 @@ describe('GitHub cache asset download (issue #53)', () => {
         await new Promise((resolve) => loop.close(resolve));
       }
     });
+  });
+});
+
+/**
+ * Restoring the pretex equation cache into the shared Docker volume.
+ *
+ * The volume used to be cleared whenever the commit being built differed from the one last
+ * loaded, before looking for a release. A new commit has no release of its own yet, so every
+ * commit after the first was rendered from nothing. Docker and the GitHub API are stubbed here;
+ * what is asserted is which release gets restored, and that nothing removes what is already there.
+ */
+describe('GitHub cache restore', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const TAG = 'pretex-cache-o-r-01234567';
+  const release = (tag) => ({ id: 1, tag_name: tag, upload_url: '', assets: [{ name: 'pretex-cache.tar.gz', size: 1, url: 'x' }] });
+
+  let extracted;
+  let latestLookups;
+
+  beforeEach(() => {
+    cacheStore.enabled = true;
+    extracted = [];
+    latestLookups = 0;
+    mock.method(cacheStore, '_downloadAsset', async () => {});
+    mock.method(cacheStore, '_extractIntoVolume', async (_file, tag) => { extracted.push(tag); });
+  });
+
+  afterEach(() => {
+    mock.restoreAll();
+    cacheStore.enabled = false;
+  });
+
+  const stub = ({ volume = [], exact = null, latest = null }) => {
+    mock.method(cacheStore, '_readVolumeTags', async () => volume);
+    mock.method(cacheStore, '_getRelease', async () => exact);
+    mock.method(cacheStore, '_getLatestReleaseFor', async (prefix) => {
+      latestLookups += 1;
+      assert.equal(prefix, 'pretex-cache-o-r-');
+      return latest;
+    });
+  };
+
+  it('skips the download when the volume already holds this commit', async () => {
+    stub({ volume: [TAG] });
+    assert.equal(await cacheStore.checkAndRestore('o', 'r', SHA), true);
+    assert.deepEqual(extracted, []);
+  });
+
+  it('restores the release for this exact commit when there is one', async () => {
+    stub({ volume: ['pretex-cache-o-r-aaaaaaaa'], exact: release(TAG) });
+    assert.equal(await cacheStore.checkAndRestore('o', 'r', SHA), true);
+    assert.deepEqual(extracted, [TAG]);
+  });
+
+  it('keeps an earlier commit\'s renders instead of clearing them when this commit has no release', async () => {
+    stub({ volume: ['pretex-cache-o-r-aaaaaaaa'] });
+    assert.equal(await cacheStore.checkAndRestore('o', 'r', SHA), true);
+    assert.deepEqual(extracted, []);
+    assert.equal(latestLookups, 0);
+  });
+
+  it('falls back to the newest release for the repo on a volume that has none of its renders', async () => {
+    stub({ volume: ['pretex-cache-other-repo-bbbbbbbb'], latest: release('pretex-cache-o-r-cccccccc') });
+    assert.equal(await cacheStore.checkAndRestore('o', 'r', SHA), true);
+    assert.deepEqual(extracted, ['pretex-cache-o-r-cccccccc']);
+  });
+
+  it('reports a full build only when the repo has no release at all', async () => {
+    stub({});
+    assert.equal(await cacheStore.checkAndRestore('o', 'r', SHA), false);
+    assert.deepEqual(extracted, []);
+  });
+
+  it('never runs a command that removes files from the volume', async () => {
+    const source = await fs.readFile(new URL('../src/services/githubCacheStore.ts', import.meta.url), 'utf8');
+    assert.doesNotMatch(source, /rm -rf/);
+  });
+});
+
+describe('finding the newest release for a repo', () => {
+  afterEach(() => mock.restoreAll());
+
+  it('takes the first matching release with a cache asset and ignores lookalike tags', async () => {
+    const asset = [{ name: 'pretex-cache.tar.gz', size: 1, url: 'x' }];
+    mock.method(cacheStore, '_apiRequest', async () => [
+      { tag_name: 'pretex-cache-o-r-extra-11111111', assets: asset },
+      { tag_name: 'pretex-cache-o-r-22222222', assets: [] },
+      { tag_name: 'pretex-cache-o-r-33333333', assets: asset },
+      { tag_name: 'pretex-cache-o-r-44444444', assets: asset },
+    ]);
+    const found = await cacheStore._getLatestReleaseFor('pretex-cache-o-r-');
+    assert.equal(found?.tag_name, 'pretex-cache-o-r-33333333');
   });
 });

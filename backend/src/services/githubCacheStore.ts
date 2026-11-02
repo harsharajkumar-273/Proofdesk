@@ -58,49 +58,59 @@ class GitHubCacheStore {
     }
   }
 
-  private _tag(owner: string, repo: string, sha: string): string {
-    return `pretex-cache-${owner}-${repo}-${sha.slice(0, 8)}`;
+  private _tagPrefix(owner: string, repo: string): string {
+    return `pretex-cache-${owner}-${repo}-`;
   }
 
-  /* ── Restore: download release asset → inject into Docker volume ─────────── */
+  private _tag(owner: string, repo: string, sha: string): string {
+    return `${this._tagPrefix(owner, repo)}${sha.slice(0, 8)}`;
+  }
 
+  /* ── Restore: download release asset → merge into Docker volume ──────────── */
+
+  // The volume is never cleared. pretex keys every cache file by a hash of the
+  // page it rendered, so entries left by another commit, or another repo, are
+  // either reused as-is or simply never looked up. Clearing the volume whenever
+  // the commit changed used to throw away a cache that was still valid for every
+  // unchanged page, and since a brand-new commit never has its own release yet,
+  // the build that followed re-rendered every equation from scratch.
   async checkAndRestore(owner: string, repo: string, sha?: string | null): Promise<boolean> {
     if (!this.enabled || !sha) return false;
 
     const tag = this._tag(owner, repo, sha);
+    const prefix = this._tagPrefix(owner, repo);
 
-    // Check whether the volume already contains exactly this commit's cache by
-    // reading the sentinel file written after every successful restore. If it
-    // matches, skip the download. If it's a different tag (stale cache from a
-    // previous build/repo), wipe the volume and load the correct one.
+    let loadedTags: string[] = [];
     try {
-      const { stdout } = await execAsync(
-        `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "cat /cache/.cache-tag 2>/dev/null || echo ''"`,
-        { timeout: 15000 }
-      );
-      const loadedTag = stdout.trim();
-      if (loadedTag === tag) {
-        logger.info(`[GitHubCache] Volume already has correct cache (${tag}) — skipping restore`, { tag });
-        return true;
-      }
-      if (loadedTag) {
-        logger.info(`[GitHubCache] Volume has stale cache (${loadedTag}), need ${tag} — clearing`, { loadedTag, tag });
-        await execAsync(
-          `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "rm -rf /cache/* /cache/.[!.]* 2>/dev/null || true"`,
-          { timeout: 30000 }
-        ).catch(() => {});
-      }
+      loadedTags = await this._readVolumeTags();
     } catch {
       /* docker unavailable */
     }
 
+    if (loadedTags.includes(tag)) {
+      logger.info(`[GitHubCache] Volume already has correct cache (${tag}) — skipping restore`, { tag });
+      return true;
+    }
+    const hasThisRepo = loadedTags.some((t) => t.startsWith(prefix));
+
     logger.info(`[GitHubCache] Looking for release ${tag} ...`, { tag });
 
     try {
-      const release = await this._getRelease(tag);
+      let release = await this._getRelease(tag);
+
       if (!release) {
-        logger.info('[GitHubCache] No cached release found — full build required', { tag });
-        return false;
+        // An earlier commit's renders already in the volume are as good as an
+        // older release, and need no download.
+        if (hasThisRepo) {
+          logger.info('[GitHubCache] No release for this commit — reusing the renders already in the volume', { tag });
+          return true;
+        }
+        release = await this._getLatestReleaseFor(prefix);
+        if (!release) {
+          logger.info('[GitHubCache] No cached release found — full build required', { tag });
+          return false;
+        }
+        logger.info(`[GitHubCache] No release for this commit — falling back to ${release.tag_name}`, { tag });
       }
 
       const asset = release.assets?.find((a) => a.name === 'pretex-cache.tar.gz');
@@ -109,20 +119,45 @@ class GitHubCacheStore {
       logger.info(`[GitHubCache] Restoring pretex cache (${Math.round(asset.size / 1024 / 1024)} MB) ...`, { tag, assetSize: asset.size });
       const tmpFile = path.join(getProofdeskDataRoot(), `pretex-cache-${Date.now()}.tar.gz`);
 
-      await this._downloadAsset(asset.url, tmpFile);
-
-      // Inject into the Docker volume, then write the sentinel tag file
-      await execAsync(
-        `docker run --rm -v ${DOCKER_VOLUME}:/cache -v "${tmpFile}:/tmp/cache.tar.gz:ro" alpine sh -c "tar xzf /tmp/cache.tar.gz -C / 2>/dev/null; echo '${tag}' > /cache/.cache-tag"`,
-        { timeout: 300000 }
-      );
-      await fs.unlink(tmpFile).catch(() => {});
-      logger.info('[GitHubCache] Pretex cache restored — build will skip equation rendering', { tag });
+      try {
+        await this._downloadAsset(asset.url, tmpFile);
+        await this._extractIntoVolume(tmpFile, release.tag_name);
+      } finally {
+        await fs.unlink(tmpFile).catch(() => {});
+      }
+      logger.info('[GitHubCache] Pretex cache restored — build will skip equation rendering', { tag: release.tag_name });
       return true;
     } catch (err: any) {
       logger.warn(`[GitHubCache] Restore failed: ${err.message}`, { tag, err });
       return false;
     }
+  }
+
+  /* ── Volume sentinels ────────────────────────────────────────────────────── */
+
+  // One sentinel per repo under /cache/.cache-tags, named by the repo's tag
+  // prefix and holding the last tag loaded or saved for it. The single
+  // /cache/.cache-tag written by earlier versions is still read, so a volume
+  // populated before this change is not restored a second time.
+  async _readVolumeTags(): Promise<string[]> {
+    const { stdout } = await execAsync(
+      `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "cat /cache/.cache-tag /cache/.cache-tags/* 2>/dev/null || true"`,
+      { timeout: 15000 }
+    );
+    return stdout.split('\n').map((t) => t.trim()).filter(Boolean);
+  }
+
+  private _writeTagCommand(tag: string): string {
+    const prefix = tag.slice(0, tag.lastIndexOf('-') + 1);
+    return `mkdir -p /cache/.cache-tags && echo '${tag}' > '/cache/.cache-tags/${prefix}'`;
+  }
+
+  // tar merges into what is already there; nothing in the volume is removed.
+  async _extractIntoVolume(tmpFile: string, tag: string): Promise<void> {
+    await execAsync(
+      `docker run --rm -v ${DOCKER_VOLUME}:/cache -v "${tmpFile}:/tmp/cache.tar.gz:ro" alpine sh -c "tar xzf /tmp/cache.tar.gz -C / 2>/dev/null; ${this._writeTagCommand(tag)}"`,
+      { timeout: 300000 }
+    );
   }
 
   /* ── Save: tar Docker volume → create GitHub Release → upload asset ──────── */
@@ -165,7 +200,7 @@ class GitHubCacheStore {
 
       // Keep the sentinel current so the next build on this machine skips restore
       await execAsync(
-        `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "echo '${tag}' > /cache/.cache-tag"`,
+        `docker run --rm -v ${DOCKER_VOLUME}:/cache alpine sh -c "${this._writeTagCommand(tag)}"`,
         { timeout: 15000 }
       ).catch(() => {});
     } catch (err: any) {
@@ -214,6 +249,23 @@ class GitHubCacheStore {
   async _getRelease(tag: string): Promise<GitHubRelease | null> {
     const [owner, repo] = this.cacheRepo.split('/');
     return this._apiRequest<GitHubRelease>('GET', `/repos/${owner}/${repo}/releases/tags/${tag}`);
+  }
+
+  // The newest release carrying a cache asset for one repo. GitHub lists
+  // releases newest first; the cache repo only ever holds these releases, so
+  // the first page reaches far enough back.
+  async _getLatestReleaseFor(prefix: string): Promise<GitHubRelease | null> {
+    const [owner, repo] = this.cacheRepo.split('/');
+    const releases = await this._apiRequest<GitHubRelease[]>('GET', `/repos/${owner}/${repo}/releases?per_page=100`);
+    if (!Array.isArray(releases)) return null;
+    return (
+      releases.find(
+        (r) =>
+          r.tag_name.startsWith(prefix) &&
+          /^[0-9a-f]{8}$/.test(r.tag_name.slice(prefix.length)) &&
+          r.assets?.some((a) => a.name === 'pretex-cache.tar.gz')
+      ) || null
+    );
   }
 
   async _createRelease(tag: string, body: string): Promise<GitHubRelease | null> {

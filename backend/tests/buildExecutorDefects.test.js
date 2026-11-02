@@ -28,7 +28,7 @@ describe('BuildExecutor regressions found by the Docker pipeline benchmark', () 
     await fs.rm(repoPath, { recursive: true, force: true });
   });
 
-  it('updateFile marks the session as diverged from its commit and drops the cache entry', async () => {
+  it('updateFile marks the session as diverged from its commit and drops a cache entry built in its own directories', async () => {
     mock.method(buildExecutor, '_saveCache', async () => {});
     mock.method(buildExecutor, 'build', async () => ({ success: true }));
     buildExecutor.buildCache.set('o/r', { commitHash: 'abc', repoPath, outputPath: '', buildPath: '', sessionId: SESSION_ID, builtAt: 0, cacheVersion: 'x' });
@@ -37,6 +37,25 @@ describe('BuildExecutor regressions found by the Docker pipeline benchmark', () 
 
     assert.equal(buildExecutor.sessions.get(SESSION_ID).hasLocalEdits, true);
     assert.equal(buildExecutor.buildCache.has('o/r'), false);
+  });
+
+  it('updateFile keeps a cache entry that belongs to another session\'s directories', async () => {
+    // One user's edit must not cost every later session a full rebuild: the
+    // cached build is still exactly what its commit produces.
+    const save = mock.method(buildExecutor, '_saveCache', async () => {});
+    mock.method(buildExecutor, 'build', async () => ({ success: true }));
+    const otherBase = await fs.mkdtemp(path.join(os.tmpdir(), 'be-defect-other-'));
+    try {
+      buildExecutor.buildCache.set('o/r', { commitHash: 'abc', repoPath: path.join(otherBase, 'repo'), outputPath: '', buildPath: '', sessionId: 'fedcba9876543210', builtAt: 0, cacheVersion: 'x' });
+
+      await buildExecutor.updateFile(SESSION_ID, 'a.txt', 'edited');
+
+      assert.equal(buildExecutor.sessions.get(SESSION_ID).hasLocalEdits, true);
+      assert.equal(buildExecutor.buildCache.get('o/r')?.commitHash, 'abc');
+      assert.equal(save.mock.callCount(), 0);
+    } finally {
+      await fs.rm(otherBase, { recursive: true, force: true });
+    }
   });
 
   it('updateFile does not resolve with the previous build\'s finished result', async () => {
