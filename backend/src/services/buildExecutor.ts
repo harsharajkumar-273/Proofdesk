@@ -16,6 +16,7 @@ import { recordPreviewSnapshot } from './previewHistoryService.js';
 import workspaceRepository from '../repositories/workspace.repository.js';
 import logger from '../utils/logger.js';
 import { resolveContainedPath } from '../utils/pathContainment.js';
+import { linkTree, breakHardLinks } from '../utils/hardLinkTree.js';
 import { classifyBuildFailure } from '../utils/buildDiagnostics.js';
 import { dockerBuildDurationSeconds, activeBuildJobs } from './metricsService.js';
 import {
@@ -1020,23 +1021,37 @@ class BuildExecutor {
       },
     });
 
-    try {
-      await fs.cp(sourceOutputPath, outputPath, { recursive: true, force: true });
-    } catch {
-      await fs.mkdir(outputPath, { recursive: true });
-    }
-
-    if (sourceBuildPath) {
-      try {
-        await fs.cp(sourceBuildPath, buildPath, { recursive: true, force: true });
-      } catch {
-        await fs.mkdir(buildPath, { recursive: true });
+    // The repo is copied because edits write straight into it. The output and
+    // build trees are only ever written by Docker, so they are hard-linked:
+    // this is what used to make a cache hit copy 200–400 MB. Every Docker run
+    // calls _privatizeBuildTrees first, so a build never writes through a link.
+    const linkOrEmpty = async (src: string | undefined, dst: string) => {
+      if (src) {
+        try {
+          await linkTree(src, dst);
+          return;
+        } catch (err: any) {
+          await fs.rm(dst, { recursive: true, force: true });
+          if (err.code !== 'ENOENT') logger.warn(`[BuildCache] Could not snapshot ${src}: ${err.message}`);
+        }
       }
-    } else {
-      await fs.mkdir(buildPath, { recursive: true });
-    }
+      await fs.mkdir(dst, { recursive: true });
+    };
+    await linkOrEmpty(sourceOutputPath, outputPath);
+    await linkOrEmpty(sourceBuildPath, buildPath);
 
     return { repoPath, outputPath, buildPath };
+  }
+
+  // Must run before anything that lets Docker write into a session's output or
+  // build tree. A tree may share files with another session's, either because
+  // it was snapshotted from a cached build or because it is the cached build
+  // and another session has since snapshotted it.
+  async _privatizeBuildTrees(session: BuildSession): Promise<void> {
+    const trees = [session.outputPath, session.buildPath || path.join(path.dirname(session.repoPath), 'build')];
+    let copied = 0;
+    for (const tree of trees) copied += await breakHardLinks(tree);
+    if (copied > 0) logger.info(`[BuildCache] Made ${copied} shared build files private before building`);
   }
 
   async _getLocalMirrorCommit(owner: string, repo: string): Promise<string | null> {
@@ -1475,6 +1490,21 @@ class BuildExecutor {
       };
     }
 
+    try {
+      await this._privatizeBuildTrees(session);
+    } catch (err: any) {
+      logger.error(`[BuildCache] Could not separate build files from the cache: ${err.message}`, err);
+      return {
+        success: false,
+        buildType: 'scons-html',
+        artifacts: [],
+        entryFile: null,
+        stdout: '',
+        stderr: `Failed to prepare the build directories: ${err.message}`,
+        sessionId,
+      };
+    }
+
     const args = [
       'exec',
       ...(xmlId ? ['-e', `SECTION_XMLID=${xmlId}`] : []),
@@ -1901,6 +1931,13 @@ class BuildExecutor {
         await this.ensureImageAvailable();
       } catch (err: any) {
         console.error('[PDF] Docker image unavailable:', err.message);
+        return null;
+      }
+
+      try {
+        await this._privatizeBuildTrees(session);
+      } catch (err: any) {
+        console.error('[PDF] Could not separate build files from the cache:', err.message);
         return null;
       }
 

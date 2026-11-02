@@ -74,6 +74,32 @@ describe('BuildExecutor regressions found by the Docker pipeline benchmark', () 
     assert.equal(result.marker, 'new');
   });
 
+  it('a cache-hit snapshot shares the build output until the session builds', async () => {
+    const source = path.join(repoPath, 'cached');
+    await fs.mkdir(path.join(source, 'repo'), { recursive: true });
+    await fs.mkdir(path.join(source, 'output'), { recursive: true });
+    await fs.mkdir(path.join(source, 'build'), { recursive: true });
+    await fs.writeFile(path.join(source, 'repo', 'book.ptx'), 'source');
+    await fs.writeFile(path.join(source, 'output', 'index.html'), 'cached');
+
+    const snap = await buildExecutor._copyWorkspaceSnapshot(
+      path.join(source, 'repo'), path.join(source, 'output'), path.join(source, 'build'), path.join(repoPath, 'snap')
+    );
+
+    const cachedFile = path.join(source, 'output', 'index.html');
+    const snapFile = path.join(snap.outputPath, 'index.html');
+    assert.equal((await fs.stat(snapFile)).ino, (await fs.stat(cachedFile)).ino);
+    // The repo takes edits directly, so it is never shared.
+    assert.notEqual(
+      (await fs.stat(path.join(snap.repoPath, 'book.ptx'))).ino,
+      (await fs.stat(path.join(source, 'repo', 'book.ptx'))).ino
+    );
+
+    await buildExecutor._privatizeBuildTrees({ owner: 'o', repo: 'r', ...snap });
+    await fs.writeFile(snapFile, 'rebuilt');
+    assert.equal(await fs.readFile(cachedFile, 'utf8'), 'cached');
+  });
+
   it('cleanup stops the session container even when the directory stays in the build cache', async () => {
     const stop = mock.method(buildExecutor, '_stopPersistentContainer', async () => {});
     buildExecutor.buildCache.set('o/r', { commitHash: 'abc', repoPath: path.join(repoPath, 'repo'), outputPath: '', buildPath: '', sessionId: SESSION_ID, builtAt: 0, cacheVersion: 'x' });
